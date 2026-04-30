@@ -42,13 +42,6 @@
 | Microsoft GraphRAG | https://github.com/microsoft/graphrag | GraphRAG 相关研究/实验参考 | `backend/vector_index_system/memory_systems/` 默认忽略。 |
 | OpenClaw / Engram | https://github.com/openclaw | 记忆/代理系统参考目录 | `backend/vector_index_system/memory_systems/` 默认忽略；请按实际来源补充准确链接。 |
 
-## Papers and Project References
-
-| 名称 | 文件/链接 | 用途 | 备注 |
-| --- | --- | --- | --- |
-| WWW26_GLOW__Copy_.pdf | 本地文件，默认由 `.gitignore` 排除 | 原始论文资料 | 未确认再分发权利前不随公开仓库提交；建议改为记录论文链接或 DOI。 |
-| GC-DPG 参考说明 | `GC-DPG参考.md` | 将 GC-DPG 思路泛化为交互式学习流程 | 本地参考文档。 |
-
 ## Assets and Data
 
 | 名称 | 路径 | 用途 | 备注 |
