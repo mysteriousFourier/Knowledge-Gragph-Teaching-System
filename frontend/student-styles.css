@@ -271,8 +271,9 @@
 #exercise-content h3,
 #exercise-content .exercise-question {
     color: #333;
-    font-size: 18px;
-    margin-bottom: 15px;
+    font-size: 19px;
+    margin-bottom: 18px;
+    line-height: 1.65;
 }
 
 #exercise-content .exercise-meta {
@@ -283,8 +284,8 @@
 
 #exercise-content .exercise-options {
     display: grid;
-    gap: 10px;
-    margin: 18px 0;
+    gap: 12px;
+    margin: 18px 0 14px;
 }
 
 #exercise-content .exercise-option {
@@ -292,7 +293,7 @@
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    padding: 12px 14px;
+    padding: 14px 16px;
     border: 1px solid #cbd5e1;
     border-radius: 10px;
     background: #f8fafc;
@@ -301,6 +302,12 @@
     text-align: left;
     font-size: 15px;
     line-height: 1.55;
+    min-height: 62px;
+    max-height: none;
+    overflow-y: visible;
+    overflow-x: hidden;
+    word-break: break-word;
+    overflow-wrap: anywhere;
     transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
 }
 
@@ -315,6 +322,16 @@
     background: #dffcf5;
     color: #0f172a;
     box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.16);
+}
+
+#exercise-content .exercise-option.correct-choice {
+    border-color: #10b981;
+    background: #dcfce7;
+}
+
+#exercise-content .exercise-option.incorrect-choice {
+    border-color: #f87171;
+    background: #fee2e2;
 }
 
 #exercise-content .exercise-option-key {
@@ -334,6 +351,7 @@
 #exercise-content .exercise-option-text {
     min-width: 0;
     color: inherit;
+    overflow-wrap: anywhere;
 }
 
 #exercise-content .selected-answer-hint,
@@ -341,6 +359,24 @@
 #exercise-content .exercise-result-text,
 #exercise-content .exercise-explanation {
     color: #334155;
+}
+
+#exercise-content .exercise-feedback {
+    margin-top: 16px;
+    padding: 14px 16px;
+    border: 1px solid #dbeafe;
+    border-radius: 10px;
+    background: #f8fafc;
+}
+
+#exercise-content .exercise-feedback.correct {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+}
+
+#exercise-content .exercise-feedback.incorrect {
+    border-color: #fecaca;
+    background: #fff7f7;
 }
 
 #exercise-content .exercise-answer-state {
@@ -378,6 +414,12 @@
     min-height: 110px;
     resize: vertical;
     line-height: 1.55;
+}
+
+#exercise-toolbar .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
 }
 
 #exercise-toolbar {

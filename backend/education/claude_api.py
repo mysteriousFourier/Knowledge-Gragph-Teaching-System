@@ -14,11 +14,19 @@ from kg_constraints import (
     build_learning_plan,
     evidence_from_graph,
     evidence_from_rag,
+    expand_formula_references,
+    format_evidence,
     relation_evidence_from_graph,
 )
 
 DEFAULT_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
 DEFAULT_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
+
+QA_SYSTEM_PROMPT = """你是一个公式友好的教学问答助手。
+图谱和检索内容是参考上下文，不是拒答规则。用户问公式、定义、推导或概念时，先直接回答。
+如果上下文有相关材料，优先使用并保留原文术语；如果上下文没有命中，但问题属于常见数学/机器学习/课程知识，可以用通用知识回答，并简短标注“通用说明”。
+不要因为 LearningPlan 或 evidence 不足而拒答；只在问题涉及具体课程私有内容且上下文完全缺失时说明需要补充材料。
+公式必须用 LaTeX 输出，并解释主要符号。"""
 
 
 def get_deepseek_model(kind: str = "flash") -> str:
@@ -42,7 +50,10 @@ class DeepSeekAPIClient:
 
     async def generate_lecture(self, graph_data: Dict, chapter_data: Dict, style: str = "引导式教学") -> str:
         prompt = self._build_lecture_prompt(graph_data, chapter_data, style)
-        lecture = await self._call_deepseek(prompt, max_tokens=5200, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT)
+        lecture = expand_formula_references(
+            await self._call_deepseek(prompt, max_tokens=5200, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT),
+            expand_labels=True,
+        )
         if self._lecture_needs_completion(lecture):
             repair_prompt = f"""
 请基于原始任务重写一份完整授课文案，不要只补几句话。
@@ -59,7 +70,10 @@ class DeepSeekAPIClient:
 3. 不要输出题纲、备注、自检说明或 JSON。
 4. 保留知识图谱/章节证据约束，不要扩展未授权内容。
 """
-            lecture = await self._call_deepseek(repair_prompt, max_tokens=5200, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT)
+            lecture = expand_formula_references(
+                await self._call_deepseek(repair_prompt, max_tokens=5200, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT),
+                expand_labels=True,
+            )
         return lecture
 
     @staticmethod
@@ -76,7 +90,10 @@ class DeepSeekAPIClient:
 
     async def answer_question(self, graph_data: Dict, question: str, search_results: Optional[List[Dict]] = None) -> str:
         prompt = self._build_qa_prompt(graph_data, question, search_results)
-        return await self._call_deepseek(prompt, max_tokens=900, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT)
+        return expand_formula_references(
+            await self._call_deepseek(prompt, max_tokens=1800, system_prompt=QA_SYSTEM_PROMPT),
+            expand_labels=True,
+        )
 
     async def natural_supplement(self, original_text: str, supplement: str) -> str:
         prompt = f"""
@@ -101,7 +118,9 @@ class DeepSeekAPIClient:
         chapter_content: str,
         count: int = 5,
         graph_data: Optional[Dict] = None,
+        feedback_guidance: Optional[str] = None,
     ) -> Dict:
+        chapter_content = expand_formula_references(chapter_content)
         chapter_data = {"title": chapter_title, "content": chapter_content}
         evidence = evidence_from_graph(
             graph_data,
@@ -131,20 +150,44 @@ class DeepSeekAPIClient:
             task="exercise",
             chapter_data=chapter_data,
         )
+        requirements = [
+            f"生成 {max(1, count)} 道单选题，不要生成示例题、占位题或模板题。",
+            "必须返回足量题目；即使材料较短，也要从定义、公式含义、变量作用、概念关系、常见误解等不同角度出题。",
+            "题干要像 NotebookLM 的材料测验一样自然、短、面向学生；不要在题干或选项里出现 LearningPlan、evidence、知识图谱、图谱证据、当前证据等内部约束词。",
+            "禁止生成泛题，例如 'Which statement is directly stated in the material?'、'What is this?'、'下列哪项正确？'。题干必须明确考察一个概念、定理、公式、变量含义或条件关系。",
+            "不要把授课文案结构当作知识点：禁止考察或作为选项输出“授课文案、教学目标、课堂导入、启发提问、教学要点、小组讨论、课后思考、章节标题、Chapter 标题”等页面/教学脚手架文本。",
+            "如果材料含有 [[SEE_FORMULA:...]]、[[SEE_TABLE:...]] 等占位引用，但没有给出公式或表格正文，不要围绕该占位符出题。",
+            "题干必须少于 32 个英文词或 72 个中文字符；每个选项少于 24 个英文词或 90 个中文字符。",
+            "题干、正确选项和解析必须能在课程材料、章节正文或 evidence 中找到依据。",
+            "英文原文、术语、公式和变量名保持英文，不要为了出题强行翻译。",
+            "每道题必须有 4 个选项，且只有 1 个正确答案；错误选项要与本章内容相关，但不能与证据冲突。",
+            "不要把整句原文直接复制成所有选项；正确选项可以保留关键术语，但选项应像答案而不是长段落。",
+            "禁止输出‘选项一/选项二/示例/测试/sample/最符合当前证据/依据不足’等占位或内部约束内容。",
+            "解析用 1-2 句说明为什么正确，必要时标注原文编号，例如‘原文[1]’。",
+            "只返回合法 JSON，不要返回 Markdown、代码块或额外说明。",
+            'JSON 格式：{"exercises":[{"id":"ex_1","question":"题目内容","options":["A. ...","B. ...","C. ...","D. ..."],"correct_answer":"A","explanation":"答案解析，依据[1]..."}]}',
+        ]
+        requirements = [
+            f"Generate {max(1, count)} natural multiple-choice questions for students, similar to NotebookLM or ChatGPT study quizzes.",
+            "Use the chapter content first. Use graph evidence only as supporting context; do not turn evidence constraints into question text.",
+            "Each question must test one clear concept, formula, variable meaning, relation, or condition from the material.",
+            "Do not ask generic meta-questions such as 'Which statement is directly stated in the material?', 'What is this?', or 'Which option is correct?'.",
+            "Each question must have exactly four concise options and one correct answer. Options should answer the same type of thing the question asks.",
+            "If a question asks for a formula, all four options must be formula-like expressions. If it asks for a definition or relation, do not use unrelated formulas as distractors.",
+            "When equations are relevant, use the actual LaTeX formula from the source, not only an equation number or placeholder.",
+            "Do not reuse the same four options across different questions.",
+            "Keep English source wording, formulas, variables, and technical terms in English. Use Chinese only as light explanation when helpful.",
+            "Return valid JSON only with this shape: {\"exercises\":[{\"id\":\"ex_1\",\"question\":\"...\",\"options\":[\"A. ...\",\"B. ...\",\"C. ...\",\"D. ...\"],\"correct_answer\":\"A\",\"explanation\":\"...\"}]}",
+        ]
+        if feedback_guidance:
+            requirements.append("教师历史赞踩反馈（用于本次生成方向，不是模型训练）：\n" + feedback_guidance)
+
         prompt = build_constrained_generation_prompt(
-            task_title="生成知识图谱约束的单选练习题",
+            task_title="生成课程材料测验题",
             user_input=chapter_title,
             source_content=chapter_content,
             learning_plan=learning_plan,
-            requirements=[
-                f"生成 {max(1, count)} 道单选题，不要生成示例题、占位题或模板题。",
-                "题干、正确选项和解析必须能在 LearningPlan.evidence 或章节正文中找到依据。",
-                "每道题必须有 4 个选项，且只有 1 个正确答案；错误选项要与本章内容相关，但不能与证据冲突。",
-                "禁止输出‘选项一/选项二/示例/测试/sample’等占位内容。",
-                "解析必须标注依据编号，例如‘依据[1]’。",
-                "只返回合法 JSON，不要返回 Markdown、代码块或额外说明。",
-                'JSON 格式：{"exercises":[{"id":"ex_1","question":"题目内容","options":["A. ...","B. ...","C. ...","D. ..."],"correct_answer":"A","explanation":"答案解析，依据[1]..."}]}',
-            ],
+            requirements=requirements,
         )
         response = await self._call_deepseek(prompt, max_tokens=2600, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT)
         try:
@@ -159,8 +202,10 @@ class DeepSeekAPIClient:
         except json.JSONDecodeError as exc:
             raise ValueError(f"DeepSeek did not return valid exercise JSON: {response[:300]}") from exc
     def _build_lecture_prompt(self, graph_data: Dict, chapter_data: Dict, style: str) -> str:
+        chapter_data = dict(chapter_data or {})
         title = chapter_data.get("title", "未命名章节")
-        content = chapter_data.get("content", "")
+        content = expand_formula_references(chapter_data.get("content", ""))
+        chapter_data["content"] = content
         evidence = evidence_from_graph(graph_data, query=f"{title}\n{content[:1200]}", chapter_data=chapter_data, limit=10)
         if content.strip():
             chapter_evidence = {
@@ -195,6 +240,7 @@ class DeepSeekAPIClient:
                 "必须覆盖：导入、核心概念讲解、关系链路、例题或推导、课堂提问、易错点、收束总结。",
                 "讲解顺序必须跟随 LearningPlan 中的知识点和关系，不要跳到未授权高级内容。",
                 "每个核心段落都要落到证据或章节正文，不要泛泛而谈。",
+                "章节正文或证据为英文时，术语、公式、变量名和关键定义保留英文；中文讲解只做辅助，不要改写原义。",
                 "长度控制在 1400-2200 字；若内容复杂，优先保证完整性，不要突然截断。",
                 "只输出授课文案本身，不要附加自检说明。",
             ],
@@ -216,17 +262,21 @@ class DeepSeekAPIClient:
             task="qa",
         )
 
-        return build_constrained_generation_prompt(
-            task_title="回答学生问题",
-            user_input=question,
-            learning_plan=learning_plan,
-            requirements=[
-                "只使用上述 LearningPlan 和 evidence 回答，不要编造图谱中没有的信息。",
-                "如果依据不足，明确说明“当前图谱依据不足”，并指出还需要什么信息。",
-                "回答要直接、清晰，适合学生阅读。",
-                "必要时引用依据编号，如“依据[2]”。",
-            ],
-        )
+        return f"""请回答学生问题。
+
+学生问题：
+{question}
+
+可参考的课程/图谱上下文：
+{format_evidence(learning_plan.get("evidence") or [])}
+
+回答规则：
+1. 先直接回答问题，不要先说“依据不足”。
+2. 如果问题是公式、符号、定义、推导、例题，请给出公式本身，并用 LaTeX 写清楚，例如 `$...$` 或 `$$...$$`。
+3. 如果上下文没有命中，但这是常见数学、机器学习或课程基础知识，可以用通用知识回答，并标注“通用说明”；不要空泛拒答。
+4. 如果上下文命中英文材料，英文术语、公式、变量名和关键定义保持英文。
+5. 只有在问题询问某个课程私有材料、而上下文完全没有该材料时，才说明需要补充原文。
+6. 可以引用依据编号，但不要输出 LearningPlan、自检过程或内部约束说明。"""
 
     async def _call_deepseek(
         self,

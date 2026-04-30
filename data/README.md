@@ -1,13 +1,19 @@
-# Local Data Module
+# 数据目录
 
-`data/` 用于本地实验数据或知识图谱数据库。数据库文件默认被 `.gitignore` 忽略，不应直接提交。
+`data/` 用于保存数据说明。实际运行产生的数据库、缓存和个人数据不应提交到仓库。
 
-## 提交规则
+## 不应提交的数据
 
-- 可提交说明文档和小型脱敏示例数据。
-- 不提交 `.db`、`.sqlite`、`.faiss`、模型文件和未脱敏真实数据。
-- 公开项目前应确认数据来源和许可证。
+- `.db`、`.sqlite`、`.sqlite3` 数据库。
+- 运行缓存和临时 JSON。
+- 个人学习记录。
+- API Key、Token、Cookie 或凭据。
+- 未公开论文 PDF、草稿和个人笔记。
 
-## 详细文档
+## 推荐做法
 
-完整说明见 [docs/modules/data-assets.md](../docs/modules/data-assets.md)。
+- 可公开的结构化课程数据放在 `structured/`。
+- 运行时数据放在 `.runtime/` 或后端本地数据目录。
+- 需要共享的数据应先确认来源、许可证和脱敏状态。
+
+更多细节见 [数据资产模块文档](../docs/modules/data-assets.md)。

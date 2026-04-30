@@ -408,6 +408,16 @@
       return /\\(bar|overline|hat|frac|sqrt|sum|prod|int|begin|sigma|Delta|delta|partial|left|right|cdot|times)\b|[_^]\s*\{/.test(text);
     }
 
+    function isPureLatexExpression(value) {
+      const text = String(value || "").trim();
+      if (!text) return false;
+      if (text.startsWith("$$") || text.startsWith("\\[") || text.startsWith("\\(") || text.startsWith("\\begin{")) return true;
+      if (/[\u4e00-\u9fff]/.test(text)) return false;
+      if (/[.!?。！？]\s+\S/.test(text)) return false;
+      if (/\b(the|and|or|is|are|was|were|this|that|where|because|therefore|means|called|defined)\b/i.test(text)) return false;
+      return /\\[A-Za-z]+|[_^]\s*\{?|[=<>+\-*/]/.test(text);
+    }
+
     function simplifyLatex(token) {
       let text = stripMathDelimiters(token);
       text = text.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "($1)/($2)");
@@ -488,7 +498,7 @@
         .replace(/\\\\([()[\]])/g, "\\$1")
         .replace(/\\\\begin\{/g, "\\begin{")
         .replace(/\\\\end\{/g, "\\end{");
-      const regex = /\\begin\{(equation\*?|align\*?|gather\*?)\}[\s\S]*?\\end\{\1\}|\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(^|[^\\])\$[^$\n]+?\$/g;
+      const regex = /\\begin\{(equation\*?|align\*?|gather\*?)\}[\s\S]*?\\end\{\1\}|\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(^|[^\\])\$[^$\n]+?\$|\\(?:frac\s*\{[^{}]+\}\s*\{[^{}]+\}|sqrt\s*\{[^{}]+\}|(?:bar|overline|hat|vec|tilde|text|operatorname|mathbb|mathcal|mathbf|mathrm)\s*\{[^{}]+\}|(?:alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|rho|sigma|phi|omega|Gamma|Delta|Theta|Lambda|Pi|Sigma|Phi|Omega|partial|nabla|times|cdot|leq|geq|neq|approx|infty|sum|prod|int|rightarrow|Rightarrow)\b)(?:\s*[_^]\s*(?:\{[^{}]+\}|[A-Za-z0-9+\-]+))*/g;
       let html = "";
       let lastIndex = 0;
       let match;
@@ -508,7 +518,7 @@
 
     function renderContentPreview(value, forceMath = false) {
       const raw = String(value || "").trim();
-      if (raw && (forceMath || looksLikeBareLatexBlock(raw))) {
+      if (raw && (forceMath || looksLikeBareLatexBlock(raw)) && isPureLatexExpression(raw)) {
         return `<div class="formula-preview">${renderLatexToken(`\\[${raw}\\]`)}</div>`;
       }
       const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");

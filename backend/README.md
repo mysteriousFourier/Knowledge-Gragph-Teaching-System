@@ -1,24 +1,46 @@
-# Backend Module
+# 后端总览
 
-`backend/` 包含本项目的服务端代码，包括启动编排、教育 API、后台维护 API、图谱与向量模块，以及 MCP 工具桥接。
+`backend/` 保存本项目的本地服务。前端本身是静态页面，后端负责统一启动、账号校验、课程生成、题库生成、知识图谱维护和图谱查询。
 
-## 子模块
+## 主要模块
 
-| 路径 | 说明 | 文档 |
+```text
+start_all.py                 启动编排器
+frontend_server.py           静态前端服务器
+education/                   教师端和学生端业务 API
+maintenance/                 图谱维护 API
+mcp-server/                  MCP 兼容图谱工具服务
+vector_index_system/         图谱存储、搜索和后台管理页面
+```
+
+## 默认服务
+
+| 服务 | 默认端口 | 职责 |
 | --- | --- | --- |
-| `start_all.py` | 本地服务启动编排 | [后端启动编排](../docs/modules/backend-orchestrator.md) |
-| `frontend_server.py` | 静态前端服务器 | [后端启动编排](../docs/modules/backend-orchestrator.md) |
-| `education/` | 教师端和学生端业务 API | [教育 API](../docs/modules/education-api.md) |
-| `maintenance/` | 图谱维护、导入、导出和校验 API | [后台维护 API](../docs/modules/maintenance-api.md) |
-| `vector_index_system/` | 图谱、向量、记忆 provider 和管理页 | [图谱与向量模块](../docs/modules/knowledge-graph-vector.md) |
-| `mcp-server/` | MCP 工具桥接 | [MCP 服务模块](../docs/modules/mcp-server.md) |
+| Frontend | 3000 | 提供静态页面并自动打开主页 |
+| Education API | 8001 | 授课文案、题库、问答、章节缓存 |
+| Maintenance API | 8002 | 图谱节点、关系、导入、同步、导出 |
 
-## 启动
+端口和登录信息从 `.env` 读取。启动时会生成 `frontend/env-config.js`，让静态前端知道 API 地址。
 
-后端通常不单独启动，推荐从根目录运行：
+## 运行方式
+
+推荐在仓库根目录运行：
 
 ```bat
 start.bat
 ```
 
-调试单个服务时，可直接运行对应 `api_server.py`，但需要先配置 `.env`。
+停止服务：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\stop_unlesspaper.ps1
+```
+
+## 文档
+
+- [后端编排器](../docs/modules/backend-orchestrator.md)
+- [教育 API](../docs/modules/education-api.md)
+- [维护 API](../docs/modules/maintenance-api.md)
+- [知识图谱与向量后端](../docs/modules/knowledge-graph-vector.md)
+- [运行时与配置](../docs/modules/runtime-and-configuration.md)

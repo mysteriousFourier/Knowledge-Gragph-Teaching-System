@@ -25,6 +25,8 @@
     function normalizeLatexText(value) {
         return String(value == null ? "" : value)
             .replace(/\\\\([()[\]])/g, "\\$1")
+            .replace(/\\\\([A-Za-z]+)/g, "\\$1")
+            .replace(/\\\\([{}_^])/g, "\\$1")
             .replace(/\\\\begin\{/g, "\\begin{")
             .replace(/\\\\end\{/g, "\\end{");
     }

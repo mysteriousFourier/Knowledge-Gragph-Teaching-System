@@ -1,104 +1,81 @@
 # 前端模块
 
-前端模块位于 `frontend/`，由静态 HTML、CSS 和 JavaScript 组成。项目不依赖前端构建工具，所有页面由 `backend/frontend_server.py` 或任意静态服务器直接提供。
+前端是纯静态 HTML、CSS、JavaScript，没有构建步骤。所有页面由 `backend/frontend_server.py` 提供，也可以用其他静态服务器打开。
 
-## 页面入口
+## 页面职责
 
-| 页面 | 路径 | 主要职责 |
-| --- | --- | --- |
-| 首页 | `frontend/index.html` | 展示项目入口，跳转教师端、学生端、图谱管理 |
-| 教师端 | `frontend/teacher.html` | 登录、章节导入、授课文案生成、图谱维护、自然补充 |
-| 学生端 | `frontend/student.html` | 登录、章节学习、练习题、问答、学习路径 |
-| 图谱查看页 | `frontend/graph-viewer.html` | 使用 Cytoscape.js 查看知识图谱 |
-| 旧图谱页 | `frontend/graph.html` | 兼容旧入口或实验页面 |
-| API 配置页 | `frontend/api-config.html` | 本地调试辅助页面 |
-
-## 样式和脚本
-
-| 文件 | 说明 |
+| 页面 | 职责 |
 | --- | --- |
-| `home.css`, `home.js` | 首页视觉和交互 |
-| `workspace-ambient.css`, `workspace-ambient.js` | 黑色字符波纹背景、呼吸动效、液态玻璃基础视觉 |
-| `latex-renderer.css`, `latex-renderer.js` | KaTeX LaTeX 公式渲染和公式样式 |
-| `markdown-renderer.css`, `markdown-renderer.js` | 课程内容、授课文案、问答和练习题的本地 Markdown 渲染 |
-| `styles.css`, `new-styles.css` | 教师端和通用页面样式 |
-| `student-styles.css` | 学生端布局和题目交互样式 |
-| `teacher.js` | 教师端业务交互、API 调用、图谱视图 |
-| `student.js` | 学生端登录、章节、练习题、问答和学习路径 |
-| `graph-viewer.css` | 图谱查看页样式 |
-| `graph-styles.css` | 旧图谱视图样式 |
+| `index.html` | 项目入口 |
+| `login.html` | 登录 |
+| `teacher.html` | 教师工作区 |
+| `student.html` | 学生学习区 |
+| `backend_admin.html` | 图谱后台页面 |
 
-## API 配置
+## 教师端
 
-前端通过 `frontend/env-config.js` 读取后端服务地址。该文件由启动器生成，不提交到 Git。
+教师端负责：
 
-默认地址：
+- 章节选择。
+- 授课文案生成。
+- 题库继续生成。
+- 题目和选项反馈。
+- 知识图谱查看。
+- 侧边问答。
 
-| 配置字段 | 默认值 |
-| --- | --- |
-| `educationApiBaseUrl` | `http://localhost:8001` |
-| `maintenanceApiBaseUrl` | `http://localhost:8002` |
-| `backendAdminBaseUrl` | `http://localhost:8080` |
+题库反馈的设计原则是：点赞题目保留，点踩题目移除，选项反馈作为后续生成提示词的质量信号。
 
-页面脚本会使用本地默认值兜底，但部署和本地启动时应优先依赖 `window.__APP_CONFIG__`。
+## 学生端
 
-## 教师端数据流
+学生端负责：
 
-```text
-教师登录
-  -> 选择或导入章节
-  -> 调用教育 API 生成授课文案
-  -> 调用维护 API 查询或更新图谱
-  -> 保存章节和授课文案到运行期章节缓存
-  -> 前端刷新文案、图谱和一致性报告
+- 阅读课程内容。
+- 查看授课文案。
+- 进入练习模式。
+- 点击选项作答。
+- 查看答案和解析。
+- 侧边问答。
+- 浏览图谱和学习路径。
+
+题目和选项允许包含 Markdown 与 LaTeX。选项容器需要支持较长文本，不应截断公式。
+
+## Markdown 与 LaTeX
+
+统一渲染顺序：
+
+1. 清洗后端文本。
+2. Markdown 渲染。
+3. LaTeX 渲染。
+4. 安全插入页面。
+
+下列区域都应使用同一链路：
+
+- 课程内容。
+- 授课文案。
+- 问答消息。
+- 题目、选项和解析。
+- 图谱右侧详情。
+- 教师端题库预览。
+
+## 视觉与性能
+
+教师端和学生端使用字符波纹背景。背景动画必须低优先级运行，避免阻塞题目、问答和图谱交互。
+
+优化原则：
+
+- 静止时仍有轻微呼吸效果。
+- 鼠标经过产生波纹，点击切换字符并产生亮度扩散。
+- 多个波相遇应有叠加效果。
+- 扩散范围有上限。
+- 长时间无交互后逐渐回到暗色。
+- 内容区使用半透明玻璃边框，避免纯黑纯白块破坏整体观感。
+
+## 缓存版本
+
+页面通过脚本查询参数控制浏览器缓存，例如：
+
+```html
+<script src="student.js?v=26"></script>
 ```
 
-主要 API：
-
-- `POST /api/teacher/login`
-- `POST /api/education/generate-lecture`
-- `POST /api/education/natural-supplement`
-- `POST /api/education/save-chapter`
-- `POST /api/education/save-lecture`
-- `GET /api/education/graph`
-- `POST /api/maintenance/search-nodes`
-- `POST /api/maintenance/scan-structured`
-
-## 学生端数据流
-
-```text
-学生登录
-  -> 获取章节
-  -> 加载预创建题库或触发题库生成
-  -> 点击选项完成选择
-  -> 提交答案并接收反馈
-  -> 通过问答接口获取图谱约束回答
-```
-
-主要 API：
-
-- `POST /api/student/login`
-- `GET /api/student/chapter`
-- `POST /api/student/generate-exercises`
-- `GET /api/student/exercises`
-- `POST /api/student/check-answer`
-- `POST /api/student/question`
-- `POST /api/student/learning-path`
-- `GET /api/student/prerequisites`
-- `GET /api/student/follow-up`
-
-## 视觉规范
-
-- 前端背景使用字符明暗变化表现波纹、扩散和呼吸效果。
-- 教师端和学生端内容区使用液态玻璃边框，避免纯黑纯白大块遮挡背景。
-- 可展示内容支持 Markdown 与 LaTeX 公式，公式格式包括 `$$...$$`、`\[...\]`、`\(...\)` 和 `$...$`。
-- 内容可读性优先于动效表现，表单、题目、文案和图谱区域必须保持足够对比度。
-- 新增面板时应复用现有玻璃层、按钮、状态标签和输入框样式，避免引入新的视觉体系。
-
-## 新增页面规则
-
-1. 页面必须从 `env-config.js` 读取服务地址。
-2. 登录或敏感操作不得在前端硬编码真实凭据。
-3. 业务错误需要显示明确状态，不只写入控制台。
-4. 新增 API 调用时同步更新对应后端模块文档。
-5. 新增 CSS 时应检查移动端宽度，避免文字和按钮溢出。
+改动用户可见逻辑后应递增版本号，避免浏览器继续加载旧脚本。

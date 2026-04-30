@@ -1,134 +1,54 @@
-# 图谱与向量模块
+# 知识图谱与向量后端
 
-图谱与向量模块位于 `backend/vector_index_system/`，负责知识图谱的持久化、检索、向量索引、记忆 provider 编排和后端图谱管理页。
+本模块位于 `backend/vector_index_system/`。它提供本地知识图谱存储、搜索和图谱后台页面。
 
-## 主要文件
-
-| 文件或目录 | 职责 |
-| --- | --- |
-| `graph_service.py` | 核心图谱服务，封装节点、关系、搜索、统计和路径查询 |
-| `memory_runtime.py` | 动态发现并编排记忆 provider，支持 fallback |
-| `cli.py` | 统一命令行入口，可调用图谱、记忆和 RAG 工具 |
-| `backend_admin.py` | 启动后端图谱管理页 |
-| `knowledge_graph/graph_viz_api.py` | 图谱管理页 HTTP API |
-| `knowledge_graph/graph_manager.py` | 较底层的图谱管理逻辑 |
-| `knowledge_graph/backend_admin.html` | 管理页前端 |
-| `vector_retrieval.py` | 向量检索能力 |
-| `graph_vector_integration.py` | 图谱和向量索引集成 |
-| `llm_integration.py` | LLM 辅助分析能力 |
-| `clear_cache.py` | 清理图谱缓存 |
-| `config.json` | 记忆 provider 配置 |
-| `knowledge_graph.graphml` | GraphML 图谱导出或交换文件 |
-
-## 存储
-
-默认图谱数据库：
+## 组成
 
 ```text
-backend/vector_index_system/knowledge_graph/knowledge_graph.db
+knowledge_graph/             图谱服务和后台页面
+models/                      本地模型目录，忽略
+memory_systems/              外部研究系统或实验仓库，忽略
+vector_index/                向量索引和缓存，忽略
 ```
 
-常见运行或生成资产：
+## 图谱数据
 
-- `knowledge_graph.graphml`
-- `backend/vector_index_system/vector_index/`
-- `backend/vector_index_system/models/`
-- `backend/vector_index_system/memory_systems/`
+图谱通常包含：
 
-本地模型、第三方研究系统、数据库和二进制索引默认不提交。
+- 节点：概念、公式、章节、定理、例子。
+- 关系：属于、依赖、推导、引用、相关。
+- 属性：标题、正文、类型、来源、公式编号、表格编号。
 
-## GraphService 能力
+前端图谱页面会把后端返回的数据归一化为节点和边，再进行可视化。
 
-`GraphService` 是教育 API 和维护 API 的主要底层依赖，提供：
+## 搜索与问答
 
-- `read_graph()`
-- `get_node()`
-- `search_nodes()`
-- `semantic_search()`
-- `add_node()`
-- `update_node()`
-- `delete_node()`
-- `add_relation()`
-- `update_relation()`
-- `delete_relation()`
-- `get_neighbors()`
-- `get_prerequisites()`
-- `get_follow_up()`
-- `get_k_hop_neighbors()`
-- `get_graph_statistics()`
-- `batch_import_graph()`
+教育 API 可以通过桥接层查询图谱后端，把图谱结果加入问答和题库生成上下文。图谱结果应作为优先证据，而不是唯一允许回答的内容。
 
-## 关系规范化
+## 忽略内容
 
-模块会对关系类型做规范化，避免 `parent`、`contains`、`prerequisite` 等关系出现多个拼写或同义版本。新增关系类型时，应确认教育约束、维护 API 和前端图谱都能解释该关系。
+下列内容不应提交：
 
-## 记忆 provider 编排
+- 本地模型权重。
+- 向量索引。
+- SQLite 数据库。
+- 外部仓库副本。
+- 实验缓存。
 
-`memory_runtime.py` 会扫描 `memory_systems/` 下兼容的 provider，并构建统一的 `MemoryService`。默认配置位于 `config.json`：
+`.gitignore` 已覆盖相关路径，但提交前仍应检查 `git status`。
 
-```json
-{
-  "memory": {
-    "default_provider": "mem0",
-    "providers": ["mem0", "openclaw"],
-    "fallback_enabled": true
-  }
-}
-```
+## 后台页面
 
-如果外部 provider 不存在或不可用，服务会尝试 fallback。`memory_systems/` 默认被 `.gitignore` 排除，纳入仓库前需要补充来源、许可证和改动说明。
-
-## CLI 示例
-
-读取图谱：
-
-```powershell
-python backend\vector_index_system\cli.py graph read
-```
-
-关键词搜索：
-
-```powershell
-python backend\vector_index_system\cli.py graph search "向量空间" --limit 10
-```
-
-语义搜索：
-
-```powershell
-python backend\vector_index_system\cli.py graph semantic-search "基和维度的关系" --top-k 5
-```
-
-RAG 问答上下文：
-
-```powershell
-python backend\vector_index_system\cli.py rag ask "什么是向量空间？"
-```
-
-记忆 provider 状态：
-
-```powershell
-python backend\vector_index_system\cli.py memory status
-```
-
-## 后端图谱管理页
-
-启动器会运行：
-
-```powershell
-python backend\vector_index_system\backend_admin.py --port 8080
-```
-
-默认访问：
+后台页面路径：
 
 ```text
-http://127.0.0.1:8080/admin
+backend/vector_index_system/knowledge_graph/backend_admin.html
 ```
 
-该页面用于查看和管理图谱，不直接承担教师端或学生端业务逻辑。
+访问地址：
 
-## 扩展规则
+```text
+http://localhost:3000/backend/vector_index_system/knowledge_graph/backend_admin.html
+```
 
-- 新增图谱字段时，应保持旧数据可读，必要时在读取层做兼容。
-- 新增向量索引文件或模型文件时，不应默认提交到 Git。
-- 新增 provider 时，应实现 `access_entry.py` 并提供 `get_status`、`add_memory`、`search_memory` 等兼容方法。
-- 修改 CLI 命令后，需要同步更新本文档和 `backend/vector_index_system/README.md`。
+该页面也需要使用统一 Markdown 和 LaTeX 渲染链路，尤其是右侧详情面板。

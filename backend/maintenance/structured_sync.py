@@ -28,6 +28,8 @@ from graph_service import GraphService, normalize_relation_type  # type: ignore 
 
 
 REFERENCE_PATTERN = re.compile(r"\[\[(SEE_)?(FORMULA|TABLE):([^\]]+)\]\]")
+FORMULA_REFERENCE_PATTERN = re.compile(r"\[\[(SEE_)?FORMULA:([^\]]+)\]\]", re.I)
+_FORMULA_INDEX: Optional[Dict[str, Dict[str, str]]] = None
 
 SEMANTIC_STOPWORDS = {
     "the", "and", "for", "that", "with", "from", "this", "these", "those", "are", "was",
@@ -71,6 +73,52 @@ def _load_json(path: Path) -> Dict[str, Any]:
         return {}
 
 
+def _load_formula_index() -> Dict[str, Dict[str, str]]:
+    global _FORMULA_INDEX
+    if _FORMULA_INDEX is not None:
+        return _FORMULA_INDEX
+
+    payload = _load_json(STRUCTURED_DIR / "formula_library.json")
+    index: Dict[str, Dict[str, str]] = {}
+    for item in payload.get("formulas") or []:
+        if not isinstance(item, dict):
+            continue
+        formula_id = str(item.get("id") or "").strip()
+        latex = str(item.get("latex") or "").strip()
+        if not formula_id or not latex:
+            continue
+        index[formula_id.lower()] = {
+            "id": formula_id,
+            "label": str(item.get("label_format") or f"Equation {formula_id}").strip(),
+            "latex": latex,
+        }
+    _FORMULA_INDEX = index
+    return index
+
+
+def _expand_formula_references(text: str, *, display: bool = True) -> str:
+    text = str(text or "")
+    if "[[" not in text:
+        return text
+    formula_index = _load_formula_index()
+
+    def replace(match: re.Match[str]) -> str:
+        formula_id = match.group(2).strip()
+        record = formula_index.get(formula_id.lower())
+        if not record:
+            return f"Equation {formula_id}"
+        label = record.get("label") or f"Equation {formula_id}"
+        latex = record.get("latex") or ""
+        if display and not match.group(1):
+            return f"{label}:\n$$ {latex} $$"
+        return f"{label} (${latex}$)"
+
+    expanded = FORMULA_REFERENCE_PATTERN.sub(replace, text)
+    expanded = re.sub(r"\b(Equation|Eq\.)\s+Equation\s+", r"\1 ", expanded)
+    expanded = re.sub(r"\bEquations\s+Equation\s+", "Equations ", expanded)
+    return expanded
+
+
 def _save_json(path: Path, payload: Dict[str, Any]) -> None:
     _ensure_data_dir()
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -84,7 +132,8 @@ def _truncate(text: str, limit: int = 72) -> str:
 
 
 def _clean_label(text: str) -> str:
-    text = re.sub(r"\[\[(?:SEE_)?(?:FORMULA|TABLE):[^\]]+\]\]", "", text or "")
+    text = _expand_formula_references(text or "", display=False)
+    text = re.sub(r"\[\[(?:SEE_)?TABLE:[^\]]+\]\]", "", text)
     text = re.sub(r"\$\$[\s\S]*?\$\$", "[formula]", text)
     text = re.sub(r"\$[^$]+\$", "[math]", text)
     return _truncate(text)
@@ -322,7 +371,8 @@ def _build_chunk_source(path: Path) -> SourceSpec:
 
     for index, block in enumerate(payload.get("blocks") or [], start=1):
         block_type = str(block.get("type") or "concept")
-        block_content = str(block.get("content") or "")
+        raw_block_content = str(block.get("content") or "")
+        block_content = _expand_formula_references(raw_block_content)
         block_id = f"block::{path.stem}::{index}"
         label = f"{chapter} #{index} {block_type}: {_clean_label(block_content)}"
         nodes.append(
@@ -367,7 +417,7 @@ def _build_chunk_source(path: Path) -> SourceSpec:
                 )
             )
 
-        formula_ids, table_ids = _parse_references(block_content)
+        formula_ids, table_ids = _parse_references(raw_block_content)
         for formula_id in formula_ids:
             formula_node_id = f"formula::{chapter}::{formula_id}"
             relations.append(

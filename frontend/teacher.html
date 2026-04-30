@@ -7,10 +7,10 @@
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="graph-styles.css">
     <link rel="stylesheet" href="new-styles.css?v=3">
-    <link rel="stylesheet" href="workspace-ambient.css?v=8">
+    <link rel="stylesheet" href="workspace-ambient.css?v=11">
     <link rel="stylesheet" href="https://unpkg.com/katex@0.16.9/dist/katex.min.css">
-    <link rel="stylesheet" href="latex-renderer.css?v=2">
-    <link rel="stylesheet" href="markdown-renderer.css?v=1">
+    <link rel="stylesheet" href="latex-renderer.css?v=4">
+    <link rel="stylesheet" href="markdown-renderer.css?v=3">
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 </head>
 <body class="workspace-ambient">
@@ -34,6 +34,7 @@
                 <div class="mode-switch">
                     <button id="btn-prepare-mode" onclick="switchMode('prepare')" class="mode-btn active">备课模式</button>
                     <button id="btn-lecture-mode" onclick="switchMode('lecture')" class="mode-btn">授课模式</button>
+                    <button id="btn-exercise-review-mode" onclick="switchMode('exercise-review')" class="mode-btn">题库反馈</button>
                 </div>
             </div>
             <div class="header-right">
@@ -200,6 +201,23 @@
                     <div id="draft-list" class="draft-list">
                         <p class="placeholder">暂无草稿</p>
                     </div>
+                </div>
+            </div>
+
+            <div id="exercise-review-mode-panel" class="mode-panel">
+                <div class="panel-section">
+                    <h2>题库反馈</h2>
+                    <div class="chapter-selector exercise-review-toolbar">
+                        <select id="exercise-review-chapter-select" class="chapter-select-input" onchange="loadTeacherExerciseBank()">
+                            <option value="">-- 请选择章节 --</option>
+                        </select>
+                        <button onclick="loadTeacherExerciseBank()" class="btn btn-small">加载题库</button>
+                        <button onclick="regenerateTeacherExerciseBank()" class="btn btn-small btn-info">继续生成</button>
+                    </div>
+                    <div id="exercise-review-summary" class="exercise-review-summary">选择章节后可查看题库，并对题目质量做点赞或点踩反馈。</div>
+                </div>
+                <div id="teacher-exercise-bank" class="exercise-review-list">
+                    <p class="placeholder">请选择章节加载题库。</p>
                 </div>
             </div>
 
@@ -394,9 +412,9 @@
     <script src="env-config.js?v=15" charset="UTF-8"></script>
     <script src="https://unpkg.com/katex@0.16.9/dist/katex.min.js"></script>
     <script src="https://unpkg.com/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
-    <script src="latex-renderer.js?v=3" charset="UTF-8"></script>
-    <script src="markdown-renderer.js?v=2" charset="UTF-8"></script>
+    <script src="latex-renderer.js?v=6" charset="UTF-8"></script>
+    <script src="markdown-renderer.js?v=4" charset="UTF-8"></script>
     <script src="workspace-ambient.js?v=5" charset="UTF-8"></script>
-    <script src="teacher.js?v=23" charset="UTF-8"></script>
+    <script src="teacher.js?v=29" charset="UTF-8"></script>
 </body>
 </html>

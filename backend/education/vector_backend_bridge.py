@@ -31,6 +31,12 @@ from cli import dispatch_tool  # type: ignore  # noqa: E402
 from memory_runtime import MemoryService  # type: ignore  # noqa: E402
 from graphml_importer import convert_to_mcp_format, parse_graphml_file  # type: ignore  # noqa: E402
 
+try:
+    from kg_constraints import expand_formula_references  # type: ignore  # noqa: E402
+except Exception:  # pragma: no cover - fallback for standalone maintenance scripts
+    def expand_formula_references(value: Any, *, display: bool = True) -> str:
+        return str(value or "")
+
 
 def _now() -> str:
     return datetime.now().isoformat()
@@ -115,9 +121,13 @@ def _node_size(node_type: str) -> str:
 
 
 def _normalize_node(node: Dict[str, Any]) -> Dict[str, Any]:
-    label = _node_label(node)
+    label = expand_formula_references(_node_label(node), display=False)
     metadata = dict(node.get("metadata") or {})
-    content = node.get("content") or metadata.get("description") or label
+    content = expand_formula_references(node.get("content") or metadata.get("description") or label)
+    if metadata.get("description"):
+        metadata["description"] = expand_formula_references(metadata.get("description"))
+    if metadata.get("label"):
+        metadata["label"] = expand_formula_references(metadata.get("label"), display=False)
     return {
         **node,
         "id": node.get("id"),
@@ -134,6 +144,9 @@ def _normalize_relation(relation: Dict[str, Any]) -> Dict[str, Any]:
     target_id = relation.get("target_id") or relation.get("target") or relation.get("to")
     relation_type = relation.get("relation_type") or relation.get("type") or relation.get("label") or "related"
     metadata = dict(relation.get("metadata") or relation.get("properties") or {})
+    description = expand_formula_references(relation.get("description") or metadata.get("description") or "")
+    if metadata.get("description"):
+        metadata["description"] = expand_formula_references(metadata.get("description"))
     return {
         **relation,
         "source_id": source_id,
@@ -142,8 +155,17 @@ def _normalize_relation(relation: Dict[str, Any]) -> Dict[str, Any]:
         "target": target_id,
         "relation_type": relation_type,
         "type": relation_type,
+        "description": description,
         "metadata": metadata,
     }
+
+
+def normalize_frontend_node(node: Dict[str, Any]) -> Dict[str, Any]:
+    return _normalize_node(node)
+
+
+def normalize_frontend_relation(relation: Dict[str, Any]) -> Dict[str, Any]:
+    return _normalize_relation(relation)
 
 
 def build_frontend_graph(raw_graph: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -318,9 +340,9 @@ def _build_local_answer_legacy(question: str, limit: int = 5) -> Dict[str, Any]:
         lines.append(f"- [{label}] {text[:140]}")
 
     if lines:
-        answer = '基于当前图谱和记忆检索，相关内容如下：\\n' + "\n".join(lines[:limit])
+        answer = "Based on retrieved graph/memory evidence, keeping source wording in its original language:\n" + "\n".join(lines[:limit])
     else:
-        answer = '当前图谱和记忆库中没有检索到与该问题直接相关的内容。'
+        answer = "I could not find directly relevant evidence in the knowledge graph or memory store. Please add the source passage or ask with a more specific term."
 
     return {
         "answer": answer,
@@ -347,9 +369,9 @@ def build_local_answer(question: str, limit: int = 5) -> Dict[str, Any]:
         lines.append(f"- [{source}] {label}: {text[:180]}")
 
     if lines:
-        answer = '基于当前图谱和记忆检索，相关内容如下：\\n' + "\n".join(lines[:limit])
+        answer = "Based on retrieved graph/memory evidence, keeping source wording in its original language:\n" + "\n".join(lines[:limit])
     else:
-        answer = '当前图谱和记忆库中没有检索到与该问题直接相关的内容。'
+        answer = "I could not find directly relevant evidence in the knowledge graph or memory store. Please add the source passage or ask with a more specific term."
 
     return {
         "answer": answer,
@@ -550,6 +572,8 @@ class ChapterStore:
                 "lecture_content": record.get("lecture_content"),
                 "exercises": record.get("exercises"),
                 "exercise_bank": record.get("exercise_bank", []),
+                "approved_exercise_bank": record.get("approved_exercise_bank", []),
+                "exercise_feedback": record.get("exercise_feedback", {}),
                 "created_at": record.get("created_at") or _now(),
                 "updated_at": _now(),
             }
@@ -589,6 +613,8 @@ class ChapterStore:
         saved["lecture_content"] = lecture_content
         saved["exercises"] = chapter.get("exercises")
         saved["exercise_bank"] = chapter.get("exercise_bank", [])
+        saved["approved_exercise_bank"] = chapter.get("approved_exercise_bank", saved.get("approved_exercise_bank", []))
+        saved["exercise_feedback"] = chapter.get("exercise_feedback", saved.get("exercise_feedback", {}))
         chapters = self._load_chapters()
         chapters[chapter_id] = saved
         self._save_chapters(chapters)
@@ -610,6 +636,8 @@ class ChapterStore:
         clean_bank = [item for item in exercises if isinstance(item, dict)]
         chapter["exercise_bank"] = clean_bank
         chapter["exercises"] = clean_bank[0] if clean_bank else None
+        chapter["approved_exercise_bank"] = chapter.get("approved_exercise_bank", [])
+        chapter["exercise_feedback"] = chapter.get("exercise_feedback", {})
         chapter["updated_at"] = _now()
 
         saved = self.save_chapter(
@@ -621,10 +649,115 @@ class ChapterStore:
         )
         saved["exercise_bank"] = clean_bank
         saved["exercises"] = chapter["exercises"]
+        saved["approved_exercise_bank"] = chapter.get("approved_exercise_bank", saved.get("approved_exercise_bank", []))
+        saved["exercise_feedback"] = chapter.get("exercise_feedback", saved.get("exercise_feedback", {}))
         chapters = self._load_chapters()
         chapters[chapter_id] = saved
         self._save_chapters(chapters)
         return saved
+
+    def save_approved_exercise(
+        self,
+        *,
+        chapter_id: str,
+        exercise: Dict[str, Any],
+        feedback_key: str,
+        approved: bool,
+    ) -> Dict[str, Any]:
+        chapters = self._load_chapters()
+        chapter = chapters.get(chapter_id) or self.get_chapter(chapter_id) or {
+            "id": chapter_id,
+            "title": chapter_id,
+            "content": "",
+            "created_at": _now(),
+        }
+        approved_bank = chapter.get("approved_exercise_bank")
+        if not isinstance(approved_bank, list):
+            approved_bank = []
+
+        exercise_id = str((exercise or {}).get("id") or "")
+        exercise_question = str((exercise or {}).get("question") or "").strip()
+
+        def item_matches(item: Dict[str, Any]) -> bool:
+            if not isinstance(item, dict):
+                return True
+            keys = {
+                str(item.get("approval_key") or ""),
+                str(item.get("feedback_key") or ""),
+                str(item.get("id") or ""),
+            }
+            if feedback_key and feedback_key in keys:
+                return True
+            if exercise_id and exercise_id in keys:
+                return True
+            if exercise_question and str(item.get("question") or "").strip() == exercise_question:
+                return True
+            return False
+
+        approved_bank = [
+            item for item in approved_bank
+            if not item_matches(item)
+        ]
+        if approved and isinstance(exercise, dict):
+            approved_item = dict(exercise)
+            approved_item["approval_key"] = feedback_key
+            approved_item["approved_at"] = _now()
+            approved_bank.append(approved_item)
+
+        chapter["approved_exercise_bank"] = approved_bank
+        chapter["updated_at"] = _now()
+        chapter["id"] = chapter_id
+        chapters[chapter_id] = chapter
+        self._save_chapters(chapters)
+        return chapter
+
+    def save_exercise_feedback(
+        self,
+        *,
+        chapter_id: str,
+        feedback_key: str,
+        rating: str,
+        exercise_id: Optional[str] = None,
+        question: Optional[str] = None,
+        note: Optional[str] = None,
+        scope: str = "exercise",
+        option_key: Optional[str] = None,
+        option_text: Optional[str] = None,
+        parent_feedback_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        chapters = self._load_chapters()
+        chapter = chapters.get(chapter_id) or self.get_chapter(chapter_id) or {
+            "id": chapter_id,
+            "title": chapter_id,
+            "content": "",
+            "created_at": _now(),
+        }
+        feedback = chapter.get("exercise_feedback")
+        if not isinstance(feedback, dict):
+            feedback = {}
+
+        normalized_rating = str(rating or "").strip().lower()
+        if normalized_rating in {"clear", "none", "neutral", ""}:
+            feedback.pop(feedback_key, None)
+        else:
+            feedback[feedback_key] = {
+                "rating": normalized_rating,
+                "scope": scope or "exercise",
+                "exercise_id": exercise_id or "",
+                "question": question or "",
+                "option_key": option_key or "",
+                "option_text": option_text or "",
+                "parent_feedback_key": parent_feedback_key or "",
+                "note": note or "",
+                "updated_at": _now(),
+            }
+
+        chapter["exercise_feedback"] = feedback
+        chapter["id"] = chapter_id
+        chapter["updated_at"] = _now()
+        chapters[chapter_id] = chapter
+        self._save_chapters(chapters)
+        return chapter
 
     def list_chapters(self) -> List[Dict[str, Any]]:
         chapters = self._load_chapters()
@@ -648,6 +781,8 @@ class ChapterStore:
                 "lecture_content": None,
                 "exercises": None,
                 "exercise_bank": [],
+                "approved_exercise_bank": [],
+                "exercise_feedback": {},
                 "created_at": node.get("created_at") or _now(),
                 "updated_at": node.get("updated_at") or _now(),
             }
@@ -685,6 +820,8 @@ class ChapterStore:
                 "lecture_content": None,
                 "exercises": None,
                 "exercise_bank": [],
+                "approved_exercise_bank": [],
+                "exercise_feedback": {},
                 "created_at": node.get("created_at") or _now(),
                 "updated_at": node.get("updated_at") or _now(),
             }

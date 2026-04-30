@@ -1,28 +1,27 @@
-# Maintenance API Module
+# 维护 API
 
-`backend/maintenance/` 是后台维护 API 模块，负责知识图谱节点关系维护、结构化数据同步、GraphML 导入、图谱导出、校验和统计。
+`backend/maintenance/` 提供知识图谱维护接口，默认端口为 `8002`。它面向图谱后台页面和教师端维护功能，用于导入、编辑、同步和导出图谱数据。
 
-## 核心能力
+## 核心文件
 
-- 添加、更新和删除图谱节点。
-- 添加、更新和查询节点关系。
-- 搜索、语义搜索和图谱结构查询。
-- 扫描 `structured/` 并同步到图谱。
-- 导入 GraphML，导出图谱和教师端数据包。
-- 校验图谱结构并清理孤立节点。
+| 文件 | 职责 |
+| --- | --- |
+| `api_server.py` | FastAPI 路由、节点/关系接口、导入导出 |
+| `structured_sync.py` | 从 `structured/` 同步章节、公式和表格到图谱 |
 
-## 主要入口
+## 主要能力
 
-```powershell
-python backend\maintenance\api_server.py
-```
+- 查询和编辑节点。
+- 查询和编辑关系。
+- 从结构化数据同步图谱内容。
+- 导出当前图谱。
+- 将公式引用展开为可渲染 LaTeX。
+- 为前端统一返回节点详情、关系和元数据。
 
-默认地址：
+## 注意事项
 
-```text
-http://127.0.0.1:8002/docs
-```
+- 维护 API 不应返回本地密钥、绝对个人路径或未公开参考文件。
+- 同步结构化材料前，应确认材料适合提交或适合本地使用。
+- 前端图谱详情依赖这里返回的正文和公式字段，改动字段名时需要同步前端。
 
-## 详细文档
-
-完整说明见 [docs/modules/maintenance-api.md](../../docs/modules/maintenance-api.md)。
+更多细节见 [维护 API 模块文档](../../docs/modules/maintenance-api.md)。

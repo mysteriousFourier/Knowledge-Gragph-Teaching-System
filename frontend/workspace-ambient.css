@@ -182,6 +182,7 @@ body.workspace-ambient {
 
 .workspace-ambient #prepare-mode-panel.active,
 .workspace-ambient #lecture-mode-panel.active,
+.workspace-ambient #exercise-review-mode-panel.active,
 .workspace-ambient #learn-mode-panel.active,
 .workspace-ambient #practice-mode-panel.active {
     display: grid;
@@ -609,7 +610,8 @@ body.workspace-ambient {
 .workspace-ambient #exercise-content .selected-answer-hint,
 .workspace-ambient #exercise-content .exercise-result-title,
 .workspace-ambient #exercise-content .exercise-result-text,
-.workspace-ambient #exercise-content .exercise-explanation {
+.workspace-ambient #exercise-content .exercise-explanation,
+.workspace-ambient #exercise-content .exercise-feedback {
     color: var(--workspace-field-muted);
 }
 
@@ -619,6 +621,9 @@ body.workspace-ambient {
         linear-gradient(180deg, rgba(17, 30, 39, 0.88), rgba(8, 14, 21, 0.82));
     color: var(--workspace-field-text);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    overflow-wrap: anywhere;
+    max-height: none;
+    overflow-y: visible;
 }
 
 .workspace-ambient #exercise-content .exercise-option:hover {
@@ -633,6 +638,20 @@ body.workspace-ambient {
         radial-gradient(circle at 18% 0%, rgba(142, 232, 220, 0.24), transparent 42%),
         linear-gradient(180deg, rgba(14, 54, 58, 0.94), rgba(7, 24, 31, 0.9));
     color: #f6fffb;
+}
+
+.workspace-ambient #exercise-content .exercise-option.correct-choice {
+    border-color: rgba(113, 232, 168, 0.92);
+    background:
+        radial-gradient(circle at 18% 0%, rgba(113, 232, 168, 0.22), transparent 42%),
+        linear-gradient(180deg, rgba(10, 60, 43, 0.94), rgba(6, 24, 20, 0.9));
+}
+
+.workspace-ambient #exercise-content .exercise-option.incorrect-choice {
+    border-color: rgba(255, 154, 154, 0.82);
+    background:
+        radial-gradient(circle at 18% 0%, rgba(255, 154, 154, 0.18), transparent 42%),
+        linear-gradient(180deg, rgba(65, 20, 28, 0.94), rgba(24, 8, 14, 0.9));
 }
 
 .workspace-ambient #exercise-content .exercise-option-key {
@@ -676,6 +695,166 @@ body.workspace-ambient {
 .workspace-ambient #exercise-content .exercise-explanation {
     border-color: rgba(142, 232, 220, 0.22);
     background: rgba(7, 13, 20, 0.46);
+}
+
+.workspace-ambient #exercise-content .exercise-feedback {
+    border-color: rgba(142, 232, 220, 0.22);
+    background: rgba(7, 13, 20, 0.46);
+}
+
+.workspace-ambient #exercise-content .exercise-feedback.correct {
+    border-color: rgba(113, 232, 168, 0.38);
+    background: rgba(8, 42, 31, 0.44);
+}
+
+.workspace-ambient #exercise-content .exercise-feedback.incorrect {
+    border-color: rgba(255, 154, 154, 0.36);
+    background: rgba(48, 16, 22, 0.42);
+}
+
+.workspace-ambient .exercise-review-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.workspace-ambient .exercise-review-toolbar .chapter-select-input {
+    flex: 1 1 280px;
+}
+
+.workspace-ambient .exercise-review-summary {
+    margin-top: 12px;
+    color: var(--workspace-muted);
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.workspace-ambient .exercise-review-list {
+    display: grid;
+    gap: 14px;
+}
+
+.workspace-ambient .exercise-review-card {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border: 1px solid var(--workspace-readable-border);
+    border-radius: 14px;
+    padding: 16px;
+    background:
+        radial-gradient(circle at 14% 0%, rgba(255, 255, 255, 0.1), transparent 30%),
+        linear-gradient(145deg, rgba(16, 23, 31, 0.86), rgba(7, 11, 16, 0.72));
+    color: var(--workspace-field-text);
+    box-shadow: inset 0 1px 0 rgba(240, 255, 252, 0.12);
+}
+
+.workspace-ambient .exercise-review-card.rated-up {
+    border-color: rgba(196, 242, 139, 0.46);
+}
+
+.workspace-ambient .exercise-review-card.rated-down {
+    border-color: rgba(255, 138, 138, 0.42);
+}
+
+.workspace-ambient .exercise-review-card-header,
+.workspace-ambient .exercise-review-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.workspace-ambient .exercise-review-index {
+    color: var(--workspace-cyan);
+    font-weight: 700;
+}
+
+.workspace-ambient .exercise-review-rating,
+.workspace-ambient .exercise-review-answer {
+    color: var(--workspace-field-muted);
+    font-size: 13px;
+}
+
+.workspace-ambient .exercise-review-question {
+    margin: 12px 0;
+    color: var(--workspace-ink);
+    font-weight: 650;
+    line-height: 1.65;
+}
+
+.workspace-ambient .exercise-review-options {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.workspace-ambient .exercise-review-option {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+    border: 1px solid rgba(190, 235, 255, 0.18);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.045);
+    color: var(--workspace-field-text);
+    line-height: 1.55;
+}
+
+.workspace-ambient .exercise-review-option.rated-up {
+    border-color: rgba(196, 242, 139, 0.42);
+}
+
+.workspace-ambient .exercise-review-option.rated-down {
+    border-color: rgba(255, 138, 138, 0.42);
+}
+
+.workspace-ambient .exercise-review-option-text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.workspace-ambient .exercise-review-option-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.workspace-ambient .exercise-review-option.correct {
+    border-color: rgba(196, 242, 139, 0.42);
+    background: rgba(196, 242, 139, 0.08);
+}
+
+.workspace-ambient .exercise-review-answer,
+.workspace-ambient .exercise-review-explanation {
+    margin-top: 12px;
+}
+
+.workspace-ambient .exercise-review-explanation {
+    color: var(--workspace-field-muted);
+    line-height: 1.65;
+}
+
+.workspace-ambient .exercise-review-actions {
+    justify-content: flex-end;
+    margin-top: 14px;
+}
+
+.workspace-ambient .exercise-review-vote.active {
+    border-color: rgba(196, 242, 139, 0.62);
+    background: rgba(196, 242, 139, 0.18);
+    color: var(--workspace-green);
+}
+
+.workspace-ambient .exercise-review-vote.active.danger {
+    border-color: rgba(255, 138, 138, 0.58);
+    background: rgba(255, 138, 138, 0.16);
+    color: var(--workspace-red);
 }
 
 .workspace-ambient .course-content .placeholder,
@@ -834,6 +1013,14 @@ body.workspace-ambient {
     .workspace-ambient .modal-buttons {
         align-items: stretch;
         flex-direction: column;
+    }
+
+    .workspace-ambient .exercise-review-option {
+        grid-template-columns: 1fr;
+    }
+
+    .workspace-ambient .exercise-review-option-actions {
+        justify-content: flex-start;
     }
 
     .workspace-ambient .btn,

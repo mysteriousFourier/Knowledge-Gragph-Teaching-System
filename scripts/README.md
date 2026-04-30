@@ -1,13 +1,28 @@
-# Scripts Module
+# 脚本
 
-`scripts/` 存放辅助脚本。根目录的 `start.bat` 和 `stop.ps1` 是用户直接执行的入口脚本，其他脚本应放在本目录中。
+`scripts/` 保存本地启动、停止和维护辅助脚本。
 
-## 当前脚本
+## 常用脚本
 
-| 文件 | 说明 |
+| 脚本 | 用途 |
 | --- | --- |
-| `resolve_python.ps1` | 在 Windows 环境中辅助解析可用 Python 解释器 |
+| `stop_unlesspaper.ps1` | 根据运行时记录和端口安全停止本项目服务 |
+| `resolve_python.ps1` | 按 `.env` 和本机环境查找 Python |
 
-## 详细文档
+根目录的 `start.bat` 是推荐启动入口，它会调用后端编排器并自动打开主页。
 
-完整说明见 [docs/modules/scripts.md](../docs/modules/scripts.md)。
+## 使用方式
+
+启动：
+
+```bat
+start.bat
+```
+
+停止：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\stop_unlesspaper.ps1
+```
+
+更多细节见 [脚本模块文档](../docs/modules/scripts.md)。

@@ -1,9 +1,8 @@
 """Knowledge-graph constraints for teaching generation.
 
-This module adapts the GC-DPG idea in GC-DPG参考.md into a generic
-KG-constrained learning pipeline:
+This module implements a generic KG-grounded learning pipeline:
 1. build a LearningPlan from graph evidence,
-2. generate only within the LearningPlan,
+2. generate with evidence-aware boundaries,
 3. attach a lightweight consistency report.
 """
 
@@ -11,24 +10,115 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 
-KG_CONSTRAINED_SYSTEM_PROMPT = """你是一个受知识图谱约束的交互式学习助手。
-必须先依据 LearningPlan 和图谱证据组织答案，再生成教学内容。
-只能使用 LearningPlan 中允许的知识点、关系和证据；不要编造图谱中不存在的概念关系。
-如果图谱证据不足，必须明确说明“当前图谱依据不足”，并指出还需要哪些知识证据。
+KG_CONSTRAINED_SYSTEM_PROMPT = """你是一个知识图谱增强的交互式学习助手。
+LearningPlan 和 evidence 是优先依据，不是拒答开关。先用证据回答；证据只覆盖一部分时，给出有边界的回答，并明确哪些部分来自证据、哪些部分需要更多材料确认。
+不要伪造课程私有事实、引用或节点关系；但用户询问常见公式、定义、数学推导或基础概念时，可以用通用知识回答，并标注为通用说明。
+保持知识原文的语言和术语：英文原文、公式、变量名、专有名词和 evidence 片段必须保留英文；除非用户明确要求翻译，不要把英文定义整段翻译成中文。如果翻译可能造成误解，直接用英文回答。
+如果 evidence 主要是英文，默认使用英文作答；需要中文辅助时也必须保留英文关键句和术语。
 如果学习者正在练习或请求提示，优先给提示和思路，不要一次性泄露完整答案。
-输出要符合学习者当前水平，避免跳到未掌握的高级内容。"""
+输出要符合学习者当前水平，回答问题时优先直接回答，再给依据或限制。"""
 
 
 DEFAULT_CONSTRAINTS = [
-    "只能使用 LearningPlan.allowed_concepts、LearningPlan.learning_intent_graph 和 evidence 中出现的知识。",
-    "不要引入未被图谱证据支持的新概念、前置关系、因果关系或结论。",
-    "如果证据不足，说明当前图谱依据不足，不要用常识补全。",
+    "优先使用 LearningPlan.allowed_concepts、LearningPlan.learning_intent_graph 和 evidence 中出现的知识。",
+    "可以基于证据做简短解释和连接，但不要编造未被证据支持的具体事实、前置关系、因果关系或结论。",
+    "如果证据不足，给出限定性回答并说明缺口；不要直接拒答，除非关键事实完全没有依据。",
+    "保持知识原文语言：英文原文、术语、公式、变量名和 evidence 片段保留英文；不确定时用英文回答。",
+    "如果 evidence 主要是英文，默认使用英文作答；需要中文辅助时也必须保留英文关键句和术语。",
     "根据 learning_level 控制难度，初学者回答优先解释前置知识和关键定义。",
     "练习、批改和提示场景优先给分步提示，除非题目明确要求公布标准答案。",
 ]
+
+
+KG_CONSTRAINED_SYSTEM_PROMPT = """You are a teaching assistant using knowledge-graph context as helpful reference, not as a refusal gate.
+Answer or generate the requested teaching content directly. Prefer retrieved evidence when it is relevant, but do not expose internal LearningPlan, graph constraints, self-check steps, or pipeline wording.
+If the evidence is partial, answer the supported part and clearly mark uncertain parts. For common formulas, definitions, derivations, and basic course concepts, you may use general knowledge and label it as a general explanation when it is not directly in the evidence.
+Keep source language stable: English source sentences, formulas, variable names, and technical terms should remain English unless the user explicitly asks for translation."""
+
+DEFAULT_CONSTRAINTS = [
+    "Use evidence as preferred context, not as a hard refusal condition.",
+    "Do not invent course-specific facts, citations, or graph relations that are not present.",
+    "If evidence is incomplete, answer the supported part and mark uncertainty.",
+    "Keep English source text, formulas, variable names, and technical terms in English.",
+    "Hide internal LearningPlan, pipeline, and consistency-check wording from users.",
+]
+
+FORMULA_REFERENCE_PATTERN = re.compile(r"\[\[(SEE_)?FORMULA:([^\]]+)\]\]", re.I)
+EQUATION_LABEL_PATTERN = re.compile(r"\b(?:Equation|Eq\.)\s+([0-9]+(?:\.[0-9]+[a-z]?)?)\b(?!\s*[:(])", re.I)
+_FORMULA_INDEX: Optional[Dict[str, Dict[str, str]]] = None
+
+
+def _load_formula_index() -> Dict[str, Dict[str, str]]:
+    global _FORMULA_INDEX
+    if _FORMULA_INDEX is not None:
+        return _FORMULA_INDEX
+
+    formula_path = Path(__file__).resolve().parents[2] / "structured" / "formula_library.json"
+    index: Dict[str, Dict[str, str]] = {}
+    try:
+        payload = json.loads(formula_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        _FORMULA_INDEX = index
+        return index
+
+    for item in payload.get("formulas") or []:
+        if not isinstance(item, dict):
+            continue
+        formula_id = str(item.get("id") or "").strip()
+        latex = str(item.get("latex") or "").strip()
+        if not formula_id or not latex:
+            continue
+        index[formula_id.lower()] = {
+            "id": formula_id,
+            "label": str(item.get("label_format") or f"Equation {formula_id}").strip(),
+            "latex": latex,
+        }
+
+    _FORMULA_INDEX = index
+    return index
+
+
+def expand_formula_references(value: Any, *, display: bool = True, expand_labels: bool = False) -> str:
+    """Expand structured formula references to their original LaTeX."""
+    text = str(value or "")
+    has_structured_ref = bool(FORMULA_REFERENCE_PATTERN.search(text))
+    if not has_structured_ref and not expand_labels:
+        return text
+
+    index = _load_formula_index()
+
+    def replace(match: re.Match[str]) -> str:
+        formula_id = match.group(2).strip()
+        record = index.get(formula_id.lower())
+        if not record:
+            return f"Equation {formula_id}"
+        label = record.get("label") or f"Equation {formula_id}"
+        latex = record.get("latex") or ""
+        if display and not match.group(1):
+            return f"{label}:\n$$ {latex} $$"
+        return f"{label} (${latex}$)"
+
+    expanded = FORMULA_REFERENCE_PATTERN.sub(replace, text)
+    expanded = re.sub(r"\b(Equation|Eq\.)\s+Equation\s+", r"\1 ", expanded)
+    expanded = re.sub(r"\bEquations\s+Equation\s+", "Equations ", expanded)
+    if expand_labels and not has_structured_ref:
+        def replace_label(match: re.Match[str]) -> str:
+            formula_id = match.group(1).strip()
+            record = index.get(formula_id.lower())
+            if not record:
+                return match.group(0)
+            label = record.get("label") or f"Equation {formula_id}"
+            latex = record.get("latex") or ""
+            if display:
+                return f"{label}:\n$$ {latex} $$"
+            return f"{label} (${latex}$)"
+
+        expanded = EQUATION_LABEL_PATTERN.sub(replace_label, expanded)
+    return expanded
 
 
 INTENT_KEYWORDS = [
@@ -242,10 +332,10 @@ def build_constrained_generation_prompt(
     source_content: str = "",
 ) -> str:
     requirement_text = "\n".join(f"{index}. {item}" for index, item in enumerate(requirements, start=1))
-    source_block = f"\n原始输入/章节内容：\n{source_content.strip()}\n" if source_content.strip() else ""
-    return f"""请执行 KG-Constrained Interactive Learning Pipeline。
+    source_block = f"\n原始输入/章节内容（保持原文语言，不要强制翻译）：\n{source_content.strip()}\n" if source_content.strip() else ""
+    return f"""请执行 KG-Grounded Interactive Learning Pipeline。
 
-Phase 1: Learning Planning 已完成，必须遵守以下 LearningPlan：
+Phase 1: Learning Planning 已完成，优先遵守以下 LearningPlan：
 {format_learning_plan(learning_plan)}
 
 Phase 2: Constrained Teaching / Interaction Generation
@@ -258,14 +348,48 @@ Phase 2: Constrained Teaching / Interaction Generation
 生成要求：
 {requirement_text}
 
+语言与原文保真：
+- evidence 或章节内容如果是英文，术语、公式、变量名、定义原句和关键短语保持英文。
+- 中文用户可以用中文解释，但不要把英文知识原文整段意译；如果翻译可能改变含义，直接用英文回答。
+- 如果 evidence 主要为英文，默认使用英文作答；需要中文辅助时保留英文关键句和术语。
+- 引用证据时尽量保留原句或关键短语，并标注 evidence 编号。
+
 Phase 3: Consistency & Pedagogy Checking
 生成前自检：
-- 是否只使用了 LearningPlan 中允许的知识点和关系。
-- 是否避免了未授权的新概念和高级跳跃。
-- 如果证据不足，是否明确说明“当前图谱依据不足”。
+- 是否优先依据 LearningPlan 中允许的知识点、关系和 evidence。
+- 是否避免了没有证据支持的具体事实、关系和高级跳跃。
+- 如果证据不足，是否给出清楚边界，而不是空泛拒答。
+- 是否保持英文原文、术语、公式和变量名不被错误翻译。
 - 练习/批改/提示场景是否没有无条件泄露完整答案。
 
 只输出最终内容，不要输出自检过程。"""
+
+
+def build_constrained_generation_prompt(
+    *,
+    task_title: str,
+    user_input: str,
+    learning_plan: Dict[str, Any],
+    requirements: Iterable[str],
+    source_content: str = "",
+) -> str:
+    """Build a soft KG-guided prompt without exposing pipeline internals."""
+    requirement_text = "\n".join(f"{index}. {item}" for index, item in enumerate(requirements, start=1))
+    source_block = f"\nSource/chapter content:\n{source_content.strip()}\n" if source_content.strip() else ""
+    evidence = learning_plan.get("evidence") or []
+    allowed = learning_plan.get("allowed_concepts") or []
+    concept_names = ", ".join(str(item.get("name") or "") for item in allowed[:8] if item.get("name"))
+    concept_line = f"\nRelevant concepts: {concept_names}\n" if concept_names else ""
+    return f"""Task: {task_title}
+User input: {user_input}
+{source_block}
+Relevant evidence:
+{format_evidence(evidence)}
+{concept_line}
+Requirements:
+{requirement_text}
+
+Use the evidence as helpful context, not as a hard gate. Do not mention LearningPlan, GC-DPG, graph constraints, phases, or self-checks. Keep English source wording, formulas, variables, and technical terms in English. Output only the final user-facing content."""
 
 
 def check_generation_consistency(
@@ -292,25 +416,29 @@ def check_generation_consistency(
         if matched == 0 and output_text.strip():
             support_ratio = 0.5
 
-    insufficiency_acknowledged = "当前图谱依据不足" in output_text or "图谱依据不足" in output_text
+    insufficiency_acknowledged = (
+        "当前图谱依据不足" in output_text
+        or "图谱依据不足" in output_text
+        or "insufficient evidence" in output_lower
+        or "need more evidence" in output_lower
+        or "not enough evidence" in output_lower
+    )
     hint_policy_violated = (
         (learning_plan.get("learner_intent") in {"hint", "practice", "feedback"} or task in {"hint", "practice", "feedback"})
         and ("正确答案" in output_text or "标准答案" in output_text)
         and "除非" not in output_text
     )
     warnings: List[str] = []
-    if not evidence_count and not insufficiency_acknowledged:
-        warnings.append("输出没有可用图谱证据支撑，应该说明当前图谱依据不足。")
+    if not evidence_count and output_text.strip() and not insufficiency_acknowledged:
+        warnings.append("未检索到可用图谱证据；该回答应被视为未由图谱验证。")
     if hint_policy_violated:
         warnings.append("练习/提示场景可能直接泄露完整答案。")
 
     is_safe = bool(output_text.strip()) and not hint_policy_violated
-    if not evidence_count:
-        is_safe = insufficiency_acknowledged
 
     return {
         "knowledge_support_ratio": round(min(1.0, support_ratio), 3),
-        "unsupported_concept_rate": 0.0 if evidence_count else 1.0,
+        "unsupported_concept_rate": 0.0 if evidence_count else (0.5 if output_text.strip() else 1.0),
         "learning_goal_alignment": 1.0 if output_text.strip() else 0.0,
         "difficulty_match": "appropriate",
         "hint_policy_violated": hint_policy_violated,
@@ -379,8 +507,8 @@ def build_kg_grounded_exercise(
 
 def _normalize_evidence_item(item: Dict[str, Any], *, index: int, default_source: str) -> Dict[str, Any]:
     metadata = dict(item.get("metadata") or {})
-    content = _node_content(item)
-    label = _node_label(item)
+    content = expand_formula_references(_node_content(item))
+    label = expand_formula_references(_node_label(item), display=False)
     return {
         "index": item.get("index") or index,
         "id": str(item.get("id") or item.get("node_id") or metadata.get("id") or label or f"evidence_{index}"),

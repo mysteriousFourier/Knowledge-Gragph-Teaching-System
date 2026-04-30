@@ -35,6 +35,8 @@ from vector_backend_bridge import (
     get_graph_schema,
     import_graph_payload,
     import_graphml_payload,
+    normalize_frontend_node,
+    normalize_frontend_relation,
     search_nodes as backend_search_nodes,
 )
 from structured_sync import TEACHER_PACKAGE_PATH, build_teacher_package, review_search, scan_structured_sources
@@ -360,7 +362,7 @@ async def get_node(node_id: str):
         result = await call_mcp_tool("get_node", {"node_id": node_id})
         return {
             "success": True,
-            "node": result
+            "node": normalize_frontend_node(result) if isinstance(result, dict) else result
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取节点失败: {str(e)}")
@@ -495,9 +497,13 @@ async def get_relations(node_id: Optional[str] = None, relation_type: Optional[s
             "get_relations",
             {"node_id": node_id, "relation_type": relation_type},
         )
+        relation_items = result.get("relations") if isinstance(result, dict) else result
         return {
             "success": True,
-            "relations": result
+            "relations": [
+                normalize_frontend_relation(item) if isinstance(item, dict) else item
+                for item in (relation_items if isinstance(relation_items, list) else [])
+            ]
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取关系失败: {str(e)}")

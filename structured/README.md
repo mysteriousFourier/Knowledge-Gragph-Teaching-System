@@ -1,15 +1,31 @@
-# Structured Data Module
+# 结构化数据
 
-`structured/` 存放可被后台维护 API 扫描的结构化教材数据，包括章节切片、公式库和表格库。
+`structured/` 保存适合公开的结构化课程材料、公式库和表格库。教育 API 和维护 API 会读取这些文件，用于授课文案、题库、问答和知识图谱详情。
 
-## 当前内容
+## 关键文件
 
-- `chapter6_001.json` 到 `chapter6_022.json`
-- `formula_library.json`
-- `table_library.json`
+| 文件 | 用途 |
+| --- | --- |
+| `formula_library.json` | 公式编号、LaTeX、说明和来源上下文 |
+| `table_library.json` | 表格编号、标题和结构化内容 |
+| 章节结构化文件 | 课程原文、章节标题和知识点 |
 
-这些文件可通过维护 API 的 `POST /api/maintenance/scan-structured` 同步为知识图谱节点和关系。
+## 公式引用
 
-## 详细文档
+推荐使用可解析的公式引用：
 
-完整说明见 [docs/modules/data-assets.md](../docs/modules/data-assets.md)。
+```text
+[[FORMULA:6.35]]
+[[SEE_FORMULA:6.35]]
+Equation 6.35
+```
+
+后端会尝试从 `formula_library.json` 展开原公式，再交给前端渲染 LaTeX。
+
+## 维护规则
+
+- 知识原文优先保留英文，降低翻译带来的概念偏差。
+- 不提交未公开论文、个人笔记或临时参考说明。
+- 新增字段后，同步维护 API、教育 API 和文档。
+
+更多细节见 [数据资产模块文档](../docs/modules/data-assets.md)。

@@ -21,6 +21,8 @@ let exerciseProgress = 0;
 let exerciseHistory = [];
 let currentAnswer = null;
 let currentExerciseChapterId = '';
+let exerciseSelections = {};
+let exerciseResults = {};
 
 
 let qaHistory = [];
@@ -710,6 +712,7 @@ async function loadExercises() {
     const selectedId = resolvePracticeChapterId();
     const exerciseContent = document.getElementById('exercise-content');
     const toolbar = document.getElementById('exercise-toolbar');
+    const desiredExerciseCount = 5;
 
     if (!selectedId) {
         showToast('请先选择练习章节', 'warning');
@@ -719,6 +722,8 @@ async function loadExercises() {
     currentAnswer = null;
     currentExerciseIndex = 0;
     currentExerciseChapterId = selectedId;
+    exerciseSelections = {};
+    exerciseResults = {};
 
     if (exerciseContent) {
         exerciseContent.innerHTML = '<p class="loading">正在加载练习题...</p>';
@@ -737,29 +742,38 @@ async function loadExercises() {
 
         if (chapterData && chapterData.success && chapterData.chapter) {
             const chapter = chapterData.chapter;
+            const approvedBank = normalizeExerciseBank(chapter.approved_exercise_bank || []);
             const cachedBank = normalizeExerciseBank(chapter.exercise_bank || chapter.exercises || chapter);
 
-            if (cachedBank.length > 0) {
-                exerciseBank = cachedBank;
+            if (approvedBank.length >= desiredExerciseCount) {
+                exerciseBank = approvedBank;
                 currentExercise = exerciseBank[currentExerciseIndex];
                 if (!currentExercise) throw new Error('题库为空');
                 displayExercise(currentExercise);
-                showToast(`已加载题库（${exerciseBank.length} 题）`, 'info');
+                showToast(`已加载正式题库（${exerciseBank.length} 题）`, 'info');
             } else {
                 
                 const exerciseData = await callAPI('/api/student/generate-exercises', 'POST', {
                     chapter_id: selectedId,
                     chapter_title: chapter.title,
                     chapter_content: chapter.content,
-                    count: 5
+                    count: desiredExerciseCount,
+                    force_regenerate: cachedBank.length > 0 && cachedBank.length < desiredExerciseCount
                 });
 
                 if (exerciseData.success) {
-                    exerciseBank = normalizeExerciseBank(exerciseData.exercise_bank || exerciseData.exercises || exerciseData.exercise || exerciseData);
+                    const generatedApprovedBank = normalizeExerciseBank(exerciseData.approved_exercise_bank || []);
+                    exerciseBank = exerciseData.approved && generatedApprovedBank.length
+                        ? generatedApprovedBank
+                        : normalizeExerciseBank(exerciseData.exercise_bank || exerciseData.exercises || exerciseData.exercise || exerciseData);
+                    if (!exerciseBank.length) {
+                        throw new Error(`题库数量不足：${exerciseBank.length} / ${desiredExerciseCount}`);
+                    }
                     currentExercise = exerciseBank[currentExerciseIndex] || null;
                     if (!currentExercise) throw new Error('题库为空');
                     displayExercise(currentExercise);
-                    showToast(exerciseData.cached ? '已从题库加载' : `题库已预创建（${exerciseBank.length || 1} 题）`, 'success');
+                    const reviewText = exerciseData.review_pending ? '（待教师审核）' : '';
+                    showToast(exerciseData.cached ? `已从题库加载${reviewText}` : `题库已预创建${reviewText}（${exerciseBank.length || 1} 题）`, 'success');
                 } else {
                     throw new Error(exerciseData.error || '鐢熸垚澶辫触');
                 }
@@ -767,11 +781,18 @@ async function loadExercises() {
         } else {
             const exerciseData = await callAPI('/api/student/exercises', 'GET', { chapter_id: selectedId });
             if (exerciseData.success) {
-                exerciseBank = normalizeExerciseBank(exerciseData.exercise_bank || exerciseData.exercises || exerciseData.exercise || exerciseData);
+                const apiApprovedBank = normalizeExerciseBank(exerciseData.approved_exercise_bank || []);
+                exerciseBank = exerciseData.approved && apiApprovedBank.length
+                    ? apiApprovedBank
+                    : normalizeExerciseBank(exerciseData.exercise_bank || exerciseData.exercises || exerciseData.exercise || exerciseData);
+                if (!exerciseBank.length) {
+                    throw new Error(`题库数量不足：${exerciseBank.length} / ${desiredExerciseCount}`);
+                }
                 currentExercise = exerciseBank[currentExerciseIndex] || null;
                 if (!currentExercise) throw new Error('题库为空');
                 displayExercise(currentExercise);
-                showToast(exerciseData.cached ? '已从题库加载' : `题库已预创建（${exerciseBank.length || 1} 题）`, 'success');
+                const reviewText = exerciseData.review_pending ? '（待教师审核）' : '';
+                showToast(exerciseData.cached ? `已从题库加载${reviewText}` : `题库已预创建${reviewText}（${exerciseBank.length || 1} 题）`, 'success');
             } else {
                 throw new Error(exerciseData.error || '加载题库失败');
             }
@@ -816,12 +837,46 @@ function normalizeExerciseBank(payload) {
 function isUsableExercise(item) {
     if (!item || !item.question) return false;
     const options = Array.isArray(item.options) ? item.options : [];
+    if (options.length !== 4) return false;
     const text = [
         item.id,
         item.question,
         options.map(getOptionText).join(' ')
     ].join(' ').toLowerCase();
-    const blocked = ['sample', '示例', '测试', '选项一', '选项二', '选项三', '选项四', 'kg_gap', '当前图谱是否有足够证据'];
+    const blocked = [
+        'sample',
+        '示例',
+        '测试',
+        '选项一',
+        '选项二',
+        '选项三',
+        '选项四',
+        'learningplan',
+        'graph evidence',
+        'current evidence',
+        'knowledge graph constraint',
+        '知识图谱约束',
+        '图谱证据',
+        '当前证据',
+        '当前图谱依据不足',
+        'which statement is directly stated in the material',
+        'which option is correct',
+        'what is this',
+        'what is the key point about',
+        'what does the source say about',
+        'source passage',
+        'see_formula',
+        'see_table',
+        '课堂导入',
+        '授课文案',
+        '教学目标',
+        '启发提问',
+        '教学要点',
+        '小组讨论',
+        '课后思考',
+        'kg_gap',
+        '当前图谱是否有足够证据'
+    ];
     return !blocked.some(marker => text.includes(marker.toLowerCase()));
 }
 
@@ -838,6 +893,44 @@ function getOptionText(option) {
         return String(option.text || option.content || option.label || option.value || '').trim();
     }
     return String(option || '').trim();
+}
+
+function getExerciseKey(exercise, index) {
+    const position = Number.isInteger(index) ? index : currentExerciseIndex;
+    return String((exercise && exercise.id) || `exercise_${position}`);
+}
+
+function isMostlyEnglish(text) {
+    const value = String(text || '');
+    const latin = (value.match(/[A-Za-z]/g) || []).length;
+    const cjk = (value.match(/[\u4e00-\u9fff]/g) || []).length;
+    return latin > Math.max(12, cjk * 2);
+}
+
+function compactPracticeText(text, charLimit, wordLimit) {
+    let value = String(text || '').replace(/\s+/g, ' ').trim();
+    value = value.replace(/^[A-D][\s.、)）:：-]+/i, '').trim();
+    if (!value) return '';
+    if (containsLatexMath(value)) return value;
+
+    if (isMostlyEnglish(value)) {
+        const words = value.split(/\s+/);
+        if (words.length > wordLimit) {
+            value = words.slice(0, wordLimit).join(' ').replace(/[,.，。;；:：]+$/, '') + '...';
+        }
+    } else if (value.length > charLimit) {
+        value = value.slice(0, charLimit).replace(/[,.，。;；:：]+$/, '') + '...';
+    }
+
+    return value;
+}
+
+function containsLatexMath(text) {
+    return /\$\$|\\\[|\\\(|\\begin\{|\\frac|\\sum|\\prod|\\bar|\\overline|\\sigma|\\beta|\\delta|\\Delta|\\left|\\right|\$[^$\n]+\$/.test(String(text || ''));
+}
+
+function getOptionDisplayText(option) {
+    return compactPracticeText(getOptionText(option), 420, 72);
 }
 
 function getOptionAnswer(option, index) {
@@ -865,30 +958,45 @@ function displayExercise(exercise) {
     if (exerciseContent && exercise) {
         const options = getExerciseOptions(exercise);
         const hasOptions = options.length > 0;
+        const exerciseKey = getExerciseKey(exercise);
+        const savedAnswer = exerciseSelections[exerciseKey] || '';
+        const result = exerciseResults[exerciseKey] || null;
+        const correctAnswer = String((result && result.correctAnswer) || exercise.correct_answer || exercise.answer || '').trim().toUpperCase();
+        const questionText = compactPracticeText(exercise.question || '题目为空', 260, 52);
         let optionsHtml = '';
         if (hasOptions) {
             optionsHtml = options.map((opt, index) => {
                 const answer = getOptionAnswer(opt, index);
-                return `<button type="button" class="exercise-option" data-answer="${escapeHtml(answer)}">
+                const selected = answer === savedAnswer;
+                const classes = ['exercise-option'];
+                if (selected) classes.push('selected');
+                if ((result && result.revealed) || result) {
+                    if (correctAnswer && answer === correctAnswer) classes.push('correct-choice');
+                    if (selected && correctAnswer && answer !== correctAnswer) classes.push('incorrect-choice');
+                }
+                const displayText = getOptionDisplayText(opt);
+                const fullText = stripOptionPrefix(opt);
+                return `<button type="button" class="${classes.join(' ')}" data-answer="${escapeHtml(answer)}" aria-pressed="${selected ? 'true' : 'false'}" title="${escapeHtml(fullText)}">
                     <span class="exercise-option-key">${escapeHtml(answer)}</span>
-                    <span class="exercise-option-text markdown-inline">${renderRichInline(stripOptionPrefix(opt))}</span>
+                    <span class="exercise-option-text markdown-inline latex-auto">${renderRichInline(displayText)}</span>
                 </button>`;
             }).join('');
         }
 
         exerciseContent.innerHTML = `
             <div class="exercise-meta">第 ${currentExerciseIndex + 1} / ${Math.max(1, exerciseBank.length || 1)} 题</div>
-            <div class="exercise-question markdown-body">${renderRichText(exercise.question || '题目为空')}</div>
+            <div class="exercise-question markdown-body" title="${escapeHtml(exercise.question || '')}">${renderRichText(questionText)}</div>
             ${hasOptions ? `
                 <div class="exercise-options">
                     ${optionsHtml}
                 </div>
-                <input type="hidden" id="exercise-answer-input" value="">
-                <div class="selected-answer-hint">请选择一个选项</div>
+                <input type="hidden" id="exercise-answer-input" value="${escapeHtml(savedAnswer)}">
+                <div class="selected-answer-hint">${savedAnswer ? `已选择：${escapeHtml(savedAnswer)}` : '请选择一个选项'}</div>
             ` : `
                 <textarea id="exercise-answer-input" class="exercise-answer-text" rows="4" placeholder="请输入答案"></textarea>
                 <div class="selected-answer-hint">请输入答案后提交</div>
             `}
+            ${renderExerciseFeedback(result)}
         `;
 
         exerciseContent.querySelectorAll('.exercise-option').forEach(button => {
@@ -899,24 +1007,71 @@ function displayExercise(exercise) {
         if (toolbar) {
             toolbar.classList.remove('hidden');
         }
+        updateExerciseToolbarState();
         queueLatexRender(exerciseContent);
     } else if (exerciseContent) {
         exerciseContent.innerHTML = '<p class="placeholder">请选择章节加载练习题</p>';
     }
 }
 
+function renderExerciseFeedback(result) {
+    if (!result) return '';
+
+    const stateClass = result.revealed || result.isCorrect ? 'correct' : 'incorrect';
+    const title = result.revealed ? '参考答案' : (result.isCorrect ? '回答正确' : '再检查一下');
+    const answerLine = result.correctAnswer ? `<div class="exercise-answer-state correct"><strong>正确答案：${renderRichInline(result.correctAnswer)}</strong></div>` : '';
+    const yourAnswer = result.userAnswer ? `<div class="exercise-answer-state ${stateClass}">你的答案：${renderRichInline(result.userAnswer)}</div>` : '';
+    const feedback = result.feedback ? `<div class="exercise-result-text markdown-body">${renderRichText(result.feedback)}</div>` : '';
+    const explanation = result.explanation ? `
+        <div class="exercise-explanation">
+            <strong>解析：</strong>
+            <div class="markdown-body">${renderRichText(result.explanation)}</div>
+        </div>
+    ` : '';
+
+    return `
+        <div class="exercise-feedback ${stateClass}">
+            <div class="exercise-result-title"><strong>${title}</strong></div>
+            ${yourAnswer}
+            ${answerLine}
+            ${feedback}
+            ${explanation}
+        </div>
+    `;
+}
+
 function selectExerciseOption(answer) {
+    if (currentExercise) {
+        const existingResult = exerciseResults[getExerciseKey(currentExercise)];
+        if (existingResult && existingResult.revealed) {
+            showToast('已查看答案，本题选择已锁定', 'info');
+            return;
+        }
+    }
     currentAnswer = String(answer || '').trim().toUpperCase();
+    if (currentExercise) {
+        const key = getExerciseKey(currentExercise);
+        exerciseSelections[key] = currentAnswer;
+        if (exerciseResults[key] && !exerciseResults[key].revealed) {
+            delete exerciseResults[key];
+        }
+    }
     const answerInput = document.getElementById('exercise-answer-input');
     if (answerInput) {
         answerInput.value = currentAnswer;
     }
     document.querySelectorAll('#exercise-content .exercise-option').forEach(button => {
         button.classList.toggle('selected', button.dataset.answer === currentAnswer);
+        button.classList.remove('correct-choice', 'incorrect-choice');
+        button.setAttribute('aria-pressed', button.dataset.answer === currentAnswer ? 'true' : 'false');
     });
     const hint = document.querySelector('#exercise-content .selected-answer-hint');
     if (hint) {
         hint.textContent = `已选择：${currentAnswer}`;
+    }
+    const feedback = document.querySelector('#exercise-content .exercise-feedback');
+    if (feedback) {
+        feedback.remove();
     }
 }
 
@@ -957,6 +1112,17 @@ async function checkAnswer(userAnswer) {
         if (result.success) {
             const isCorrect = result.is_correct;
             const score = result.correctness_score || 0;
+            const exerciseKey = getExerciseKey(currentExercise);
+            exerciseSelections[exerciseKey] = String(userAnswer || '').trim().toUpperCase();
+            exerciseResults[exerciseKey] = {
+                userAnswer: String(userAnswer || '').trim().toUpperCase(),
+                isCorrect,
+                score,
+                feedback: result.feedback || '',
+                explanation: result.explanation || currentExercise.explanation || '',
+                correctAnswer: String(result.correct_answer || currentExercise.correct_answer || currentExercise.answer || '').trim().toUpperCase(),
+                revealed: false
+            };
 
             // 鏇存柊缁冧範鍘嗗彶
             exerciseHistory.push({
@@ -975,26 +1141,9 @@ async function checkAnswer(userAnswer) {
                 showToast('本题练习完成', 'success');
             } else {
                 showToast(result.feedback || 'Incorrect answer', 'error');
-
-                
-                if (result.explanation) {
-                    const answerContent = document.getElementById('exercise-content');
-                    if (answerContent) {
-                        answerContent.innerHTML = `
-                            <div class="exercise-question markdown-body">${renderRichText(currentExercise.question || '')}</div>
-                            <p class="exercise-answer-state ${isCorrect ? 'correct' : 'incorrect'}">
-                                你的答案：${renderRichInline(userAnswer)}
-                            </p>
-                            <p class="exercise-result-title"><strong>解析：</strong></p>
-                            <div class="exercise-result-text markdown-body">${renderRichText(result.explanation)}</div>
-                            ${result.correct_answer ? `<p class="exercise-answer-state correct"><strong>正确答案：${renderRichInline(result.correct_answer)}</strong></p>` : ''}
-                        `;
-                        queueLatexRender(answerContent);
-                    }
-                }
-
                 updateExerciseProgress(0);
             }
+            displayExercise(currentExercise);
         } else {
             showToast('判断答案失败', 'error');
         }
@@ -1010,49 +1159,54 @@ function showAnswer() {
         return;
     }
 
-    const answerContent = document.getElementById('exercise-content');
+    const key = getExerciseKey(currentExercise);
+    const correctAnswer = String(currentExercise.correct_answer || currentExercise.answer || '').trim().toUpperCase();
+    exerciseResults[key] = {
+        userAnswer: exerciseSelections[key] || currentAnswer || '',
+        isCorrect: Boolean(exerciseSelections[key] && correctAnswer && exerciseSelections[key] === correctAnswer),
+        feedback: '',
+        explanation: currentExercise.explanation || '',
+        correctAnswer: correctAnswer || '暂无',
+        revealed: true
+    };
+    displayExercise(currentExercise);
+}
 
-    if (answerContent) {
-        const options = getExerciseOptions(currentExercise);
-        const correctAnswer = currentExercise.correct_answer || currentExercise.answer || '暂无';
-        answerContent.innerHTML = `
-            <div class="exercise-question markdown-body">${renderRichText(currentExercise.question || '')}</div>
-            <p class="exercise-answer-state correct">
-                <strong>正确答案：${renderRichInline(correctAnswer)}</strong>
-            </p>
-            ${options.length > 0 ? `
-                <div class="exercise-options readonly">
-                    ${options.map((opt, index) => {
-                        const answer = getOptionAnswer(opt, index);
-                        return `<div class="exercise-option ${answer === String(correctAnswer).trim().toUpperCase() ? 'selected' : ''}">
-                            <span class="exercise-option-key">${escapeHtml(answer)}</span>
-                            <span class="exercise-option-text markdown-inline">${renderRichInline(stripOptionPrefix(opt))}</span>
-                        </div>`;
-                    }).join('')}
-                </div>
-            ` : ''}
-            ${currentExercise.explanation ? `
-                <div class="exercise-explanation">
-                    <strong>解析：</strong>
-                    <div class="markdown-body">${renderRichText(currentExercise.explanation)}</div>
-                </div>
-            ` : ''}
-        `;
-        queueLatexRender(answerContent);
+function previousExercise() {
+    if (exerciseBank.length > 0 && currentExerciseIndex > 0) {
+        currentExerciseIndex -= 1;
+        currentExercise = exerciseBank[currentExerciseIndex];
+        currentAnswer = exerciseSelections[getExerciseKey(currentExercise)] || null;
+        displayExercise(currentExercise);
+        showToast(`已切换到第 ${currentExerciseIndex + 1} 题`, 'info');
+        return;
     }
+
+    showToast('已经是第一题', 'info');
 }
 
 function nextExercise() {
     if (exerciseBank.length > 0 && currentExerciseIndex < exerciseBank.length - 1) {
         currentExerciseIndex += 1;
         currentExercise = exerciseBank[currentExerciseIndex];
-        currentAnswer = null;
+        currentAnswer = exerciseSelections[getExerciseKey(currentExercise)] || null;
         displayExercise(currentExercise);
         showToast(`已切换到第 ${currentExerciseIndex + 1} 题`, 'info');
         return;
     }
 
     showToast('题库已到最后一题', 'info');
+}
+
+function updateExerciseToolbarState() {
+    const prevButton = document.getElementById('btn-prev-exercise');
+    const nextButton = document.getElementById('btn-next-exercise');
+    if (prevButton) {
+        prevButton.disabled = currentExerciseIndex <= 0;
+    }
+    if (nextButton) {
+        nextButton.disabled = !exerciseBank.length || currentExerciseIndex >= exerciseBank.length - 1;
+    }
 }
 
 function updateExerciseProgress(progress) {

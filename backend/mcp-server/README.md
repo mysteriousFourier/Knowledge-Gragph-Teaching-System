@@ -1,17 +1,17 @@
-# MCP Server Module
+# MCP 服务
 
-`backend/mcp-server/` 提供知识图谱 MCP 工具桥接。项目主业务路径优先使用教育 API、维护 API 和 `backend/vector_index_system/`，本模块主要用于外部 MCP 客户端接入和兼容工具调用。
+`backend/mcp-server/` 是面向 MCP 客户端的知识图谱工具桥接层。它允许外部工具通过统一接口查询图谱节点、关系和学习路径。
 
-## 核心能力
+## 用途
 
-- 暴露图谱读取、搜索、更新和路径查询工具。
-- 支持 GraphML 解析和批量导入。
-- 提供本地 MCP 数据目录和配置示例。
+- 为支持 MCP 的客户端提供图谱查询能力。
+- 复用本项目已有图谱数据，而不是维护另一份数据。
+- 在问答、解释和调试场景中提供结构化上下文。
 
-## 数据注意事项
+## 数据边界
 
-`data/` 下的数据库和运行期文件默认不提交。公开分发前，应确认示例数据和第三方来源许可证。
+- 本地数据库和运行时缓存不提交。
+- API Key 不由 MCP 服务保存。
+- 若需要新增工具，应在 `docs/modules/mcp-server.md` 中记录工具名、输入、输出和失败行为。
 
-## 详细文档
-
-完整说明见 [docs/modules/mcp-server.md](../../docs/modules/mcp-server.md)。
+更多细节见 [MCP 服务模块文档](../../docs/modules/mcp-server.md)。

@@ -60,6 +60,8 @@ let savedChapterListRequestToken = 0;
 let lectureChapterListRequestToken = 0;
 let chapterListContentRequestToken = 0;
 let chapterCachePromise = null;
+let exerciseReviewChapterListRequestToken = 0;
+let teacherExerciseReviewBank = [];
 
 // ==================== API閰嶇疆 ====================
 
@@ -694,21 +696,283 @@ function showPage(pageId) {
 function switchMode(mode) {
     const preparePanel = document.getElementById('prepare-mode-panel');
     const lecturePanel = document.getElementById('lecture-mode-panel');
+    const exerciseReviewPanel = document.getElementById('exercise-review-mode-panel');
     const prepareBtn = document.getElementById('btn-prepare-mode');
     const lectureBtn = document.getElementById('btn-lecture-mode');
+    const exerciseReviewBtn = document.getElementById('btn-exercise-review-mode');
 
     if (mode === 'prepare') {
         if (preparePanel) preparePanel.classList.add('active');
         if (lecturePanel) lecturePanel.classList.remove('active');
+        if (exerciseReviewPanel) exerciseReviewPanel.classList.remove('active');
         if (prepareBtn) prepareBtn.classList.add('active');
         if (lectureBtn) lectureBtn.classList.remove('active');
+        if (exerciseReviewBtn) exerciseReviewBtn.classList.remove('active');
         showToast('已切换到备课模式');
     } else if (mode === 'lecture') {
         if (preparePanel) preparePanel.classList.remove('active');
         if (lecturePanel) lecturePanel.classList.add('active');
+        if (exerciseReviewPanel) exerciseReviewPanel.classList.remove('active');
         if (prepareBtn) prepareBtn.classList.remove('active');
         if (lectureBtn) lectureBtn.classList.add('active');
+        if (exerciseReviewBtn) exerciseReviewBtn.classList.remove('active');
         showToast('已切换到授课模式');
+    } else if (mode === 'exercise-review') {
+        if (preparePanel) preparePanel.classList.remove('active');
+        if (lecturePanel) lecturePanel.classList.remove('active');
+        if (exerciseReviewPanel) exerciseReviewPanel.classList.add('active');
+        if (prepareBtn) prepareBtn.classList.remove('active');
+        if (lectureBtn) lectureBtn.classList.remove('active');
+        if (exerciseReviewBtn) exerciseReviewBtn.classList.add('active');
+        loadTeacherExerciseChapterList();
+        showToast('已切换到题库反馈');
+    }
+}
+
+// ==================== 题库反馈 ====================
+
+function appendExerciseReviewChapterOption(select, chapter, source) {
+    if (!select || !chapter || !chapter.id) return;
+    const title = chapter.title || chapter.id;
+    for (let i = 0; i < select.options.length; i++) {
+        if (select.options[i].value === chapter.id || select.options[i].textContent === title) {
+            return;
+        }
+    }
+    const option = document.createElement('option');
+    option.value = chapter.id;
+    option.textContent = title;
+    option.dataset.source = source || '';
+    select.appendChild(option);
+}
+
+function loadTeacherExerciseChapterList() {
+    const requestToken = ++exerciseReviewChapterListRequestToken;
+    const select = document.getElementById('exercise-review-chapter-select');
+    if (!select) return;
+    const currentValue = select.value;
+    select.innerHTML = '<option value="">-- 请选择章节 --</option>';
+
+    getLocalChapterEntries().forEach(function(entry) {
+        appendExerciseReviewChapterOption(select, entry, entry.source || 'local');
+    });
+
+    callAPI('/list-chapters', 'GET').then(function(resp) {
+        if (requestToken !== exerciseReviewChapterListRequestToken) return;
+        if (resp.success && Array.isArray(resp.chapters)) {
+            resp.chapters.forEach(function(chapter) {
+                appendExerciseReviewChapterOption(select, chapter, 'api');
+            });
+        }
+        if (currentValue) select.value = currentValue;
+    }).catch(function() {});
+
+    loadChapterCache().then(function(cachePayload) {
+        if (requestToken !== exerciseReviewChapterListRequestToken) return;
+        getCachedChapterRecords(cachePayload).forEach(function(chapter) {
+            appendExerciseReviewChapterOption(select, chapter, 'cache');
+        });
+        if (currentValue) select.value = currentValue;
+    }).catch(function() {});
+}
+
+function normalizeTeacherExerciseBank(payload) {
+    if (!payload) return [];
+    if (Array.isArray(payload.exercise_bank)) return payload.exercise_bank;
+    if (Array.isArray(payload.exercises)) return payload.exercises;
+    if (payload.exercise && typeof payload.exercise === 'object') return [payload.exercise];
+    return [];
+}
+
+function updateExerciseReviewSummary(payload) {
+    const summary = document.getElementById('exercise-review-summary');
+    if (!summary) return;
+    const bank = normalizeTeacherExerciseBank(payload);
+    const feedbackSummary = (payload && payload.feedback_summary) || {};
+    const up = Number(feedbackSummary.up || 0);
+    const down = Number(feedbackSummary.down || 0);
+    const optionUp = Number(feedbackSummary.option_up || 0);
+    const optionDown = Number(feedbackSummary.option_down || 0);
+    const approvedCount = normalizeTeacherExerciseBank({ exercise_bank: payload && payload.approved_exercise_bank }).length;
+    summary.textContent = `当前候选题 ${bank.length} 题，正式题库 ${approvedCount} 题，整题点赞 ${up}，整题点踩 ${down}，选项点赞 ${optionUp}，选项点踩 ${optionDown}。整题点赞会加入正式题库；整题点踩会从候选题库删除，但反馈会保留用于后续生成。`;
+}
+
+async function loadTeacherExerciseBank(refresh) {
+    const select = document.getElementById('exercise-review-chapter-select');
+    const container = document.getElementById('teacher-exercise-bank');
+    const chapterId = select ? select.value : '';
+    if (!chapterId) {
+        if (container) container.innerHTML = '<p class="placeholder">请选择章节加载题库。</p>';
+        showToast('请先选择章节', 'warning');
+        return;
+    }
+    if (container) {
+        container.innerHTML = '<p class="loading">正在加载题库...</p>';
+    }
+    try {
+        const endpoint = `/teacher/exercise-bank?chapter_id=${encodeURIComponent(chapterId)}${refresh ? '&refresh=true' : ''}`;
+        const data = await callAPI(endpoint, 'GET');
+        if (!data.success) throw new Error(data.error || data.detail || '加载题库失败');
+        renderTeacherExerciseBank(data);
+        showToast(data.cached ? '已加载题库' : '题库已更新', 'success');
+    } catch (error) {
+        console.error('加载教师题库失败:', error);
+        if (container) container.innerHTML = '<p class="placeholder">题库加载失败，请检查后端是否已重启。</p>';
+        showToast('题库加载失败', 'error');
+    }
+}
+
+async function regenerateTeacherExerciseBank() {
+    const select = document.getElementById('exercise-review-chapter-select');
+    const container = document.getElementById('teacher-exercise-bank');
+    const chapterId = select ? select.value : '';
+    if (!chapterId) {
+        showToast('请先选择章节', 'warning');
+        return;
+    }
+    if (container) container.innerHTML = '<p class="loading">正在继续生成题库...</p>';
+    try {
+        const data = await callAPI('/teacher/regenerate-exercises', 'POST', {
+            chapter_id: chapterId,
+            count: 5,
+            force_regenerate: true
+        });
+        if (!data.success) throw new Error(data.error || data.detail || '继续生成失败');
+        renderTeacherExerciseBank(data);
+        showToast('已继续生成题库，点赞题目已保留，点踩题目已删除', 'success');
+    } catch (error) {
+        console.error('继续生成教师题库失败:', error);
+        if (container) container.innerHTML = '<p class="placeholder">继续生成失败，请稍后再试。</p>';
+        showToast('继续生成题库失败', 'error');
+    }
+}
+
+function renderTeacherExerciseBank(payload) {
+    const container = document.getElementById('teacher-exercise-bank');
+    if (!container) return;
+    const bank = normalizeTeacherExerciseBank(payload);
+    teacherExerciseReviewBank = bank;
+    updateExerciseReviewSummary(payload || {});
+
+    if (!bank.length) {
+        container.innerHTML = '<p class="placeholder">当前章节还没有可用题目。</p>';
+        return;
+    }
+
+    container.innerHTML = bank.map(function(exercise, index) {
+        const rating = String(exercise.teacher_rating || '').toLowerCase();
+        const correctAnswer = String(exercise.correct_answer || exercise.answer || '').trim().toUpperCase();
+        const options = Array.isArray(exercise.options) ? exercise.options : [];
+        const optionsHtml = options.map(function(option, optionIndex) {
+            const optionText = String(option || '');
+            const optionKey = optionText.match(/^\s*([A-D])[\.\)]\s*/i);
+            const answerKey = optionKey ? optionKey[1].toUpperCase() : String.fromCharCode(65 + optionIndex);
+            const feedback = (exercise.option_feedback && exercise.option_feedback[answerKey]) || {};
+            const optionRating = String(feedback.rating || '').toLowerCase();
+            const correctClass = correctAnswer && answerKey === correctAnswer ? ' correct' : '';
+            return `
+                <li class="exercise-review-option${correctClass} ${optionRating ? `rated-${optionRating}` : ''}">
+                    <div class="exercise-review-option-text markdown-inline latex-auto">${renderRichInline(optionText)}</div>
+                    <div class="exercise-review-option-actions">
+                        <button class="btn btn-small exercise-review-vote ${optionRating === 'up' ? 'active' : ''}" onclick="rateTeacherOption(${index}, '${answerKey}', 'up')">好选项</button>
+                        <button class="btn btn-small exercise-review-vote ${optionRating === 'down' ? 'active danger' : ''}" onclick="rateTeacherOption(${index}, '${answerKey}', 'down')">坏选项</button>
+                    </div>
+                </li>
+            `;
+        }).join('');
+        const ratingText = rating === 'up' ? '已点赞' : (rating === 'down' ? '已点踩' : '未评价');
+        return `
+            <article class="exercise-review-card ${rating ? `rated-${rating}` : ''}">
+                <div class="exercise-review-card-header">
+                    <span class="exercise-review-index">第 ${index + 1} 题</span>
+                    <span class="exercise-review-rating">${ratingText}</span>
+                </div>
+                <div class="exercise-review-question markdown-body">${renderRichText(exercise.question || '题目为空')}</div>
+                <ol class="exercise-review-options">${optionsHtml}</ol>
+                <div class="exercise-review-answer">正确答案：${escapeHtml(correctAnswer || '未标注')}</div>
+                ${exercise.explanation ? `<div class="exercise-review-explanation markdown-body">${renderRichText(exercise.explanation)}</div>` : ''}
+                <div class="exercise-review-actions">
+                    <button class="btn btn-small exercise-review-vote ${rating === 'up' ? 'active' : ''}" onclick="rateTeacherExercise(${index}, 'up')">点赞</button>
+                    <button class="btn btn-small exercise-review-vote ${rating === 'down' ? 'active danger' : ''}" onclick="rateTeacherExercise(${index}, 'down')">点踩</button>
+                </div>
+            </article>
+        `;
+    }).join('');
+    queueLatexRender(container);
+    if (typeof window.renderLatexIn === 'function') {
+        setTimeout(function() {
+            window.renderLatexIn(container);
+        }, 30);
+    }
+}
+
+async function rateTeacherExercise(index, rating) {
+    const select = document.getElementById('exercise-review-chapter-select');
+    const chapterId = select ? select.value : '';
+    const exercise = teacherExerciseReviewBank[index];
+    if (!chapterId || !exercise) {
+        showToast('题目状态已过期，请重新加载题库', 'warning');
+        return;
+    }
+    const currentRating = String(exercise.teacher_rating || '').toLowerCase();
+    const nextRating = currentRating === rating ? 'clear' : rating;
+    try {
+        const data = await callAPI('/teacher/exercise-feedback', 'POST', {
+            chapter_id: chapterId,
+            exercise_id: exercise.feedback_key || exercise.id || `exercise_${index + 1}`,
+            feedback_key: exercise.feedback_key || '',
+            rating: nextRating,
+            question: exercise.question || '',
+            options: exercise.options || [],
+            correct_answer: exercise.correct_answer || exercise.answer || ''
+        });
+        if (!data.success) throw new Error(data.error || data.detail || '保存反馈失败');
+        renderTeacherExerciseBank(data);
+        showToast(nextRating === 'clear' ? '已取消评价' : '题目反馈已保存', 'success');
+    } catch (error) {
+        console.error('保存题目反馈失败:', error);
+        showToast('保存题目反馈失败', 'error');
+    }
+}
+
+async function rateTeacherOption(index, optionKey, rating) {
+    const select = document.getElementById('exercise-review-chapter-select');
+    const chapterId = select ? select.value : '';
+    const exercise = teacherExerciseReviewBank[index];
+    if (!chapterId || !exercise) {
+        showToast('题目状态已过期，请重新加载题库', 'warning');
+        return;
+    }
+    const key = String(optionKey || '').trim().toUpperCase();
+    const optionFeedback = (exercise.option_feedback && exercise.option_feedback[key]) || {};
+    const currentRating = String(optionFeedback.rating || '').toLowerCase();
+    const nextRating = currentRating === rating ? 'clear' : rating;
+    const option = (exercise.options || []).find(function(item, optionIndex) {
+        const text = String(item || '');
+        const match = text.match(/^\s*([A-D])[\.\)]\s*/i);
+        const currentKey = match ? match[1].toUpperCase() : String.fromCharCode(65 + optionIndex);
+        return currentKey === key;
+    });
+    try {
+        const data = await callAPI('/teacher/exercise-feedback', 'POST', {
+            chapter_id: chapterId,
+            exercise_id: exercise.feedback_key || exercise.id || `exercise_${index + 1}`,
+            feedback_key: exercise.feedback_key || '',
+            rating: nextRating,
+            question: exercise.question || '',
+            scope: 'option',
+            option_key: key,
+            option_text: String(option || ''),
+            option_feedback_key: optionFeedback.feedback_key || '',
+            options: exercise.options || [],
+            correct_answer: exercise.correct_answer || exercise.answer || ''
+        });
+        if (!data.success) throw new Error(data.error || data.detail || '保存选项反馈失败');
+        renderTeacherExerciseBank(data);
+        showToast(nextRating === 'clear' ? '已取消选项评价' : '选项反馈已保存', 'success');
+    } catch (error) {
+        console.error('保存选项反馈失败:', error);
+        showToast('保存选项反馈失败', 'error');
     }
 }
 
@@ -1699,7 +1963,8 @@ function escapeJsString(text) {
 
 function cleanLatex(text) {
     if (!text) return '';
-    text = text.replace(/\[\[(?:TABLE|FORMULA|SEE_TABLE|SEE_FORMULA):[^\]]*\]\]/g, '');
+    text = text.replace(/\[\[(?:FORMULA|SEE_FORMULA):([^\]]+)\]\]/gi, 'Equation $1');
+    text = text.replace(/\[\[(?:TABLE|SEE_TABLE):([^\]]+)\]\]/gi, 'Table $1');
     text = text.replace(/\s{2,}/g, ' ').trim();
     return text;
 }

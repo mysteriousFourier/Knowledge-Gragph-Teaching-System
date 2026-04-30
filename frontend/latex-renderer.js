@@ -54,6 +54,8 @@
         "\\Rightarrow": "\u21d2"
     };
 
+    var bareLatexRegex = /\\(?:frac\s*\{[^{}]+\}\s*\{[^{}]+\}|sqrt\s*\{[^{}]+\}|(?:bar|overline|hat|vec|tilde|text|operatorname|mathbb|mathcal|mathbf|mathrm)\s*\{[^{}]+\}|(?:alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|rho|sigma|phi|omega|Gamma|Delta|Theta|Lambda|Pi|Sigma|Phi|Omega|partial|nabla|times|cdot|leq|geq|neq|approx|infty|sum|prod|int|rightarrow|Rightarrow)\b)(?:\s*[_^]\s*(?:\{[^{}]+\}|[A-Za-z0-9+\-]+))*/g;
+
     function canRender() {
         return typeof window.renderMathInElement === "function";
     }
@@ -61,6 +63,8 @@
     function normalizeLatexText(value) {
         return String(value == null ? "" : value)
             .replace(/\\\\([()[\]])/g, "\\$1")
+            .replace(/\\\\([A-Za-z]+)/g, "\\$1")
+            .replace(/\\\\([{}_^])/g, "\\$1")
             .replace(/\\\\begin\{/g, "\\begin{")
             .replace(/\\\\end\{/g, "\\end{");
     }
@@ -106,6 +110,26 @@
         node.textContent = simplifyLatex(token);
         node.title = token;
         return node;
+    }
+
+    function createKatexNode(token) {
+        if (window.katex && typeof window.katex.renderToString === "function") {
+            try {
+                var node = document.createElement("span");
+                node.innerHTML = window.katex.renderToString(token, {
+                    displayMode: false,
+                    throwOnError: false,
+                    strict: "ignore",
+                    trust: false
+                });
+                return node;
+            } catch (error) {
+                if (window.console && typeof window.console.warn === "function") {
+                    window.console.warn("Bare LaTeX render failed:", error);
+                }
+            }
+        }
+        return createFallbackNode(token);
     }
 
     function findMathParts(text) {
@@ -184,6 +208,57 @@
         });
     }
 
+    function renderBareLatexIn(root) {
+        var target = root || document.body;
+        if (!target || !document.createTreeWalker) {
+            return;
+        }
+
+        var walker = document.createTreeWalker(
+            target,
+            NodeFilter.SHOW_TEXT,
+            {
+                acceptNode: function (node) {
+                    if (!node.nodeValue || node.nodeValue.indexOf("\\") === -1) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+                    if (isIgnoredElement(node.parentElement)) {
+                        return NodeFilter.FILTER_REJECT;
+                    }
+                    bareLatexRegex.lastIndex = 0;
+                    return bareLatexRegex.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+                }
+            }
+        );
+
+        var textNodes = [];
+        var current;
+        while ((current = walker.nextNode())) {
+            textNodes.push(current);
+        }
+
+        textNodes.forEach(function (node) {
+            var text = normalizeLatexText(node.nodeValue);
+            bareLatexRegex.lastIndex = 0;
+            var fragment = document.createDocumentFragment();
+            var lastIndex = 0;
+            var match;
+            while ((match = bareLatexRegex.exec(text)) !== null) {
+                if (match.index > lastIndex) {
+                    fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+                }
+                fragment.appendChild(createKatexNode(match[0]));
+                lastIndex = match.index + match[0].length;
+            }
+            if (lastIndex < text.length) {
+                fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+            }
+            if (fragment.childNodes.length && node.parentNode) {
+                node.parentNode.replaceChild(fragment, node);
+            }
+        });
+    }
+
     function renderLatexIn(root) {
         var target = root || document.body;
         if (!target || rendering) {
@@ -218,8 +293,10 @@
                         "tex2jax_ignore"
                     ]
                 });
+                renderBareLatexIn(target);
             } else {
                 fallbackRenderLatexIn(target);
+                renderBareLatexIn(target);
             }
         } catch (error) {
             if (window.console && typeof window.console.warn === "function") {
@@ -271,8 +348,8 @@
         return Boolean(
             element.matches &&
             (
-                element.matches(".markdown-body, .markdown-inline, .latex-auto, .answer-box, .course-content, .lecture-content-display, .exercise-content, #exercise-content, #detail-content, #node-detail-content, .modal-content") ||
-                element.closest(".markdown-body, .markdown-inline, .latex-auto, .answer-box, .course-content, .lecture-content-display, .exercise-content, #exercise-content, #detail-content, #node-detail-content, .modal-content")
+                element.matches(".markdown-body, .markdown-inline, .latex-auto, .answer-box, .course-content, .lecture-content-display, .exercise-content, #exercise-content, #detail-content, #node-detail-content, .modal-content, .exercise-review-list, .exercise-review-card, .exercise-review-option, .exercise-review-option-text, .exercise-review-question, .exercise-review-explanation") ||
+                element.closest(".markdown-body, .markdown-inline, .latex-auto, .answer-box, .course-content, .lecture-content-display, .exercise-content, #exercise-content, #detail-content, #node-detail-content, .modal-content, .exercise-review-list, .exercise-review-card, .exercise-review-option, .exercise-review-option-text, .exercise-review-question, .exercise-review-explanation")
             )
         );
     }
@@ -282,14 +359,14 @@
         if (!element || isIgnoredElement(element)) {
             return null;
         }
-        if (element.matches(".markdown-body, .markdown-inline, .latex-auto, .answer-box, .course-content, .lecture-content-display, .exercise-content, #exercise-content, #detail-content, #node-detail-content, .modal-content")) {
+        if (element.matches(".markdown-body, .markdown-inline, .latex-auto, .answer-box, .course-content, .lecture-content-display, .exercise-content, #exercise-content, #detail-content, #node-detail-content, .modal-content, .exercise-review-list, .exercise-review-card, .exercise-review-option, .exercise-review-option-text, .exercise-review-question, .exercise-review-explanation")) {
             return element;
         }
-        var closest = element.closest(".markdown-body, .markdown-inline, .latex-auto, .answer-box, .course-content, .lecture-content-display, .exercise-content, #exercise-content, #detail-content, #node-detail-content, .modal-content");
+        var closest = element.closest(".markdown-body, .markdown-inline, .latex-auto, .answer-box, .course-content, .lecture-content-display, .exercise-content, #exercise-content, #detail-content, #node-detail-content, .modal-content, .exercise-review-list, .exercise-review-card, .exercise-review-option, .exercise-review-option-text, .exercise-review-question, .exercise-review-explanation");
         if (closest) {
             return closest;
         }
-        return element.querySelector(".markdown-body, .markdown-inline, .latex-auto, .answer-box, .course-content, .lecture-content-display, .exercise-content, #exercise-content, #detail-content, #node-detail-content, .modal-content");
+        return element.querySelector(".markdown-body, .markdown-inline, .latex-auto, .answer-box, .course-content, .lecture-content-display, .exercise-content, #exercise-content, #detail-content, #node-detail-content, .modal-content, .exercise-review-list, .exercise-review-card, .exercise-review-option, .exercise-review-option-text, .exercise-review-question, .exercise-review-explanation");
     }
 
     function addPendingRoot(nextRoot) {
