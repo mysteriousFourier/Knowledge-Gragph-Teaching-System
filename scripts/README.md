@@ -21,7 +21,7 @@ start.bat
 停止：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\stop_unlesspaper.ps1
+powershell -ExecutionPolicy Bypass -File stop.ps1
 ```
 
 更多细节见 [脚本模块文档](../docs/modules/scripts.md)。
