@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识图谱教学系统 - 教师端</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="graph-styles.css">
+    <link rel="stylesheet" href="new-styles.css">
+    <link rel="stylesheet" href="workspace-ambient.css?v=6">
+    <link rel="stylesheet" href="https://unpkg.com/katex@0.16.9/dist/katex.min.css">
+    <script src="https://unpkg.com/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+</head>
+<body class="workspace-ambient">
+    <canvas id="workspace-ambient-canvas" class="workspace-ambient-canvas" aria-hidden="true"></canvas>
+    <div id="login-page" class="page active">
+        <div class="login-container">
+            <h1>知识图谱教学系统</h1>
+            <p class="subtitle">教师登录</p>
+            <div class="login-form">
+                <input type="text" id="username" placeholder="用户名" class="input-field">
+                <input type="password" id="password" placeholder="密码" class="input-field">
+                <button onclick="login()" class="btn btn-primary">登录</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="teacher-page" class="page teacher-page">
+        <header class="header">
+            <div class="header-left">
+                <h1>知识图谱教学系统</h1>
+                <div class="mode-switch">
+                    <button id="btn-prepare-mode" onclick="switchMode('prepare')" class="mode-btn active">备课模式</button>
+                    <button id="btn-lecture-mode" onclick="switchMode('lecture')" class="mode-btn">授课模式</button>
+                </div>
+            </div>
+            <div class="header-right">
+                <span id="current-user">教师</span>
+                <button onclick="toggleSettingsWindow()" class="btn-icon qa-toggle" title="设置">⚙</button>
+                <button onclick="toggleQaWindow()" class="btn-icon qa-toggle" title="问答">💬</button>
+                <button onclick="logout()" class="btn btn-small">退出</button>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <div id="prepare-mode-panel" class="mode-panel active">
+                <div class="panel-section" style="display:flex; gap:20px;">
+                    <div class="panel-section" style="flex:1;">
+                        <h2>选择已保存章节</h2>
+                        <div class="chapter-selector" style="display:flex; gap:8px; align-items:center;">
+                            <select id="saved-chapter-select" class="chapter-select-input" onchange="loadSavedChapter()" style="flex:1;">
+                                <option value="">-- 请选择已保存的章节 --</option>
+                            </select>
+                            <button onclick="loadSavedChapterList()" class="btn btn-small" title="刷新列表">刷新</button>
+                            <button onclick="toggleChapterList()" class="btn btn-small" title="管理章节">管理</button>
+                        </div>
+                        <div id="chapter-list-panel" style="display:none; margin-top:10px; max-height:250px; overflow-y:auto; border:1px solid #ddd; border-radius:6px; background:#fafafa;">
+                            <div style="padding:10px 14px; background:#f0f0f0; border-bottom:1px solid #ddd; font-size:13px; font-weight:600;">已保存章节列表</div>
+                            <div id="chapter-list-content" style="padding:6px;"></div>
+                        </div>
+                        <div id="selected-chapter-info" class="chapter-info" style="display:none;">
+                            <p><strong>章节标题：</strong><span id="chapter-info-title"></span></p>
+                            <p><strong>创建时间：</strong><span id="chapter-info-time"></span></p>
+                            <p><strong>授课文稿：</strong><span id="chapter-info-lecture-status">未生成</span></p>
+                        </div>
+                    </div>
+
+                    <div class="panel-section" style="flex:1;">
+                        <h2>导入新章节</h2>
+                        <div class="action-card">
+                            <div class="input-row">
+                                <label class="input-label">选择知识图谱文件：</label>
+                                <input type="file" id="graphml-file-input" accept=".graphml,.xml,.json" class="input-field" style="width:100%;" onchange="previewGraphNodeCount()">
+                            </div>
+                            <div class="input-row">
+                                <label class="input-label">章节名称：</label>
+                                <input type="text" id="chapter-title" placeholder="输入章节名称" class="input-field">
+                            </div>
+                            <div class="input-row">
+                                <label class="input-label">导入范围：</label>
+                                <select id="import-node-range" class="input-field" style="width:auto; min-width:160px;" onchange="updateImportRangeInfo()">
+                                    <option value="all">全部节点</option>
+                                    <option value="half">前一半</option>
+                                    <option value="custom">自定义数量</option>
+                                </select>
+                                <input type="number" id="import-node-count" placeholder="输入数量" min="1" class="input-field" style="width:80px; display:none;">
+                            </div>
+                            <div id="import-node-info" style="font-size:12px; color:#888; margin:4px 0 8px;"></div>
+                            <div class="help-text" style="font-size:12px; color:#666; margin:8px 0;">
+                                支持 GraphML（.graphml、.xml）和 JSON 格式的知识图谱文件，导入后会自动生成授课文稿。
+                            </div>
+                            <button onclick="importKnowledgeGraph()" class="btn btn-primary">导入并生成文稿</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section large-section">
+                    <h2>授课文稿</h2>
+                    <div class="lecture-editor-wrapper" id="lecture-editor-wrapper">
+                        <div class="drag-handle" id="lecture-drag-handle">
+                            <span class="drag-line">⋮⋮</span>
+                        </div>
+                        <textarea id="lecture-note" placeholder="导入章节后会自动生成授课文稿，也可以在这里继续编辑..." class="textarea lecture-editor"></textarea>
+                    </div>
+                    <div class="editor-toolbar">
+                        <button onclick="generateLecture()" class="btn btn-info">生成文稿</button>
+                        <button onclick="saveLecture()" class="btn btn-primary">保存文稿</button>
+                        <button onclick="clearLecture()" class="btn btn-secondary">清空</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="lecture-mode-panel" class="mode-panel">
+                <div class="panel-section">
+                    <h2>选择授课章节</h2>
+                    <div class="chapter-selector" style="display:flex; gap:8px; align-items:center;">
+                        <select id="chapter-select" class="chapter-select-input" style="flex:1;" onchange="onLectureChapterChange()">
+                            <option value="">-- 请选择章节 --</option>
+                        </select>
+                        <button onclick="loadLectureChapterList()" class="btn btn-small" title="刷新列表">刷新</button>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>AI 授课控制</h2>
+                    <div class="lecture-control">
+                        <button id="btn-start-lecture" onclick="startLecture()" class="btn btn-large btn-primary">开始授课</button>
+                        <button id="btn-pause-lecture" onclick="confirmPauseLecture()" class="btn btn-large btn-warning" disabled>暂停补充</button>
+                        <button id="btn-stop-lecture" onclick="stopLecture()" class="btn btn-large btn-danger" disabled>结束授课</button>
+                        <button id="btn-show-lecture" onclick="toggleLectureFloat()" class="btn btn-large btn-info">查看授课文稿</button>
+                    </div>
+                    <div class="lecture-info">
+                        <span id="lecture-status-text">等待开始授课...</span>
+                    </div>
+                    <div class="button-group" style="margin-top:10px;">
+                        <button onclick="saveLectureRecord()" class="btn btn-info" id="btn-save-lecture-record">保存授课记录</button>
+                        <button onclick="showRecordHistory()" class="btn btn-success">查看授课记录</button>
+                    </div>
+                </div>
+
+                <div id="teacher-lecture-display-container" class="lecture-display-container hidden">
+                    <div class="lecture-text-panel">
+                        <div class="lecture-text-header">
+                            <h3>授课文稿</h3>
+                            <button id="btn-teacher-show-full" onclick="toggleTeacherFullContent()" class="btn btn-small">显示全部</button>
+                        </div>
+                        <div id="teacher-lecture-display-text" class="lecture-content-display">
+                            <p class="placeholder">请选择章节并开始授课后查看授课内容...</p>
+                        </div>
+                        <div class="teacher-lecture-controls">
+                            <button id="btn-teacher-play" onclick="playTeacherLecture()" class="btn btn-small" disabled>播放</button>
+                            <button id="btn-teacher-pause" onclick="pauseTeacherLecture()" class="btn btn-small" disabled>暂停</button>
+                        </div>
+                    </div>
+
+                    <div class="knowledge-graph-panel">
+                        <h3>知识图谱</h3>
+                        <div id="teacher-knowledge-graph" class="graph-area lecture-graph-area">
+                            <div class="graph-placeholder">
+                                <p>知识图谱请在后端管理页查看，避免授课端卡顿。</p>
+                                <button onclick="openBackendGraphAdmin()" class="btn btn-small">打开后端知识图谱</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="lecture-float-window" class="float-window lecture-float-window hidden">
+                    <div class="float-header lecture-float-header">
+                        <h3>授课文稿</h3>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <button onclick="refreshLectureFloat()" class="btn-icon" title="刷新">↻</button>
+                            <button onclick="toggleLectureFloat()" class="btn-close">&times;</button>
+                        </div>
+                    </div>
+                    <div class="float-body lecture-float-body">
+                        <textarea id="lecture-note-float" placeholder="导入章节后自动生成授课文稿..." class="textarea lecture-editor"></textarea>
+                        <div class="lecture-toolbar">
+                            <button onclick="syncFloatToMain()" class="btn btn-small">同步到主窗口</button>
+                            <button onclick="syncMainToFloat()" class="btn btn-small">从主窗口同步</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>补充内容</h2>
+                    <div id="supplement-card" class="action-card hidden">
+                        <textarea id="supplement-content" placeholder="输入补充内容..." class="textarea"></textarea>
+                        <div class="button-group" style="margin-top:10px;">
+                            <button onclick="confirmSupplement()" class="btn btn-success">确认补充</button>
+                            <button onclick="saveDraft()" class="btn btn-info">保存草稿</button>
+                            <button onclick="cancelSupplement()" class="btn btn-secondary">取消</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>补充内容草稿箱</h2>
+                    <div id="draft-list" class="draft-list">
+                        <p class="placeholder">暂无草稿</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel graph-panel">
+                <h2>知识图谱</h2>
+                <div id="graph-page-placeholder" class="graph-container" style="min-height:180px;display:flex;align-items:center;justify-content:center;padding:18px;">
+                    <div style="text-align:center;color:#6b7280;line-height:1.7;">
+                        <div style="font-weight:600;color:#1f2937;margin-bottom:6px;">知识图谱使用后端管理页</div>
+                        <div>后端管理页直连 vector_index_system 图谱，支持查看节点内容、关系和编辑。</div>
+                    </div>
+                </div>
+                <div class="graph-controls">
+                    <button onclick="openBackendGraphAdmin()" class="btn btn-info">打开后端知识图谱</button>
+                    <button onclick="scanStructuredData()" class="btn btn-small">同步 Structured</button>
+                    <button onclick="openReviewSearch()" class="btn btn-small">审阅检索</button>
+                    <button onclick="exportGraph()" class="btn btn-small">导出</button>
+                    <button onclick="downloadTeacherPackage()" class="btn btn-small">教师包</button>
+                    <button onclick="toggleFullScreen()" class="btn btn-small">打开图谱</button>
+                </div>
+
+                <div class="node-detail hidden" id="node-detail">
+                    <div class="node-detail-header">
+                        <h3>节点详情</h3>
+                        <button onclick="closeNodeDetail()" class="btn-close">&times;</button>
+                    </div>
+                    <div id="node-detail-content"></div>
+                </div>
+
+                <div id="graph-overview-float" class="graph-statistics-float hidden" style="width:520px;">
+                    <div class="statistics-header" id="overview-drag-handle" style="cursor:move;">
+                        <h3>知识图谱总览</h3>
+                        <button onclick="closeGraphOverview()" class="btn-close">&times;</button>
+                    </div>
+                    <div id="graph-overview-content" style="padding:16px; max-height:70vh; overflow-y:auto;"></div>
+                </div>
+
+                <div id="review-search-float" class="graph-statistics-float hidden" style="width:620px;">
+                    <div class="statistics-header" id="review-search-drag-handle" style="cursor:move;">
+                        <h3>图谱审阅检索</h3>
+                        <button onclick="closeReviewSearch()" class="btn-close">&times;</button>
+                    </div>
+                    <div style="padding:16px;">
+                        <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center;">
+                            <input type="text" id="review-search-input" placeholder="输入关键词，检索节点、关系和相邻节点" style="flex:1; padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:13px; outline:none;">
+                            <select id="review-search-chapter" style="padding:8px 12px; border:1px solid #ddd; border-radius:6px; font-size:13px;">
+                                <option value="">全部章节</option>
+                            </select>
+                            <button onclick="runReviewSearch()" class="btn btn-info">检索</button>
+                        </div>
+                        <div id="review-search-results" style="max-height:60vh; overflow-y:auto;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="qa-float-window" class="float-window qa-float-window hidden">
+        <div class="float-header" id="qa-float-header">
+            <h3>问答系统</h3>
+            <div class="window-controls">
+                <button onclick="toggleQaWindow()" class="btn-close">&times;</button>
+            </div>
+        </div>
+        <div class="float-body" id="qa-float-body">
+            <div class="qa-input-section">
+                <textarea id="question-input" placeholder="请输入问题..." class="textarea"></textarea>
+                <button onclick="askQuestion()" class="btn btn-primary" style="width:100%; margin-top:8px;">提问</button>
+            </div>
+            <div class="qa-output-section">
+                <h3>回答</h3>
+                <div id="answer-display" class="answer-box">
+                    <p class="placeholder">答案将显示在这里...</p>
+                </div>
+            </div>
+            <div class="qa-history-section">
+                <h3>问答历史</h3>
+                <div id="history-list" class="history-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden">
+        <span id="toast-message"></span>
+    </div>
+
+    <div id="save-record-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>退出授课</h3>
+            <p>是否保存当前授课记录？</p>
+            <div class="modal-buttons">
+                <button onclick="saveRecordAndExit()" class="btn btn-success">保存并退出</button>
+                <button onclick="exitWithoutSave()" class="btn btn-secondary">不保存直接退出</button>
+                <button onclick="closeSaveModal()" class="btn btn-primary">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="pause-options-modal" class="modal hidden">
+        <div class="modal-content">
+            <h3>暂停授课</h3>
+            <p>是否需要记录补充内容？</p>
+            <div class="pause-buttons">
+                <button onclick="startVoiceRecordFromPause()" class="btn btn-success">是（语音记录）</button>
+                <button onclick="pauseOnly()" class="btn btn-secondary">否（仅暂停）</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="voice-record-window" class="float-window voice-record-window hidden">
+        <div class="float-header voice-record-header">
+            <h3>语音识别记录</h3>
+            <div class="record-controls">
+                <button id="btn-start-record" onclick="startVoiceRecord()" class="btn-record">
+                    <span class="record-icon">●</span>
+                    <span>开始录音</span>
+                </button>
+                <button id="btn-stop-record" onclick="stopVoiceRecord()" class="btn-record stop" disabled>
+                    <span class="record-icon">■</span>
+                    <span>停止录音</span>
+                </button>
+                <button onclick="closeVoiceRecord()" class="btn-close">&times;</button>
+            </div>
+        </div>
+        <div class="float-body voice-record-body">
+            <div class="recognition-status">
+                <span id="record-status-text">准备开始录音...</span>
+            </div>
+            <div class="recognized-text-container">
+                <label>识别结果：</label>
+                <textarea id="voice-recognized-text" placeholder="语音识别结果将显示在这里..." class="textarea"></textarea>
+            </div>
+            <div class="voice-record-actions">
+                <button onclick="confirmVoiceContent()" class="btn btn-success">确认补充</button>
+                <button onclick="saveVoiceDraft()" class="btn btn-info">保存草稿</button>
+                <button onclick="discardVoiceContent()" class="btn btn-secondary">放弃</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="audio-status" class="audio-status hidden">
+        <div class="audio-playing">
+            <div class="audio-icon">🔊</div>
+            <span id="audio-text">正在播放...</span>
+        </div>
+    </div>
+
+    <div id="record-history-modal" class="modal hidden">
+        <div class="modal-content" style="max-width:600px;">
+            <h3>授课记录历史</h3>
+            <div id="record-history-list" class="record-history-list">
+                <p class="placeholder">暂无授课记录</p>
+            </div>
+            <div class="modal-buttons">
+                <button onclick="closeRecordHistoryModal()" class="btn btn-secondary">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="context-menu" class="context-menu hidden">
+        <div class="context-menu-item" onclick="showRecordHistory()">查看所有记录</div>
+    </div>
+
+    <div id="settings-modal" class="modal hidden">
+        <div class="modal-content" style="max-width:500px;">
+            <h3>系统设置</h3>
+            <div class="settings-section">
+                <h4>DeepSeek API 配置</h4>
+                <p class="settings-description">配置你的 DeepSeek API 密钥以启用 AI 功能（生成授课文稿、智能问答等）。</p>
+                <div class="input-row">
+                    <label class="input-label">API 密钥：</label>
+                    <input type="password" id="deepseek-api-key" placeholder="sk-..." class="input-field">
+                    <button onclick="toggleApiKeyVisibility()" class="btn-icon" title="显示/隐藏密钥">👁</button>
+                </div>
+                <div class="settings-help">
+                    <p><strong>如何获取 API 密钥：</strong></p>
+                    <ol>
+                        <li>访问 <a href="https://platform.deepseek.com/api_keys" target="_blank">DeepSeek 平台</a></li>
+                        <li>登录或注册账号</li>
+                        <li>进入 API Keys 页面</li>
+                        <li>创建新的 API 密钥</li>
+                        <li>将密钥粘贴到上方输入框</li>
+                    </ol>
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button onclick="saveSettings()" class="btn btn-primary">保存设置</button>
+                <button onclick="testApiKey()" class="btn btn-info">测试连接</button>
+                <button onclick="closeSettingsModal()" class="btn btn-secondary">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="env-config.js?v=15" charset="UTF-8"></script>
+    <script src="workspace-ambient.js?v=5" charset="UTF-8"></script>
+    <script src="teacher.js?v=19" charset="UTF-8"></script>
+</body>
+</html>

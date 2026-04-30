@@ -1,0 +1,57 @@
+{
+  "id": "chapter6_014",
+  "metadata": {
+    "chapter": "chapter6",
+    "section": "Chapter 6: Theorems of Natural Selection",
+    "subsections": [
+      "1968 Version: $ R_{z}=\\sigma_{A}(w,z) $"
+    ],
+    "source_file": "chapter6原文.json",
+    "source_title": "Evolution and Selection of Quantitative Traits",
+    "formula_references": [
+      "6.17c",
+      "6.24a",
+      "6.24b",
+      "6.24c"
+    ],
+    "table_references": []
+  },
+  "blocks": [
+    {
+      "type": "derivation",
+      "content": "We first consider Robertson's (1968) version, as it is widely used in the population-genetics literature (e.g., Crow and Nagylaki 1976; Nagylaki 1992b). Robertson's (1968, p. 13) paper does not contain either a proof or a formal expression, just the clear statement that \"The secondary theorem of natural selection states that the change in any character produced by a selection process is equal to the additive covariance between fitness and the character itself.\" In equation form,"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.24a]]"
+    },
+    {
+      "type": "proposition",
+      "content": "The expression $ \\sigma_{A}(w,z) $ , which is shorthand for the covariance between the breeding values for the trait and relative fitness $ \\sigma(A_{w},A_{z}) $ , is often called the Robertson covariance. The term secondary theorem is reasonable for this version, as it directly follows from Fisher's fundamental theorem, using a simple regression argument (Falconer 1985). The expected change in a trait is given by its change in mean breeding value, $ \\Delta A_{z} $ , which in turn is the change in the breeding value of relative fitness, $ R_{w}=\\Delta A_{w} $ times the regression of the trait breeding value $ A_{z} $ given $ A_{w} $ , or"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.24b]]"
+    },
+    {
+      "type": "proposition",
+      "content": "From standard regression theory (LW Chapter 3), the slope of the regression of $ A_{z} $ on $ A_{w} $ is simply"
+    },
+    {
+      "type": "derivation",
+      "content": "$$ \\beta_ {A _ {z} \\mid A _ {w}} = \\frac {\\sigma \\left(A _ {w} , A _ {z}\\right)}{\\sigma^ {2} \\left(A _ {w}\\right)} $$"
+    },
+    {
+      "type": "derivation",
+      "content": "Likewise, under the fundamental theorem (Equation [[SEE_FORMULA:6.17c]]), $ \\Delta A_{w}=\\sigma^{2}(A_{w}). $ Substituting"
+    },
+    {
+      "type": "proposition",
+      "content": "these two results into Equation [[SEE_FORMULA:6.24b]] recovers Robertson's 1968 version of his theorem,"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.24c]]"
+    }
+  ]
+}

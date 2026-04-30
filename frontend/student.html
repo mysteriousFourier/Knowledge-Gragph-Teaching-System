@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识图谱教学系统 - 学生端</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="graph-styles.css">
+    <link rel="stylesheet" href="new-styles.css">
+    <link rel="stylesheet" href="student-styles.css?v=2">
+    <link rel="stylesheet" href="workspace-ambient.css?v=6">
+</head>
+<body class="workspace-ambient">
+    <canvas id="workspace-ambient-canvas" class="workspace-ambient-canvas" aria-hidden="true"></canvas>
+    <div id="login-page" class="page active">
+        <div class="login-container">
+            <h1>知识图谱教学系统</h1>
+            <p class="subtitle">学生登录</p>
+            <div class="role-selector">
+                <button onclick="switchRole('student')" class="role-btn active">学生登录</button>
+                <button onclick="switchRole('teacher')" class="role-btn">教师登录</button>
+            </div>
+            <div class="login-form">
+                <input type="text" id="username" placeholder="学号/用户名" class="input-field">
+                <input type="password" id="password" placeholder="密码" class="input-field">
+                <button onclick="login()" class="btn btn-primary">登录</button>
+            </div>
+            <p class="login-tip">学生账号由后端环境配置管理</p>
+        </div>
+    </div>
+
+    <div id="student-page" class="page student-page">
+        <header class="header">
+            <div class="header-left">
+                <h1>知识图谱教学系统</h1>
+                <div class="mode-switch">
+                    <button id="btn-learn-mode" onclick="switchMode('learn')" class="mode-btn active">学习模式</button>
+                    <button id="btn-practice-mode" onclick="switchMode('practice')" class="mode-btn">练习模式</button>
+                </div>
+            </div>
+            <div class="header-right">
+                <span id="current-user">学生</span>
+                <button onclick="toggleSettingsWindow()" class="btn-icon qa-toggle" title="设置">⚙</button>
+                <button onclick="toggleQaWindow()" class="btn-icon qa-toggle" title="提问">❓</button>
+                <button onclick="logout()" class="btn btn-small">退出</button>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <div id="learn-mode-panel" class="mode-panel active">
+                <div class="panel-section">
+                    <h2>选择学习章节</h2>
+                    <div class="chapter-selector">
+                        <select id="chapter-select" class="chapter-select-input" onchange="onChapterChange()">
+                            <option value="">-- 请选择章节 --</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>课程内容</h2>
+                    <div id="lecture-display-container" class="lecture-display-container hidden">
+                        <div class="lecture-text-panel">
+                            <div class="lecture-text-header">
+                                <h3>授课内容</h3>
+                                <button id="btn-show-full-content" onclick="toggleFullContent()" class="btn btn-small">显示全部</button>
+                            </div>
+                            <div id="lecture-display-text" class="lecture-content-display">
+                                <p class="placeholder">请开始播放后查看授课内容...</p>
+                            </div>
+                        </div>
+
+                        <div class="knowledge-graph-panel">
+                            <h3>知识图谱</h3>
+                            <div class="graph-controls-row">
+                                <button onclick="openBackendGraphAdmin()" class="btn btn-small">打开后端知识图谱</button>
+                            </div>
+                            <div id="knowledge-graph" class="graph-area lecture-graph-area">
+                                <div class="graph-placeholder">
+                                    <p>知识图谱请在后端管理页查看，避免学生端卡顿。</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="original-content-wrapper" class="course-content-wrapper">
+                        <div class="drag-handle" id="content-drag-handle">
+                            <span class="drag-line">⋮⋮</span>
+                        </div>
+                        <div id="course-content" class="course-content">
+                            <p class="placeholder">请选择章节开始学习</p>
+                        </div>
+                    </div>
+                    <div class="content-toolbar">
+                        <button onclick="playContent()" class="btn btn-info" id="btn-play-content" disabled>播放讲解</button>
+                        <button onclick="pauseContent()" class="btn btn-warning" id="btn-pause-content" disabled>暂停</button>
+                        <button onclick="markAsLearned()" class="btn btn-success" id="btn-mark-learned" disabled>标记已学</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="practice-mode-panel" class="mode-panel">
+                <div class="panel-section">
+                    <h2>选择练习章节</h2>
+                    <div class="chapter-selector">
+                        <select id="practice-chapter-select" class="chapter-select-input" onchange="loadExercises()">
+                            <option value="">-- 请选择章节 --</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="panel-section">
+                    <h2>练习题</h2>
+                    <div id="exercise-content" class="exercise-content">
+                        <p class="placeholder">请选择章节加载练习题</p>
+                    </div>
+                    <div class="exercise-toolbar hidden" id="exercise-toolbar">
+                        <button onclick="submitAnswer()" class="btn btn-primary">提交答案</button>
+                        <button onclick="showAnswer()" class="btn btn-secondary">查看答案</button>
+                        <button onclick="nextExercise()" class="btn btn-info">下一题</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="qa-float-window" class="float-window qa-float-window hidden">
+        <div class="float-header" id="qa-float-header">
+            <h3>学习助手</h3>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <button onclick="refreshQaWindow()" class="btn-icon" title="刷新">↻</button>
+                <button onclick="toggleQaWindow()" class="btn-close">&times;</button>
+            </div>
+        </div>
+        <div class="float-body" id="qa-float-body">
+            <div class="qa-input-section">
+                <textarea id="question-input" placeholder="请输入你的问题..." class="textarea"></textarea>
+                <button onclick="askQuestion()" class="btn btn-primary" style="width:100%; margin-top:8px;">提问</button>
+            </div>
+            <div class="qa-output-section">
+                <h3>回答</h3>
+                <div id="answer-display" class="answer-box">
+                    <p class="placeholder">答案将显示在这里...</p>
+                </div>
+            </div>
+            <div class="qa-history-section">
+                <h3>提问历史</h3>
+                <div id="history-list" class="history-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="lecture-float-window" class="float-window lecture-float-window hidden">
+        <div class="float-header lecture-float-header">
+            <h3>课程内容</h3>
+            <button onclick="toggleLectureFloat()" class="btn-close">&times;</button>
+        </div>
+        <div class="float-body lecture-float-body">
+            <div id="lecture-note-float" class="course-content">
+                <p class="placeholder">选择章节后显示课程内容</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden">
+        <span id="toast-message"></span>
+    </div>
+
+    <div id="audio-status" class="audio-status hidden">
+        <div class="audio-playing">
+            <div class="audio-icon">🔊</div>
+            <span id="audio-text">正在播放...</span>
+        </div>
+    </div>
+
+    <div id="settings-modal" class="modal hidden">
+        <div class="modal-content" style="max-width:500px;">
+            <h3>系统设置</h3>
+            <div class="settings-section">
+                <h4>DeepSeek API 配置</h4>
+                <p class="settings-description">配置你的 DeepSeek API 密钥以启用 AI 功能（智能问答等）。</p>
+                <div class="input-row">
+                    <label class="input-label">API 密钥：</label>
+                    <input type="password" id="deepseek-api-key" placeholder="sk-..." class="input-field">
+                    <button onclick="toggleApiKeyVisibility()" class="btn-icon" title="显示/隐藏密钥">👁</button>
+                </div>
+                <div class="settings-help">
+                    <p><strong>如何获取 API 密钥：</strong></p>
+                    <ol>
+                        <li>访问 <a href="https://platform.deepseek.com/api_keys" target="_blank">DeepSeek 平台</a></li>
+                        <li>登录或注册账号</li>
+                        <li>进入 API Keys 页面</li>
+                        <li>创建新的 API 密钥</li>
+                        <li>将密钥粘贴到上方输入框</li>
+                    </ol>
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button onclick="saveSettings()" class="btn btn-primary">保存设置</button>
+                <button onclick="testApiKey()" class="btn btn-info">测试连接</button>
+                <button onclick="closeSettingsModal()" class="btn btn-secondary">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="env-config.js?v=15" charset="UTF-8"></script>
+    <script src="workspace-ambient.js?v=5" charset="UTF-8"></script>
+    <script src="student.js?v=17" charset="UTF-8"></script>
+</body>
+</html>

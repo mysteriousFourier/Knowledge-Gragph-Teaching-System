@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识图谱可视化系统</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            overflow: hidden;
+            color: #333;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .sidebar {
+            width: 320px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-right: 1px solid rgba(255, 255, 255, 0.2);
+            display: flex;
+            flex-direction: column;
+            box-shadow: 4px 0 15px rgba(0,0,0,0.1);
+            z-index: 10;
+        }
+
+        .header {
+            padding: 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            padding: 16px 24px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #667eea;
+            display: block;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .controls {
+            padding: 20px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .control-group {
+            margin-bottom: 16px;
+        }
+
+        .control-label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .search-box {
+            position: relative;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 10px 12px 10px 36px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s;
+            outline: none;
+        }
+
+        .search-box input:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .search-box::before {
+            content: "Q";
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 14px;
+            color: #999;
+            font-weight: bold;
+        }
+
+        .filter-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .filter-tag {
+            padding: 6px 12px;
+            background: #e9ecef;
+            border: none;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            color: #495057;
+        }
+
+        .filter-tag:hover {
+            background: #dee2e6;
+        }
+
+        .filter-tag.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .legend {
+            padding: 20px;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .legend-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #495057;
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            background: #fff;
+            overflow: hidden;
+        }
+
+        #graph-svg {
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+
+        #graph-svg:active {
+            cursor: grabbing;
+        }
+
+        .toolbar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 8px;
+            background: white;
+            padding: 8px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .toolbar-btn {
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: transparent;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+
+        .toolbar-btn:hover {
+            background: #f0f0f0;
+            transform: scale(1.1);
+        }
+
+        .detail-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            max-width: 500px;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            transform: translateY(120%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .detail-panel.show {
+            transform: translateY(0);
+        }
+
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .detail-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #212529;
+        }
+
+        .detail-type {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #495057;
+            margin-top: 4px;
+        }
+
+        .detail-close {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #adb5bd;
+            transition: color 0.3s;
+        }
+
+        .detail-close:hover {
+            color: #495057;
+        }
+
+        .detail-content {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #495057;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            display: none;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            background: #333;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 1000;
+            transition: transform 0.3s;
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .node circle {
+            stroke: #fff;
+            stroke-width: 2px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .node:hover circle {
+            stroke: #667eea;
+            stroke-width: 4px;
+            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.2));
+        }
+
+        .node text {
+            font-size: 12px;
+            pointer-events: none;
+            text-shadow: 0 1px 3px rgba(255,255,255,0.8), 0 -1px 3px rgba(255,255,255,0.8);
+            font-weight: 500;
+        }
+
+        .link {
+            stroke: #999;
+            stroke-opacity: 0.6;
+            stroke-width: 1.5px;
+            transition: all 0.3s;
+        }
+
+        .link:hover {
+            stroke: #667eea;
+            stroke-opacity: 1;
+            stroke-width: 2.5px;
+        }
+
+        .zoom-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .zoom-btn {
+            width: 40px;
+            height: 40px;
+            border: none;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            cursor: pointer;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+        }
+
+        .zoom-btn:hover {
+            background: #f8f9fa;
+            transform: scale(1.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="header">
+                <h1>知识图谱可视化</h1>
+                <p>Knowledge Graph Visualization System</p>
+            </div>
+
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="stat-value" id="node-count">0</span>
+                    <span class="stat-label">节点</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-value" id="edge-count">0</span>
+                    <span class="stat-label">关系</span>
+                </div>
+            </div>
+
+            <div class="controls">
+                <div class="control-group">
+                    <label class="control-label">搜索节点</label>
+                    <div class="search-box">
+                        <input type="text" id="search-input" placeholder="输入关键词搜索...">
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <label class="control-label">节点类型过滤</label>
+                    <div class="filter-tags" id="type-filters">
+                        <button class="filter-tag active" data-type="all">全部</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="legend">
+                <div class="legend-title">节点类型</div>
+                <div id="legend-content"></div>
+            </div>
+        </div>
+
+        <div class="canvas-container">
+            <svg id="graph-svg"></svg>
+
+            <div class="toolbar">
+                <button class="toolbar-btn" onclick="resetZoom()" title="重置视图">R</button>
+                <button class="toolbar-btn" onclick="toggleAnimation()" title="切换动画">P</button>
+                <button class="toolbar-btn" onclick="showAllNodes()" title="显示所有节点">A</button>
+                <button class="toolbar-btn" onclick="exportGraph()" title="导出数据">E</button>
+            </div>
+
+            <div class="zoom-controls">
+                <button class="zoom-btn" onclick="zoomIn()">+</button>
+                <button class="zoom-btn" onclick="zoomOut()">-</button>
+            </div>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>正在加载知识图谱数据...</p>
+            </div>
+
+            <div class="detail-panel" id="detail-panel">
+                <div class="detail-header">
+                    <div>
+                        <div class="detail-title" id="detail-title">节点标题</div>
+                        <span class="detail-type" id="detail-type">类型</span>
+                    </div>
+                    <button class="detail-close" onclick="closeDetail()">x</button>
+                </div>
+                <div class="detail-content" id="detail-content">
+                    节点内容详情
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let simulation;
+        let svg;
+        let g;
+        let zoom;
+        let nodes = [];
+        let links = [];
+        let allNodes = [];
+        let allLinks = [];
+        let nodeTypes = new Set();
+        let colorScale;
+        let animationEnabled = true;
+        let selectedNode = null;
+        let focusChapter = null; // 默认显示所有chapter
+
+        const colorPalette = [
+            '#667eea', '#764ba2', '#f093fb', '#f5576c',
+            '#4facfe', '#00f2fe', '#43e97b', '#38f9d7',
+            '#fa709a', '#fee140', '#30cfd0', '#330867'
+        ];
+
+        document.addEventListener('DOMContentLoaded', function() {
+            initGraph();
+            loadData();
+        });
+
+        function initGraph() {
+            const container = document.querySelector('.canvas-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            svg = d3.select('#graph-svg')
+                .attr('width', width)
+                .attr('height', height);
+
+            zoom = d3.zoom()
+                .scaleExtent([0.1, 4])
+                .on('zoom', (event) => {
+                    g.attr('transform', event.transform);
+                });
+
+            svg.call(zoom);
+
+            g = svg.append('g');
+
+            window.addEventListener('resize', () => {
+                const newWidth = container.clientWidth;
+                const newHeight = container.clientHeight;
+                svg.attr('width', newWidth).attr('height', newHeight);
+                if (simulation) {
+                    simulation.force('center', d3.forceCenter(newWidth / 2, newHeight / 2));
+                    simulation.alpha(0.3).restart();
+                }
+            });
+        }
+
+        async function loadData() {
+            showLoading(true);
+
+            try {
+                const [nodesRes, relsRes] = await Promise.all([
+                    fetch('/api/nodes'),
+                    fetch('/api/relationships')
+                ]);
+
+                if (!nodesRes.ok || !relsRes.ok) {
+                    throw new Error('API request failed');
+                }
+
+                const nodesData = await nodesRes.json();
+                const relsData = await relsRes.json();
+
+                nodes = nodesData.nodes || [];
+                
+                // 确保节点ID是字符串类型
+                nodes.forEach(node => {
+                    node.id = String(node.id);
+                });
+                
+                // 过滤出有效的关系（确保source和target节点都存在）
+                const nodeMap = new Map();
+                nodes.forEach(node => {
+                    nodeMap.set(node.id, node);
+                });
+                
+                console.log('节点ID映射:', Array.from(nodeMap.keys()).slice(0, 10));
+                console.log('原始关系数据:', relsData.relationships.slice(0, 5));
+                
+                links = (relsData.relationships || []).filter(rel => {
+                    const sourceId = String(rel.source_node);
+                    const targetId = String(rel.target_node);
+                    const sourceExists = nodeMap.has(sourceId);
+                    const targetExists = nodeMap.has(targetId);
+                    if (!sourceExists || !targetExists) {
+                        console.log(`过滤掉无效关系: ${sourceId} -> ${targetId}`);
+                    }
+                    return sourceExists && targetExists;
+                }).map(rel => ({
+                    ...rel,
+                    source: nodeMap.get(String(rel.source_node)),
+                    target: nodeMap.get(String(rel.target_node))
+                }));
+                
+                // 保存所有数据
+                allNodes = nodes;
+                allLinks = links;
+                
+                // 清理无效关系后更新统计
+                console.log(`原始节点数: ${nodesData.nodes.length}`);
+                console.log(`原始关系数: ${relsData.relationships.length}`);
+                console.log(`过滤后: ${nodes.length} 个节点, ${links.length} 个关系`);
+                
+                // 检查前5个关系
+                console.log('前5个关系:', links.slice(0, 5));
+                
+                // 检查是否有节点间的直接关系
+                const nodeNodeLinks = links.filter(rel => {
+                    return rel.source.type !== 'chapter' && rel.target.type !== 'chapter';
+                });
+                console.log(`节点间直接关系数: ${nodeNodeLinks.length}`);
+                
+                // 检查关系类型分布
+                const linkTypes = {};
+                links.forEach(link => {
+                    linkTypes[link.type] = (linkTypes[link.type] || 0) + 1;
+                });
+                console.log('关系类型分布:', linkTypes);
+                
+                nodes.forEach(node => {
+                    if (node.type) nodeTypes.add(node.type);
+                });
+
+                colorScale = d3.scaleOrdinal()
+                    .domain(Array.from(nodeTypes))
+                    .range(colorPalette);
+
+                // 默认显示所有chapter
+                if (focusChapter) {
+                    showChapterNodes(focusChapter);
+                } else {
+                    // 显示所有chapter及其相关节点
+                    showAllChapters();
+                }
+
+                updateStats();
+                updateFilters();
+                updateLegend();
+
+                showToast('知识图谱加载成功');
+
+            } catch (error) {
+                console.error('加载数据失败:', error);
+                showToast('加载失败: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function renderGraph() {
+            const container = document.querySelector('.canvas-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            g.selectAll('*').remove();
+
+            simulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(links).id(d => d.id).distance(100))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(40));
+
+            const link = g.append('g')
+                .selectAll('line')
+                .data(links)
+                .enter().append('line')
+                .attr('class', 'link')
+                .attr('stroke-width', d => Math.sqrt(d.strength || 1) * 2);
+
+            const node = g.append('g')
+                .selectAll('.node')
+                .data(nodes)
+                .enter().append('g')
+                .attr('class', 'node')
+                .call(d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended));
+
+            node.append('circle')
+                .attr('r', d => {
+                    const degree = links.filter(l => {
+                        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
+                        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
+                        return sourceId === d.id || targetId === d.id;
+                    }).length;
+                    return 15 + Math.min(degree * 3, 20);
+                })
+                .attr('fill', d => colorScale(d.type || 'default'));
+
+            node.append('text')
+                .attr('dx', 20)
+                .attr('dy', 5)
+                .text(d => d.label);
+
+            node.on('click', (event, d) => {
+                event.stopPropagation();
+                showDetail(d);
+                showNodeConnections(d.id);
+            });
+
+            link.on('mouseenter', function(event, d) {
+                d3.select(this).attr('stroke', '#667eea').attr('stroke-opacity', 1);
+            }).on('mouseleave', function() {
+                d3.select(this).attr('stroke', '#999').attr('stroke-opacity', 0.6);
+            });
+
+            simulation.on('tick', () => {
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+
+                node.attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+
+            svg.on('click', () => {
+                closeDetail();
+            });
+        }
+
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        function updateStats() {
+            document.getElementById('node-count').textContent = nodes.length;
+            document.getElementById('edge-count').textContent = links.length;
+        }
+
+        function updateFilters() {
+            const container = document.getElementById('type-filters');
+            const types = Array.from(nodeTypes);
+
+            types.forEach(type => {
+                const btn = document.createElement('button');
+                btn.className = 'filter-tag';
+                btn.textContent = type;
+                btn.dataset.type = type;
+                btn.onclick = () => filterByType(type, btn);
+                container.appendChild(btn);
+            });
+        }
+
+        function updateLegend() {
+            const container = document.getElementById('legend-content');
+            const types = Array.from(nodeTypes);
+
+            types.forEach(type => {
+                const item = document.createElement('div');
+                item.className = 'legend-item';
+                item.innerHTML = `
+                    <div class="legend-color" style="background: ${colorScale(type)}"></div>
+                    <span>${type}</span>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        document.getElementById('search-input').addEventListener('input', function(e) {
+            const term = e.target.value.toLowerCase();
+
+            if (!term) {
+                d3.selectAll('.node').style('opacity', 1);
+                d3.selectAll('.link').style('opacity', 0.6);
+                return;
+            }
+
+            d3.selectAll('.node').style('opacity', d => {
+                const match = d.label.toLowerCase().includes(term) ||
+                             (d.content && d.content.toLowerCase().includes(term));
+                return match ? 1 : 0.1;
+            });
+
+            d3.selectAll('.link').style('opacity', 0.05);
+        });
+
+        function filterByType(type, btn) {
+            document.querySelectorAll('.filter-tag').forEach(tag => tag.classList.remove('active'));
+            btn.classList.add('active');
+
+            if (type === 'all') {
+                d3.selectAll('.node').style('display', 'block');
+                d3.selectAll('.link').style('display', 'block');
+            } else {
+                const filteredNodes = nodes.filter(n => n.type === type);
+                const filteredIds = new Set(filteredNodes.map(n => n.id));
+
+                d3.selectAll('.node').style('display', d => d.type === type ? 'block' : 'none');
+                d3.selectAll('.link').style('display', d =>
+                    filteredIds.has(d.source.id) && filteredIds.has(d.target.id) ? 'block' : 'none'
+                );
+            }
+        }
+
+        function showDetail(node) {
+            document.getElementById('detail-title').textContent = node.label;
+            document.getElementById('detail-type').textContent = node.type || '未分类';
+            document.getElementById('detail-content').textContent = node.content || '暂无描述';
+            document.getElementById('detail-panel').classList.add('show');
+        }
+
+        function closeDetail() {
+            document.getElementById('detail-panel').classList.remove('show');
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').classList.toggle('show', show);
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.style.background = type === 'error' ? '#dc3545' : '#333';
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function zoomIn() {
+            svg.transition().call(zoom.scaleBy, 1.3);
+        }
+
+        function zoomOut() {
+            svg.transition().call(zoom.scaleBy, 0.7);
+        }
+
+        function resetZoom() {
+            svg.transition().call(zoom.transform, d3.zoomIdentity);
+        }
+
+        function toggleAnimation() {
+            animationEnabled = !animationEnabled;
+            if (simulation) {
+                if (animationEnabled) {
+                    simulation.alpha(0.3).restart();
+                    showToast('动画已开启');
+                } else {
+                    simulation.stop();
+                    showToast('动画已暂停');
+                }
+            }
+        }
+
+        function exportGraph() {
+            const data = { nodes, links };
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'knowledge_graph.json';
+            a.click();
+            URL.revokeObjectURL(url);
+            showToast('图谱数据已导出');
+        }
+
+        function showChapterNodes(chapterId) {
+            // 显示某个chapter的节点
+            // 找到chapter节点
+            const chapterNode = allNodes.find(node => node.id === chapterId);
+            if (!chapterNode) {
+                console.log('Chapter not found:', chapterId);
+                return;
+            }
+
+            // 找到与chapter相关的节点
+            const chapterLinks = allLinks.filter(link => 
+                link.source.id === chapterId || link.target.id === chapterId
+            );
+
+            // 收集所有相关节点
+            const relatedNodeIds = new Set([chapterId]);
+            chapterLinks.forEach(link => {
+                if (link.source.id !== chapterId) relatedNodeIds.add(link.source.id);
+                if (link.target.id !== chapterId) relatedNodeIds.add(link.target.id);
+            });
+
+            // 找到这些节点之间的关系
+            const nodeLinks = allLinks.filter(link => 
+                relatedNodeIds.has(link.source.id) && relatedNodeIds.has(link.target.id)
+            );
+
+            // 过滤节点和关系
+            nodes = allNodes.filter(node => relatedNodeIds.has(node.id));
+            links = nodeLinks;
+
+            console.log(`显示Chapter ${chapterNode.label} 的 ${nodes.length} 个节点和 ${links.length} 个关系`);
+            renderGraph();
+            updateStats();
+        }
+
+        function showNodeConnections(nodeId, depth = 2) {
+            // 显示选中节点的周围关系
+            selectedNode = nodeId;
+
+            // 收集相关节点
+            const relatedNodeIds = new Set([nodeId]);
+            let currentDepth = 0;
+            let currentNodes = [nodeId];
+
+            while (currentDepth < depth) {
+                const newNodes = [];
+                allLinks.forEach(link => {
+                    if (currentNodes.includes(link.source.id)) {
+                        if (!relatedNodeIds.has(link.target.id)) {
+                            relatedNodeIds.add(link.target.id);
+                            newNodes.push(link.target.id);
+                        }
+                    }
+                    if (currentNodes.includes(link.target.id)) {
+                        if (!relatedNodeIds.has(link.source.id)) {
+                            relatedNodeIds.add(link.source.id);
+                            newNodes.push(link.source.id);
+                        }
+                    }
+                });
+                currentNodes = newNodes;
+                currentDepth++;
+            }
+
+            // 过滤节点和关系
+            nodes = allNodes.filter(node => relatedNodeIds.has(node.id));
+            links = allLinks.filter(link => 
+                relatedNodeIds.has(link.source.id) && relatedNodeIds.has(link.target.id)
+            );
+
+            console.log(`显示节点 ${nodeId} 的 ${nodes.length} 个相关节点和 ${links.length} 个关系`);
+            renderGraph();
+            updateStats();
+        }
+
+        function showAllNodes() {
+            // 显示所有节点
+            nodes = allNodes;
+            links = allLinks;
+            selectedNode = null;
+            console.log(`显示所有 ${nodes.length} 个节点和 ${links.length} 个关系`);
+            renderGraph();
+            updateStats();
+        }
+
+        function showAllChapters() {
+            // 显示所有chapter及其相关节点
+            // 找到所有chapter节点
+            const chapterNodes = allNodes.filter(node => node.type === 'chapter');
+            const chapterIds = new Set(chapterNodes.map(node => node.id));
+            
+            // 找到与chapter相关的节点
+            const chapterLinks = allLinks.filter(link => 
+                chapterIds.has(link.source.id) || chapterIds.has(link.target.id)
+            );
+
+            // 收集所有相关节点
+            const relatedNodeIds = new Set([...chapterIds]);
+            chapterLinks.forEach(link => {
+                if (!chapterIds.has(link.source.id)) relatedNodeIds.add(link.source.id);
+                if (!chapterIds.has(link.target.id)) relatedNodeIds.add(link.target.id);
+            });
+
+            // 找到这些节点之间的关系
+            const nodeLinks = allLinks.filter(link => 
+                relatedNodeIds.has(link.source.id) && relatedNodeIds.has(link.target.id)
+            );
+
+            // 过滤节点和关系
+            nodes = allNodes.filter(node => relatedNodeIds.has(node.id));
+            links = nodeLinks;
+
+            console.log(`显示所有 ${chapterNodes.length} 个chapter的 ${nodes.length} 个节点和 ${links.length} 个关系`);
+            renderGraph();
+            updateStats();
+        }
+    </script>
+</body>
+</html>

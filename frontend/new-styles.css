@@ -1,0 +1,996 @@
+/* ==================== 模式切换面板 ==================== */
+
+.mode-panel {
+    display: none;
+}
+
+.mode-panel.active {
+    display: block;
+}
+
+/* ==================== 模式切换按钮 ==================== */
+
+.mode-switch {
+    display: flex;
+    gap: 10px;
+}
+
+.mode-btn {
+    padding: 8px 16px;
+    border: 2px solid #667eea;
+    background: white;
+    color: #667eea;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-weight: 600;
+}
+
+.mode-btn:hover {
+    background: #f0f0f0;
+}
+
+.mode-btn.active {
+    background: #667eea;
+    color: white;
+}
+
+/* ==================== 浮窗基础样式 ==================== */
+
+.float-window {
+    position: fixed;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    z-index: 1500;
+    min-width: 300px;
+    max-width: 500px;
+}
+
+.float-header {
+    background: #1a1a1a;
+    color: white;
+    padding: 12px 16px;
+    border-radius: 12px 12px 0 0;
+    cursor: move;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.float-header h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.float-body {
+    padding: 16px;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+/* ==================== 问答浮窗 ==================== */
+
+.qa-float-window {
+    top: 100px;
+    right: 20px;
+    width: 400px;
+}
+
+.qa-input-section {
+    margin-bottom: 15px;
+}
+
+.qa-input-section textarea {
+    width: 100%;
+    height: 60px;
+    resize: none;
+}
+
+.qa-output-section {
+    margin-bottom: 15px;
+}
+
+.qa-output-section h3 {
+    font-size: 14px;
+    color: #667eea;
+    margin-bottom: 8px;
+}
+
+.answer-box {
+    background: #f8f9fa;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    padding: 12px;
+    min-height: 60px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.qa-history-section h3 {
+    font-size: 14px;
+    color: #667eea;
+    margin-bottom: 8px;
+}
+
+.history-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.history-item {
+    background: #f8f9fa;
+    border-left: 3px solid #667eea;
+    padding: 10px;
+    margin-bottom: 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.history-item:hover {
+    background: #e1e1e1;
+}
+
+/* ==================== 授课文案浮窗 ==================== */
+
+.lecture-float-window {
+    top: 100px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 500px;
+}
+
+.lecture-float-body textarea {
+    width: 100%;
+    height: 200px;
+    resize: vertical;
+}
+
+.lecture-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+/* ==================== 语音识别窗口 ==================== */
+
+.voice-record-window {
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 450px;
+}
+
+.voice-record-header {
+    background: #333;
+}
+
+.record-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.btn-record {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.3s;
+}
+
+.btn-record {
+    background: rgba(255, 255, 255, 0.3);
+    color: white;
+}
+
+.btn-record.stop {
+    background: rgba(239, 68, 68, 0.9);
+}
+
+.btn-record:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.record-icon {
+    animation: pulse 1.5s infinite;
+}
+
+.voice-record-body {
+    padding: 20px;
+}
+
+.recognition-status {
+    background: #fff7ed;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 15px;
+    font-size: 14px;
+    color: #92400e;
+}
+
+.recognized-text-container {
+    margin-bottom: 15px;
+}
+
+.recognized-text-container label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 600;
+    color: #333;
+}
+
+.voice-record-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* ==================== 弹窗按钮 ==================== */
+
+.pause-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-top: 20px;
+}
+
+.pause-buttons .btn {
+    flex: 1;
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+/* ==================== 横向缩放容器 ==================== */
+
+.lecture-editor-wrapper {
+    position: relative;
+    background: white;
+    border: 2px solid #e1e1e1;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.lecture-editor {
+    width: 100%;
+    min-height: 300px;
+    padding: 12px;
+    border: none;
+    resize: none;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.resize-handle {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 20px;
+    height: 20px;
+    cursor: nwse-resize;
+    background: linear-gradient(135deg, transparent 50%, #667eea 50%);
+    border-radius: 0 0 6px 0;
+}
+
+/* ==================== 拖拽手柄 ==================== */
+
+.drag-handle {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    background: #e1e1e1;
+    cursor: ew-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px 0 0 8px;
+}
+
+.drag-handle:hover {
+    background: #667eea;
+}
+
+.drag-line {
+    color: #999;
+    font-size: 12px;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+}
+
+.drag-handle:hover .drag-line {
+    color: white;
+}
+
+/* ==================== 面板布局 ==================== */
+
+.main-content {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+}
+
+.prepare-mode-active #prepare-mode-panel,
+.lecture-mode-active #lecture-mode-panel {
+    display: block;
+}
+
+/* ==================== 按钮图标 ==================== */
+
+.btn-icon {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 8px;
+    background: white;
+    cursor: pointer;
+    font-size: 18px;
+    transition: all 0.3s;
+}
+
+.btn-icon:hover {
+    background: #f0f0f0;
+    transform: scale(1.1);
+}
+
+.btn-close {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0 8px;
+    line-height: 1;
+}
+
+.btn-close:hover {
+    color: #ffcccc;
+}
+
+/* ==================== 章节选择器 ==================== */
+
+.chapter-selector {
+    margin-bottom: 15px;
+}
+
+.chapter-select-input {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #e1e1e1;
+    border-radius: 8px;
+    font-size: 14px;
+    background: white;
+    cursor: pointer;
+}
+
+.chapter-select-input:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+/* ==================== 授课信息 ==================== */
+
+.lecture-info {
+    background: #f0f9ff;
+    padding: 10px;
+    border-radius: 8px;
+    border-left: 4px solid #3b82f6;
+    margin-top: 15px;
+    font-size: 14px;
+    color: #1e40af;
+}
+
+/* ==================== 响应式 ==================== */
+
+@media (max-width: 768px) {
+    .qa-float-window {
+        width: 90%;
+        right: 5%;
+    }
+
+    .lecture-float-window {
+        width: 90%;
+    }
+
+    .voice-record-window {
+        width: 90%;
+    }
+}
+
+/* ==================== 授课记录历史 ==================== */
+
+.record-history-list {
+    max-height: 400px;
+    overflow-y: auto;
+    margin: 15px 0;
+}
+
+.record-item {
+    background: #f8f9fa;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.record-item:hover {
+    background: #e1e1e1;
+    transform: translateX(5px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.record-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.record-title {
+    font-weight: 600;
+    color: #667eea;
+}
+
+.record-time {
+    font-size: 12px;
+    color: #999;
+}
+
+.record-progress {
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 6px;
+}
+
+.record-position {
+    font-size: 12px;
+    color: #999;
+}
+
+/* ==================== 右键菜单 ==================== */
+
+.context-menu {
+    position: fixed;
+    background: white;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 3000;
+    min-width: 180px;
+    overflow: hidden;
+}
+
+.context-menu-item {
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-size: 14px;
+    color: #333;
+}
+
+.context-menu-item:hover {
+    background: #667eea;
+    color: white;
+}
+
+.context-menu-item:active {
+    background: #5568d3;
+}
+
+/* ==================== AI补充样式 ==================== */
+
+.supplement-highlight {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    padding: 8px 12px;
+    border-radius: 6px;
+    border-left: 4px solid #f59e0b;
+    margin: 12px 0;
+}
+
+/* ==================== 加载动画 ==================== */
+
+.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 20px;
+    color: #667eea;
+    font-style: italic;
+}
+
+.loading::before {
+    content: '';
+    width: 20px;
+    height: 20px;
+    border: 2px solid #667eea;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ==================== 章节信息样式 ==================== */
+
+.chapter-info {
+    background: #f8f9fa;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 10px;
+}
+
+.chapter-info p {
+    margin: 8px 0;
+    font-size: 14px;
+}
+
+.chapter-info strong {
+    color: #667eea;
+    font-weight: 600;
+}
+
+/* ==================== 教师端授课展示区域 ==================== */
+
+.lecture-display-container {
+    display: flex;
+    gap: 20px;
+    height: 500px;
+    margin-bottom: 20px;
+}
+
+.lecture-text-panel {
+    flex: 1;
+    background: white;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.lecture-text-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.lecture-text-header h3 {
+    margin: 0;
+    color: #667eea;
+    font-size: 16px;
+}
+
+.lecture-content-display {
+    flex: 1;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    overflow-y: auto;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* 当显示全部内容时，允许滚动 */
+.lecture-content-display.show-full {
+    max-height: none;
+    overflow-y: auto;
+}
+
+/* 默认显示部分内容时，固定高度 */
+.lecture-content-display.show-partial {
+    max-height: 400px;
+    overflow-y: hidden;
+}
+
+.knowledge-graph-panel {
+    flex: 1;
+    background: white;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.knowledge-graph-panel h3 {
+    margin: 0 0 10px 0;
+    color: #667eea;
+    font-size: 16px;
+}
+
+.lecture-graph-area {
+    flex: 1;
+    min-height: 350px;
+    max-height: 450px;
+    overflow: auto;
+}
+
+/* 知识点关键词高亮 */
+.knowledge-keyword {
+    background-color: #fee2e2;
+    border-radius: 3px;
+    padding: 2px 4px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.knowledge-keyword.active {
+    background-color: #dc2626;
+    color: white;
+    font-weight: bold;
+    padding: 2px 6px;
+}
+
+/* 知识图谱节点高亮 */
+.node.highlighted {
+    animation: nodePulse 1s infinite;
+    border: 2px solid #dc2626 !important;
+    box-shadow: 0 0 15px 3px rgba(220, 38, 38, 0.6);
+}
+
+@keyframes nodePulse {
+    0%, 100% {
+        transform: scale(1.05);
+        box-shadow: 0 0 15px 3px rgba(220, 38, 38, 0.6);
+    }
+    50% {
+        transform: scale(1.1);
+        box-shadow: 0 0 20px 5px rgba(220, 38, 38, 0.8);
+    }
+}
+
+/* 教师端授课控制按钮 */
+.teacher-lecture-controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #e1e1e1;
+}
+
+/* 隐藏类 */
+.hidden {
+    display: none !important;
+}
+
+/* ==================== 设置弹窗样式 ==================== */
+
+.settings-section {
+    margin-bottom: 20px;
+}
+
+.settings-section h4 {
+    color: #667eea;
+    margin-bottom: 10px;
+    font-size: 16px;
+}
+
+.settings-description {
+    color: #666;
+    margin-bottom: 15px;
+    font-size: 14px;
+}
+
+.settings-help {
+    background: #f8f9fa;
+    border-left: 4px solid #667eea;
+    padding: 15px;
+    border-radius: 6px;
+    margin-top: 15px;
+}
+
+.settings-help p {
+    margin: 0 0 10px 0;
+    color: #333;
+    font-weight: 600;
+}
+
+.settings-help ol {
+    margin: 0;
+    padding-left: 20px;
+    color: #555;
+}
+
+.settings-help li {
+    margin-bottom: 5px;
+}
+
+.settings-help a {
+    color: #667eea;
+    text-decoration: underline;
+}
+
+.settings-help a:hover {
+    text-decoration: none;
+}
+
+/* ==================== 教师端图谱统计 ==================== */
+
+.teacher-graph-stats {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    padding: 15px;
+    margin-bottom: 15px;
+    color: white;
+}
+
+.teacher-stats-header {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    text-align: center;
+    color: white;
+}
+
+.teacher-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.teacher-stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    backdrop-filter: blur(10px);
+}
+
+.teacher-stat-label {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.teacher-stat-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: white;
+}
+
+.teacher-stats-section {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 10px;
+    margin-top: 10px;
+}
+
+.teacher-stats-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.top-nodes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.top-node-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+}
+
+.top-node-label {
+    font-size: 13px;
+    color: white;
+    font-weight: 500;
+}
+
+.top-node-degree {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.type-distribution {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.type-badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    color: white;
+    font-weight: 500;
+    backdrop-filter: blur(10px);
+}
+
+/* ==================== API连接错误提示（教师端） ==================== */
+
+.api-connection-error {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+    animation: fadeIn 0.3s ease;
+}
+
+.api-error-content {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    max-width: 480px;
+}
+
+.api-error-icon {
+    font-size: 48px;
+    animation: apiPulse 2s infinite;
+}
+
+.api-error-text {
+    flex: 1;
+}
+
+.api-error-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #ef4444;
+    margin-bottom: 8px;
+}
+
+.api-error-message {
+    font-size: 14px;
+    color: #666;
+}
+
+.api-error-content .button-group {
+    display: flex;
+    gap: 10px;
+}
+
+@keyframes apiPulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -45%);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%);
+    }
+}
+
+/* ==================== 图谱工具栏 ==================== */
+
+.graph-toolbar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.graph-search {
+    display: flex;
+    flex: 1;
+    min-width: 200px;
+    gap: 8px;
+}
+
+.graph-search .input-field {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #e1e1e1;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.graph-search .input-field:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.graph-filter .input-field {
+    padding: 8px;
+    border: 1px solid #e1e1e1;
+    border-radius: 6px;
+    font-size: 14px;
+    min-width: 120px;
+}
+
+/* ==================== 图谱搜索高亮 ==================== */
+
+.node.search-highlight {
+    animation: searchPulse 1s infinite;
+    border: 2px solid #f59e0b !important;
+    box-shadow: 0 0 15px 3px rgba(245, 158, 11, 0.6);
+    z-index: 10;
+}
+
+.node.search-dimmed {
+    opacity: 0.3;
+}
+
+@keyframes searchPulse {
+    0%, 100% {
+        transform: scale(1.05);
+        box-shadow: 0 0 15px 3px rgba(245, 158, 11, 0.6);
+    }
+    50% {
+        transform: scale(1.1);
+        box-shadow: 0 0 20px 5px rgba(245, 158, 11, 0.8);
+    }
+}
+
+/* ==================== 节点详情增强 ==================== */
+
+.node-detail {
+    background: white;
+    border: 1px solid #e1e1e1;
+    border-radius: 8px;
+    padding: 15px;
+    margin-top: 15px;
+    animation: slideDown 0.3s ease;
+}
+
+.node-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e1e1e1;
+}
+
+.node-detail-header h3 {
+    margin: 0;
+    color: #667eea;
+    font-size: 16px;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

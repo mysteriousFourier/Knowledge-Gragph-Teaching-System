@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>后端知识图谱管理</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --line: #d7dce2;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --blue: #2563eb;
+      --green: #059669;
+      --amber: #d97706;
+      --red: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+    header {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    header h1 { margin: 0; font-size: 18px; font-weight: 650; }
+    main {
+      height: calc(100vh - 56px);
+      display: grid;
+      grid-template-columns: 300px minmax(460px, 1fr) 390px;
+      min-height: 640px;
+    }
+    aside, section {
+      min-width: 0;
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+    }
+    aside { padding: 14px; overflow: auto; }
+    #stage { position: relative; background: #fbfcfd; }
+    #graph-svg { width: 100%; height: 100%; display: block; cursor: grab; }
+    #detail { padding: 14px; overflow: auto; border-right: 0; }
+    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      min-height: 34px;
+      padding: 0 11px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+    }
+    button.primary { border-color: var(--blue); background: var(--blue); color: white; }
+    button.active { border-color: var(--blue); color: var(--blue); background: #eff6ff; }
+    button:hover { filter: brightness(0.97); }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 9px;
+      font: inherit;
+      background: white;
+      color: var(--text);
+    }
+    textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
+    label { display: block; margin: 12px 0 6px; font-size: 12px; color: var(--muted); font-weight: 650; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+    .stat { border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
+    .stat b { display: block; font-size: 22px; line-height: 1.1; }
+    .stat span { color: var(--muted); font-size: 12px; }
+    .segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
+    .list { display: grid; gap: 6px; margin-top: 10px; }
+    .item {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px;
+      cursor: pointer;
+      background: #fff;
+    }
+    .item:hover { border-color: var(--blue); }
+    .item-title { font-weight: 650; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-meta { margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .status { color: var(--muted); font-size: 13px; }
+    .node { cursor: grab; }
+    .node:active { cursor: grabbing; }
+    .node circle { stroke: white; stroke-width: 2; }
+    .node text { font-size: 10px; fill: #374151; pointer-events: none; }
+    .edge { stroke: #9aa4b2; stroke-opacity: .42; cursor: pointer; }
+    .edge:hover { stroke: var(--blue); stroke-opacity: .95; }
+    .edge-label { fill: #4b5563; font-size: 9px; pointer-events: none; paint-order: stroke; stroke: white; stroke-width: 3px; }
+    .selected circle { stroke: var(--red); stroke-width: 3; }
+    .relation-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      border-bottom: 1px solid #edf0f3;
+      padding: 7px 0;
+      font-size: 12px;
+    }
+    .table {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+      margin-top: 10px;
+      font-size: 12px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1.1fr 95px 1.1fr;
+      gap: 8px;
+      padding: 8px;
+      border-bottom: 1px solid #edf0f3;
+      cursor: pointer;
+      background: white;
+    }
+    .row:hover { background: #f8fbff; }
+    .badge {
+      display: inline-block;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: #eef2f7;
+      color: #334155;
+      font-size: 12px;
+      margin: 3px 4px 3px 0;
+    }
+    @media (max-width: 1100px) {
+      main { grid-template-columns: 260px 1fr; }
+      #detail { grid-column: 1 / -1; height: 340px; border-top: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>后端知识图谱管理</h1>
+    <div class="toolbar">
+      <span id="status" class="status">加载中</span>
+      <button onclick="zoomBy(1.18)">放大</button>
+      <button onclick="zoomBy(0.84)">缩小</button>
+      <button onclick="forceRelayout()">力导向重排</button>
+      <button onclick="showFormulaRelations()">公式关系</button>
+      <button onclick="resetView()">重置视图</button>
+      <button onclick="loadGraph()">刷新</button>
+      <button onclick="location.href='/viz'">旧版视图</button>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <input id="search" placeholder="搜索节点、内容、类型或章节" oninput="render()">
+      <label>视图</label>
+      <div class="segmented">
+        <button id="view-network" class="active" onclick="setView('network')">图谱</button>
+        <button id="view-focus" onclick="setView('focus')">聚焦</button>
+        <button id="view-table" onclick="setView('table')">关系表</button>
+      </div>
+      <label>节点类型</label>
+      <select id="type-filter" onchange="render()"><option value="">全部</option></select>
+      <label>关系类型</label>
+      <select id="relation-filter" onchange="render()"><option value="">全部</option></select>
+      <label>最大节点数</label>
+      <select id="max-nodes" onchange="render()">
+        <option value="80">80</option>
+        <option value="140" selected>140</option>
+        <option value="220">220</option>
+        <option value="all">全部</option>
+      </select>
+      <div class="stats">
+        <div class="stat"><b id="node-count">0</b><span>节点</span></div>
+        <div class="stat"><b id="edge-count">0</b><span>关系</span></div>
+      </div>
+      <div id="audit" class="muted">正在加载关系审计</div>
+      <div id="node-list" class="list"></div>
+    </aside>
+    <section id="stage">
+      <svg id="graph-svg"></svg>
+    </section>
+    <section id="detail">
+      <h2 style="margin:0 0 8px;font-size:16px;">详情</h2>
+      <div id="detail-content" class="muted">请选择一个节点或关系。</div>
+    </section>
+  </main>
+  <script>
+    let graph = { nodes: [], relations: [] };
+    let audit = null;
+    let selectedId = "";
+    let viewMode = "network";
+    let positions = new Map();
+    let visible = { nodes: [], relations: [] };
+    let viewport = { scale: 1, x: 0, y: 0 };
+    let dragState = null;
+    let panState = null;
+    let layoutSignature = "";
+
+    const colors = {
+      chapter: "#f59e0b", formula: "#10b981", table: "#0ea5e9", note: "#0ea5e9",
+      proposition: "#ef4444", derivation: "#6366f1", discussion: "#14b8a6",
+      concept: "#64748b", default: "#6b7280"
+    };
+
+    function esc(value) {
+      const div = document.createElement("div");
+      div.textContent = value == null ? "" : String(value);
+      return div.innerHTML;
+    }
+
+    function js(value) {
+      return esc(String(value || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
+    }
+
+    function labelOf(nodeOrId) {
+      const node = typeof nodeOrId === "string" ? graph.nodes.find(item => item.id === nodeOrId) : nodeOrId;
+      if (!node) return nodeOrId || "";
+      return (node.metadata && node.metadata.label) || node.label || node.id;
+    }
+
+    async function loadGraph() {
+      document.getElementById("status").textContent = "正在加载图谱";
+      const [graphResponse, auditResponse] = await Promise.all([
+        fetch("/api/graph"),
+        fetch("/api/relation-audit")
+      ]);
+      const result = await graphResponse.json();
+      const auditResult = await auditResponse.json();
+      if (!result.success) throw new Error(result.error || "load failed");
+      graph = result.data || { nodes: [], relations: [] };
+      audit = auditResult.audit || null;
+      document.getElementById("node-count").textContent = graph.nodes.length;
+      document.getElementById("edge-count").textContent = graph.relations.length;
+      fillFilters();
+      renderAudit();
+      render();
+      document.getElementById("status").textContent = `已加载 ${graph.nodes.length} 个节点 / ${graph.relations.length} 条关系`;
+    }
+
+    function renderAudit() {
+      const el = document.getElementById("audit");
+      if (!audit) {
+        el.textContent = "暂无审计数据";
+        return;
+      }
+      const semantic = audit.semantic_count || 0;
+      const structural = audit.structural_count || 0;
+      const candidates = audit.semantic_candidate_count || 0;
+      el.innerHTML = `
+        <div style="border:1px solid var(--line);border-radius:6px;padding:9px;background:#fafafa;">
+          <div><b>关系审计</b></div>
+          <div>结构/引用关系: ${structural}</div>
+          <div>语义/候选关系: ${semantic}（生成 ${candidates} 条）</div>
+          <div>平均度: ${audit.avg_degree}，孤立节点: ${audit.isolated_count}</div>
+          <div style="margin-top:5px;">${Object.entries(audit.type_counts || {}).map(([k, v]) => `<span class="badge">${esc(k)} ${v}</span>`).join("")}</div>
+        </div>`;
+    }
+
+    function fillFilters() {
+      const typeSelect = document.getElementById("type-filter");
+      const relationSelect = document.getElementById("relation-filter");
+      const currentType = typeSelect.value;
+      const currentRel = relationSelect.value;
+      const types = Array.from(new Set(graph.nodes.map(n => n.type || "concept"))).sort();
+      const relations = Array.from(new Set(graph.relations.map(r => r.relation_type || "related"))).sort();
+      typeSelect.innerHTML = '<option value="">全部</option>' + types.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+      relationSelect.innerHTML = '<option value="">全部</option>' + relations.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+      if (types.includes(currentType)) typeSelect.value = currentType;
+      if (relations.includes(currentRel)) relationSelect.value = currentRel;
+    }
+
+    function setView(mode) {
+      viewMode = mode;
+      ["network", "focus", "table"].forEach(name => {
+        document.getElementById(`view-${name}`).classList.toggle("active", name === mode);
+      });
+      render();
+    }
+
+    function filteredNodesBase() {
+      const term = document.getElementById("search").value.trim().toLowerCase();
+      const type = document.getElementById("type-filter").value;
+      const maxValue = document.getElementById("max-nodes").value || "140";
+      const max = maxValue === "all" ? graph.nodes.length : Number(maxValue);
+      let nodes = graph.nodes.filter(node => {
+        const metadata = node.metadata || {};
+        const text = [node.id, node.label, node.type, node.content, metadata.label, metadata.chapter].join(" ").toLowerCase();
+        return (!type || node.type === type) && (!term || text.includes(term));
+      });
+      if (viewMode === "focus" && selectedId) {
+        const connected = new Set([selectedId]);
+        graph.relations.forEach(rel => {
+          if (rel.source_id === selectedId) connected.add(rel.target_id);
+          if (rel.target_id === selectedId) connected.add(rel.source_id);
+        });
+        nodes = graph.nodes.filter(node => connected.has(node.id));
+      }
+      return nodes.slice(0, max);
+    }
+
+    function filteredRelations(nodes) {
+      const ids = new Set(nodes.map(n => n.id));
+      const relType = document.getElementById("relation-filter").value;
+      return graph.relations
+        .filter(r => ids.has(r.source_id) && ids.has(r.target_id))
+        .filter(r => !relType || r.relation_type === relType)
+        .slice(0, relType ? 1200 : (viewMode === "focus" ? 500 : 360));
+    }
+
+    function render() {
+      const nodes = filteredNodesBase();
+      const relations = filteredRelations(nodes);
+      visible = { nodes, relations };
+      renderList(nodes);
+      if (viewMode === "table") {
+        renderTable(relations);
+      } else {
+        renderSvg(nodes, relations, true);
+      }
+    }
+
+    function renderList(nodes) {
+      document.getElementById("node-list").innerHTML = nodes.slice(0, 70).map(node => {
+        const chapter = (node.metadata && node.metadata.chapter) || "";
+        return `<div class="item" onclick="showNode('${js(node.id)}')">
+          <div class="item-title">${esc(labelOf(node))}</div>
+          <div class="item-meta">${esc(node.type || "concept")}${chapter ? " / " + esc(chapter) : ""}</div>
+        </div>`;
+      }).join("");
+    }
+
+    function renderTable(relations) {
+      const svg = document.getElementById("graph-svg");
+      svg.innerHTML = `<foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:16px;height:100%;overflow:auto;">
+        <div class="table">${relations.map(rel => `<div class="row" onclick="showRelation('${js(rel.id)}')">
+          <div>${esc(labelOf(rel.source_id))}</div>
+          <div><b>${esc(rel.relation_type || "related")}</b></div>
+          <div>${esc(labelOf(rel.target_id))}</div>
+        </div>`).join("") || '<div class="row"><div>暂无关系</div><div></div><div></div></div>'}</div>
+      </div></foreignObject>`;
+    }
+
+    function initialPosition(node, index, count, width, height) {
+      const saved = positions.get(node.id);
+      if (saved) return saved;
+      const angle = (Math.PI * 2 * index) / Math.max(count, 1);
+      const radius = node.type === "chapter" ? 0 : Math.max(130, Math.min(width, height) * (0.25 + (index % 4) * 0.045));
+      const p = { x: width / 2 + Math.cos(angle) * radius, y: height / 2 + Math.sin(angle) * radius, vx: 0, vy: 0, fixed: false };
+      positions.set(node.id, p);
+      return p;
+    }
+
+    function layout(nodes, relations, width, height) {
+      const map = new Map(nodes.map((node, index) => [node.id, initialPosition(node, index, nodes.length, width, height)]));
+      for (let step = 0; step < 130; step++) {
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j++) {
+            const a = map.get(nodes[i].id);
+            const b = map.get(nodes[j].id);
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const force = Math.min(900 / (dist * dist), 0.7);
+            dx /= dist; dy /= dist;
+            if (!a.fixed) { a.vx -= dx * force; a.vy -= dy * force; }
+            if (!b.fixed) { b.vx += dx * force; b.vy += dy * force; }
+          }
+        }
+        relations.forEach(rel => {
+          const a = map.get(rel.source_id);
+          const b = map.get(rel.target_id);
+          if (!a || !b) return;
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const target = rel.relation_type === "contains" ? 110 : 145;
+          const force = (dist - target) * 0.012;
+          dx /= dist; dy /= dist;
+          if (!a.fixed) { a.vx += dx * force; a.vy += dy * force; }
+          if (!b.fixed) { b.vx -= dx * force; b.vy -= dy * force; }
+        });
+        map.forEach(p => {
+          if (p.fixed) return;
+          p.vx += (width / 2 - p.x) * 0.0009;
+          p.vy += (height / 2 - p.y) * 0.0009;
+          p.vx *= 0.82; p.vy *= 0.82;
+          p.x = Math.max(24, Math.min(width - 24, p.x + p.vx));
+          p.y = Math.max(24, Math.min(height - 24, p.y + p.vy));
+        });
+      }
+    }
+
+    function renderSvg(nodes, relations, allowLayout = false) {
+      const svg = document.getElementById("graph-svg");
+      const box = svg.getBoundingClientRect();
+      const width = Math.max(box.width, 680);
+      const height = Math.max(box.height, 560);
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      const signature = `${viewMode}|${nodes.map(n => n.id).join("|")}|${relations.map(r => r.id).join("|")}|${width}|${height}`;
+      if (allowLayout || signature !== layoutSignature) {
+        layout(nodes, relations, width, height);
+        layoutSignature = signature;
+      }
+      svg.innerHTML = "";
+
+      const background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      background.setAttribute("x", 0);
+      background.setAttribute("y", 0);
+      background.setAttribute("width", width);
+      background.setAttribute("height", height);
+      background.setAttribute("fill", "transparent");
+      background.onpointerdown = event => startPan(event);
+      svg.appendChild(background);
+
+      const root = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      root.setAttribute("transform", `translate(${viewport.x},${viewport.y}) scale(${viewport.scale})`);
+      svg.appendChild(root);
+
+      relations.forEach(rel => {
+        const a = positions.get(rel.source_id);
+        const b = positions.get(rel.target_id);
+        if (!a || !b) return;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("class", "edge");
+        line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
+        line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
+        line.setAttribute("stroke-width", rel.relation_type === "contains" ? 1.4 : 1.8);
+        line.onclick = event => { event.stopPropagation(); showRelation(rel.id); };
+        root.appendChild(line);
+        if (document.getElementById("relation-filter").value || viewMode === "focus" || relations.length < 120) {
+          const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          text.setAttribute("class", "edge-label");
+          text.setAttribute("x", (a.x + b.x) / 2);
+          text.setAttribute("y", (a.y + b.y) / 2);
+          text.textContent = (rel.relation_type || "related").slice(0, 22);
+          root.appendChild(text);
+        }
+      });
+
+      nodes.forEach(node => {
+        const p = positions.get(node.id);
+        const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        group.setAttribute("class", "node" + (selectedId === node.id ? " selected" : ""));
+        group.setAttribute("transform", `translate(${p.x},${p.y})`);
+        group.onpointerdown = event => startNodeDrag(event, node.id);
+        group.onclick = event => { event.stopPropagation(); showNode(node.id); };
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        const degree = relations.filter(r => r.source_id === node.id || r.target_id === node.id).length;
+        circle.setAttribute("r", node.type === "chapter" ? 18 : Math.min(18, 8 + degree * 0.8));
+        circle.setAttribute("fill", colors[node.type] || colors.default);
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", 14);
+        text.setAttribute("y", 4);
+        text.textContent = labelOf(node).slice(0, viewMode === "focus" ? 48 : 30);
+        group.appendChild(circle);
+        group.appendChild(text);
+        root.appendChild(group);
+      });
+
+      svg.onwheel = event => {
+        event.preventDefault();
+        zoomBy(event.deltaY < 0 ? 1.12 : 0.88, event);
+      };
+    }
+
+    function startNodeDrag(event, nodeId) {
+      event.preventDefault();
+      event.stopPropagation();
+      const p = positions.get(nodeId);
+      p.fixed = true;
+      dragState = { nodeId, startX: event.clientX, startY: event.clientY, x: p.x, y: p.y };
+      window.onpointermove = moveNodeDrag;
+      window.onpointerup = stopNodeDrag;
+    }
+
+    function moveNodeDrag(event) {
+      if (!dragState) return;
+      const p = positions.get(dragState.nodeId);
+      p.x = dragState.x + (event.clientX - dragState.startX) / viewport.scale;
+      p.y = dragState.y + (event.clientY - dragState.startY) / viewport.scale;
+      renderSvg(visible.nodes, visible.relations);
+    }
+
+    function stopNodeDrag() {
+      dragState = null;
+      window.onpointermove = null;
+      window.onpointerup = null;
+    }
+
+    function startPan(event) {
+      if (viewMode === "table") return;
+      event.preventDefault();
+      panState = {
+        startX: event.clientX,
+        startY: event.clientY,
+        x: viewport.x,
+        y: viewport.y
+      };
+      window.onpointermove = movePan;
+      window.onpointerup = stopPan;
+    }
+
+    function movePan(event) {
+      if (!panState) return;
+      viewport.x = panState.x + event.clientX - panState.startX;
+      viewport.y = panState.y + event.clientY - panState.startY;
+      renderSvg(visible.nodes, visible.relations);
+    }
+
+    function stopPan() {
+      panState = null;
+      window.onpointermove = null;
+      window.onpointerup = null;
+    }
+
+    function zoomBy(multiplier, event = null) {
+      const svg = document.getElementById("graph-svg");
+      const box = svg.getBoundingClientRect();
+      const oldScale = viewport.scale;
+      const nextScale = Math.max(0.25, Math.min(4.0, oldScale * multiplier));
+      const cx = event ? event.clientX - box.left : box.width / 2;
+      const cy = event ? event.clientY - box.top : box.height / 2;
+      const graphX = (cx - viewport.x) / oldScale;
+      const graphY = (cy - viewport.y) / oldScale;
+      viewport.scale = nextScale;
+      viewport.x = cx - graphX * nextScale;
+      viewport.y = cy - graphY * nextScale;
+      renderSvg(visible.nodes, visible.relations);
+    }
+
+    function forceRelayout() {
+      positions.clear();
+      layoutSignature = "";
+      render();
+    }
+
+    function showFormulaRelations() {
+      document.getElementById("search").value = "";
+      document.getElementById("type-filter").value = "";
+      document.getElementById("relation-filter").value = "references_formula";
+      document.getElementById("max-nodes").value = "all";
+      positions.clear();
+      layoutSignature = "";
+      setView("network");
+    }
+
+    function resetView() {
+      viewport = { scale: 1, x: 0, y: 0 };
+      positions.clear();
+      layoutSignature = "";
+      render();
+    }
+
+    async function showNode(nodeId) {
+      selectedId = nodeId;
+      if (viewMode === "focus") render();
+      const response = await fetch(`/api/node?node_id=${encodeURIComponent(nodeId)}`);
+      const result = await response.json();
+      const node = result.node || {};
+      const metadata = node.metadata || {};
+      const relResponse = await fetch(`/api/relations?node_id=${encodeURIComponent(nodeId)}`);
+      const relResult = await relResponse.json();
+      const relations = relResult.relations || [];
+      document.getElementById("detail-content").innerHTML = `
+        <div class="muted">${esc(node.id)}</div>
+        <label>节点名称</label>
+        <input id="node-label" value="${esc(metadata.label || node.label || node.id)}">
+        <label>节点内容</label>
+        <textarea id="node-content">${esc(node.content || "")}</textarea>
+        <button class="primary" onclick="saveNode('${js(node.id)}')">保存节点</button>
+        <label>关联关系</label>
+        <div>${relations.map(r => relationRow(nodeId, r)).join("") || '<div class="muted">暂无关系</div>'}</div>
+      `;
+      renderSvg(visible.nodes, visible.relations);
+    }
+
+    function relationRow(nodeId, relation) {
+      const other = relation.source_id === nodeId ? relation.target_id : relation.source_id;
+      const sourceMark = (relation.metadata && relation.metadata.relation_source) ? ` / ${relation.metadata.relation_source}` : "";
+      return `<div class="relation-row">
+        <div><b>${esc(relation.relation_type)}${esc(sourceMark)}</b><br><span class="muted">${esc(labelOf(other))}</span></div>
+        <button onclick="showRelation('${js(relation.id)}')">编辑</button>
+      </div>`;
+    }
+
+    function showRelation(relationId) {
+      const relation = graph.relations.find(r => r.id === relationId);
+      if (!relation) return;
+      selectedId = relationId;
+      const metadata = relation.metadata || {};
+      document.getElementById("detail-content").innerHTML = `
+        <div class="muted">${esc(relation.id)}</div>
+        <label>源节点</label><input id="rel-source" value="${esc(relation.source_id || "")}">
+        <label>目标节点</label><input id="rel-target" value="${esc(relation.target_id || "")}">
+        <label>关系类型</label><input id="rel-type" value="${esc(relation.relation_type || "related")}">
+        <label>关系说明</label><textarea id="rel-description">${esc(metadata.description || "")}</textarea>
+        <button class="primary" onclick="saveRelation('${js(relation.id)}')">保存关系</button>
+      `;
+    }
+
+    async function saveNode(nodeId) {
+      const node = graph.nodes.find(n => n.id === nodeId);
+      const metadata = Object.assign({}, node && node.metadata || {}, { label: document.getElementById("node-label").value });
+      const response = await fetch("/api/update-node", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ node_id: nodeId, content: document.getElementById("node-content").value, metadata })
+      });
+      const result = await response.json();
+      document.getElementById("status").textContent = result.success ? "节点已保存" : result.error;
+      await loadGraph();
+      showNode(nodeId);
+    }
+
+    async function saveRelation(relationId) {
+      const response = await fetch("/api/update-relation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          relation_id: relationId,
+          source_id: document.getElementById("rel-source").value,
+          target_id: document.getElementById("rel-target").value,
+          relation_type: document.getElementById("rel-type").value,
+          metadata: { description: document.getElementById("rel-description").value }
+        })
+      });
+      const result = await response.json();
+      document.getElementById("status").textContent = result.success ? "关系已保存" : result.error;
+      await loadGraph();
+      showRelation(relationId);
+    }
+
+    window.addEventListener("resize", render);
+    loadGraph().catch(error => {
+      document.getElementById("status").textContent = error.message;
+    });
+  </script>
+</body>
+</html>

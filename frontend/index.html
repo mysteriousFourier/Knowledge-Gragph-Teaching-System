@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识图谱教学系统</title>
+    <meta name="description" content="知识图谱教学系统入口，连接教师备课、学生学习、图谱维护和 AI 问答。">
+    <link rel="stylesheet" href="home.css?v=3">
+    <script src="env-config.js?v=15" charset="UTF-8"></script>
+    <script src="home.js?v=3" defer></script>
+</head>
+<body>
+    <canvas id="matrix-canvas" class="matrix-canvas" aria-hidden="true"></canvas>
+
+    <header class="site-nav">
+        <div class="nav-inner">
+            <a class="brand" href="#overview" aria-label="知识图谱教学系统首页">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <span class="brand-name">知识图谱教学系统</span>
+            </a>
+            <nav class="nav-links" aria-label="主页导航">
+                <a href="#overview">概览</a>
+                <a href="#architecture">架构</a>
+                <a href="#capabilities">能力</a>
+                <a href="#entry">入口</a>
+            </nav>
+            <a class="nav-action" href="graph.html">图谱后台</a>
+        </div>
+    </header>
+
+    <main>
+        <section id="overview" class="hero">
+            <div class="hero-content">
+                <p class="kicker">KNOWLEDGE GRAPH TEACHING SYSTEM</p>
+                <h1>知识图谱教学系统</h1>
+                <p class="hero-copy">
+                    面向课堂的知识图谱教学系统。把章节、教案、练习、问答和图谱维护收束到同一个本地运行环境。
+                </p>
+                <div class="hero-actions" aria-label="核心入口">
+                    <a class="action-link action-primary" href="student.html">进入学生端</a>
+                    <a class="action-link" href="teacher.html">进入教师端</a>
+                    <a class="action-link action-muted" href="api-config.html">API 配置</a>
+                </div>
+            </div>
+
+            <div class="runtime-row" aria-label="运行状态">
+                <div class="runtime-item">
+                    <span id="status-education" class="status-dot" data-state="checking"></span>
+                    <span>EDU API</span>
+                    <strong>8001</strong>
+                </div>
+                <div class="runtime-item">
+                    <span id="status-maintenance" class="status-dot" data-state="checking"></span>
+                    <span>MAINT API</span>
+                    <strong>8002</strong>
+                </div>
+                <div class="runtime-item">
+                    <span id="status-admin" class="status-dot" data-state="checking"></span>
+                    <span>GRAPH ADMIN</span>
+                    <strong>8080</strong>
+                </div>
+            </div>
+        </section>
+
+        <section id="architecture" class="split-section">
+            <div class="section-copy">
+                <p class="section-label">SYSTEM ARCHITECTURE</p>
+                <h2>静态前端，Python 后端，图谱数据在本地流转。</h2>
+                <p>
+                    首页只作为入口层存在。实际业务仍由现有学生端、教师端、维护 API、教育 API 和后端图谱管理页承担。
+                </p>
+            </div>
+            <div class="flow-map" aria-label="系统架构">
+                <div class="flow-node node-front">静态前端</div>
+                <div class="flow-line"></div>
+                <div class="flow-node node-api">FastAPI 服务</div>
+                <div class="flow-line"></div>
+                <div class="flow-node node-graph">知识图谱 / 向量索引</div>
+                <div class="flow-terminal">
+                    <span>start.bat</span>
+                    <span>education: 8001</span>
+                    <span>maintenance: 8002</span>
+                    <span>frontend: 3000</span>
+                </div>
+            </div>
+        </section>
+
+        <section id="capabilities" class="capability-section">
+            <div class="section-heading">
+                <p class="section-label">CAPABILITIES</p>
+                <h2>课堂工作流的四个核心面板</h2>
+            </div>
+            <div class="capability-grid">
+                <article class="capability-card">
+                    <span class="card-index">01</span>
+                    <h3>教师备课</h3>
+                    <p>导入章节与图谱文件，生成授课文稿，并在授课过程中补充知识点。</p>
+                </article>
+                <article class="capability-card">
+                    <span class="card-index">02</span>
+                    <h3>学生学习</h3>
+                    <p>按章节学习、播放讲解、生成练习，并根据学习路径复习前置知识。</p>
+                </article>
+                <article class="capability-card">
+                    <span class="card-index">03</span>
+                    <h3>图谱维护</h3>
+                    <p>维护节点、关系、GraphML 导入、结构化扫描和知识图谱分析。</p>
+                </article>
+                <article class="capability-card">
+                    <span class="card-index">04</span>
+                    <h3>AI 问答</h3>
+                    <p>结合图谱检索与本地上下文，为课堂提问、练习讲解和复习提供回答。</p>
+                </article>
+            </div>
+        </section>
+
+        <section id="api" class="api-section">
+            <div class="section-copy">
+                <p class="section-label">API SURFACE</p>
+                <h2>当前主页复用现有服务地址。</h2>
+                <p>
+                    `env-config.js` 仍然由启动脚本生成。后续部署时，只需要把服务基础地址改为线上 API 地址。
+                </p>
+            </div>
+            <div class="terminal-panel">
+                <div class="terminal-titlebar">
+                    <span>runtime.config</span>
+                    <button type="button" class="copy-button" data-copy-api>复制</button>
+                </div>
+                <pre id="api-snippet"><code>GET  /api/health
+POST /api/education/ask-question
+POST /api/education/generate-lecture
+GET  /api/maintenance/graph
+POST /api/maintenance/scan-structured</code></pre>
+            </div>
+        </section>
+
+        <section id="entry" class="entry-section">
+            <div class="section-heading">
+                <p class="section-label">LAUNCH</p>
+                <h2>选择你要进入的工作台</h2>
+            </div>
+            <div class="entry-grid">
+                <a class="entry-card" href="student.html">
+                    <span>STUDENT</span>
+                    <strong>学生端</strong>
+                    <small>学习、练习、提问</small>
+                </a>
+                <a class="entry-card" href="teacher.html">
+                    <span>TEACHER</span>
+                    <strong>教师端</strong>
+                    <small>备课、授课、生成文稿</small>
+                </a>
+                <a class="entry-card" href="graph.html">
+                    <span>GRAPH</span>
+                    <strong>图谱后台</strong>
+                    <small>节点、关系、可视化</small>
+                </a>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

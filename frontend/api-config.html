@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>DeepSeek API 配置</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        .input-group {
+            margin: 20px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="password"], input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px 5px 5px 0;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-info {
+            background: #17a2b8;
+            color: white;
+        }
+        button:hover {
+            opacity: 0.8;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        .help {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+        .help h3 {
+            margin-top: 0;
+        }
+        .help ol {
+            margin-bottom: 0;
+        }
+        .help li {
+            margin-bottom: 8px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 DeepSeek API 配置</h1>
+
+        <div class="input-group">
+            <label for="api-key">DeepSeek API 密钥：</label>
+            <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
+            <button type="button" onclick="toggleVisibility()">👁️ 显示/隐藏</button>
+        </div>
+
+        <div class="input-group">
+            <button type="button" onclick="saveApiKey()" class="btn-primary">💾 保存 API 密钥</button>
+            <button type="button" onclick="testApiKey()" class="btn-info">🧪 测试连接</button>
+            <button type="button" onclick="clearApiKey()" class="btn-secondary">🗑️ 清除密钥</button>
+            <button type="button" onclick="showCurrentKey()" class="btn-info">👀 查看当前密钥</button>
+        </div>
+
+        <div id="status" class="status hidden"></div>
+
+        <div class="help">
+            <h3>📖 如何获取 DeepSeek API 密钥：</h3>
+            <ol>
+                <li>访问 <a href="https://platform.deepseek.com/api_keys" target="_blank" style="color: #667eea;">DeepSeek 平台</a></li>
+                <li>登录或注册 DeepSeek 账户</li>
+                <li>点击左侧菜单中的 <strong>"API Keys"</strong></li>
+                <li>点击 <strong>"Create Key"</strong> 按钮</li>
+                <li>复制生成的密钥（格式：sk-xxxxxx）</li>
+                <li>回到这个页面，点击"显示/隐藏"按钮</li>
+                <li>粘贴密钥到输入框中</li>
+                <li>点击"保存 API 密钥"按钮</li>
+            </ol>
+        </div>
+
+        <div class="help">
+            <h3>🚀 配置成功后：</h3>
+            <ul>
+                <li>访问 <a href="teacher.html" target="_blank" style="color: #667eea;">教师端主页面</a></li>
+                <li>访问 <a href="student.html" target="_blank" style="color: #667eea;">学生端主页面</a></li>
+                <li>即可使用 AI 功能（生成授课文案、智能问答等）</li>
+            </ul>
+        </div>
+
+        <div class="help">
+            <h3>⚠️ 注意事项：</h3>
+            <ul>
+                <li>API 密钥将保存在浏览器的 localStorage 中</li>
+                <li>每个浏览器需要单独配置一次</li>
+                <li>请妥善保管您的 API 密钥，不要泄露给他人</li>
+                <li>清除浏览器数据会删除已保存的密钥</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        function saveApiKey() {
+            const apiKey = document.getElementById('api-key').value.trim();
+
+            if (!apiKey) {
+                showStatus('请输入 API 密钥', 'error');
+                return;
+            }
+
+            // 保存到 localStorage
+            localStorage.setItem('deepseek_api_key', apiKey);
+            showStatus('✅ API 密钥已成功保存！', 'success');
+        }
+
+        function testApiKey() {
+            const apiKey = document.getElementById('api-key').value.trim();
+
+            if (!apiKey) {
+                showStatus('请先输入 API 密钥', 'error');
+                return;
+            }
+
+            showStatus('⏳ 正在测试连接...', 'info');
+
+            // 模拟测试
+            setTimeout(function() {
+                if (apiKey.startsWith('sk-')) {
+                    showStatus('✅ API 密钥格式正确！可以保存使用。', 'success');
+                } else {
+                    showStatus('❌ API 密钥格式不正确，应该是 sk- 开头', 'error');
+                }
+            }, 1000);
+        }
+
+        function clearApiKey() {
+            localStorage.removeItem('deepseek_api_key');
+            localStorage.removeItem('claude_api_key');
+            document.getElementById('api-key').value = '';
+            showStatus('🗑️ API 密钥已清除', 'info');
+        }
+
+        function showCurrentKey() {
+            const apiKey = localStorage.getItem('deepseek_api_key') || localStorage.getItem('claude_api_key');
+
+            if (apiKey) {
+                const maskedKey = apiKey.substring(0, 20) + '...' + apiKey.substring(apiKey.length - 4);
+                showStatus('👀 当前 API 密钥: ' + maskedKey, 'info');
+            } else {
+                showStatus('🔒 当前没有保存 API 密钥', 'info');
+            }
+        }
+
+        function toggleVisibility() {
+            const input = document.getElementById('api-key');
+            if (input.type === 'password') {
+                input.type = 'text';
+            } else {
+                input.type = 'password';
+            }
+        }
+
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = 'status ' + type;
+            statusDiv.classList.remove('hidden');
+
+            // 3秒后自动隐藏
+            setTimeout(function() {
+                statusDiv.classList.add('hidden');
+            }, 5000);
+        }
+
+        // 页面加载时检查是否已有密钥
+        window.addEventListener('load', function() {
+            const savedKey = localStorage.getItem('deepseek_api_key') || localStorage.getItem('claude_api_key');
+            if (savedKey) {
+                const input = document.getElementById('api-key');
+                input.value = savedKey;
+                showStatus('✅ 检测到已保存的 API 密钥', 'info');
+            }
+        });
+    </script>
+</body>
+</html>

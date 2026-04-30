@@ -1,0 +1,1075 @@
+{
+  "metadata": {
+    "total_formulas": 82,
+    "block_formulas": 82,
+    "inline_formulas": 0
+  },
+  "formulas": [
+    {
+      "id": "6.1",
+      "label_format": "Equation 6.1",
+      "latex": "\\bar {z} = \\sum_ {i = 1} ^ {N} q _ {i} z _ {i}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "t z can be any trait measure. For example, if x denotes the value of a trait, taking $ z=(x-\\mu_{x})^{2} $ or $ z=(x-\\mu_{x})^{4} $ gives the response in the variance and the fourth moment, respectively. Averaging over all categories, the mean trait value is Suppose that the members of category i leave a total of $ n_{i} $ descendants (the absolute fitness, $ W_{i} $ for that category). The average number of descendants over categories (the mean fitness) is $$ \\overline {{W}} = \\sum_ {i = 1} ^ {N} q _ {i} W _ {",
+      "description": null
+    },
+    {
+      "id": "6.2a",
+      "label_format": "Equation 6.2a",
+      "latex": "\\overline {{W}} = \\sum_ {i = 1} ^ {N} q _ {i} W _ {i}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "$$ \\bar {z} = \\sum_ {i = 1} ^ {N} q _ {i} z _ {i} $$ Suppose that the members of category i leave a total of $ n_{i} $ descendants (the absolute fitness, $ W_{i} $ for that category). The average number of descendants over categories (the mean fitness) is The relative fitness of category $i$ is $w_{i} = W_{i} / \\overline{W}$. Price's key idea was to define $ q_{i}^{\\prime} $ as the frequency of all descendants that have category i as their ancestor $$ q _ {i} ^ {\\prime} = w _ {i} q _ {i} $$ Note, in partic",
+      "description": null
+    },
+    {
+      "id": "6.2b",
+      "label_format": "Equation 6.2b",
+      "latex": "q _ {i} ^ {\\prime} = w _ {i} q _ {i}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "$$ \\overline {{W}} = \\sum_ {i = 1} ^ {N} q _ {i} W _ {i} $$ The relative fitness of category $i$ is $w_{i} = W_{i} / \\overline{W}$. Price's key idea was to define $ q_{i}^{\\prime} $ as the frequency of all descendants that have category i as their ancestor Note, in particular, that $ q_{i}^{\\prime} $ is not the frequency of descendants in category i, but rather the fraction of all descendants that are from ancestors in category i. The focus is entirely on the categories of ancestors, not on which categories th",
+      "description": null
+    },
+    {
+      "id": "6.3a",
+      "label_format": "Equation 6.3a",
+      "latex": "\\bar {z} _ {i} = z _ {i} + \\bar {\\delta} _ {i}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "in the offspring, but all have only Aa parents. Now consider the transmission phase (which more generally includes everything other than selection). Let $ \\overline{z}_{i} $ denote the mean value of the descendants from category i, which we can decompose as namely, the mean value, $ z_{i} $ of their ancestors plus a deviation, $ \\overline{\\delta}_{i} $ , due to imperfect transmission. Taking the average over all ancestral categories, the average trait value over all the descendants becomes $$ \\bar {z} ^ {\\prim",
+      "description": null
+    },
+    {
+      "id": "6.3b",
+      "label_format": "Equation 6.3b",
+      "latex": "\\bar {z} ^ {\\prime} = \\sum_ {i} q _ {i} ^ {\\prime} \\bar {z} _ {i}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "ar {\\delta} _ {i} $$ namely, the mean value, $ z_{i} $ of their ancestors plus a deviation, $ \\overline{\\delta}_{i} $ , due to imperfect transmission. Taking the average over all ancestral categories, the average trait value over all the descendants becomes Recalling Equations 6.1, 6.2b, and 6.3b, the response in trait value, $ R_{z}=\\overline{z}^{\\prime}-\\overline{z} $ ,becomes $$ \\begin{array}{l} R _ {z} = \\sum_ {i} q _ {i} ^ {\\prime} \\bar {z} _ {i} - \\sum_ {i} q _ {i} z _ {i} \\\\ = \\left(\\sum_ {i} q _ {i} ^",
+      "description": null
+    },
+    {
+      "id": "6.4",
+      "label_format": "Equation 6.4",
+      "latex": "\\begin{array}{l} R _ {z} = \\sum_ {i} q _ {i} ^ {\\prime} \\bar {z} _ {i} - \\sum_ {i} q _ {i} z _ {i} \\\\ = \\left(\\sum_ {i} q _ {i} ^ {\\prime} z _ {i} - \\sum_ {i} q _ {i} z _ {i}\\right) + \\left(\\sum_ {i} q _ {i} ^ {\\prime} \\bar {z} _ {i} - \\sum_ {i} q _ {i} ^ {\\prime} z _ {i}\\right) \\\\ = \\sum_ {i} \\left(q _ {i} ^ {\\prime} - q _ {i}\\right) z _ {i} + \\sum_ {i} q _ {i} ^ {\\prime} \\left(\\bar {z} _ {i} - z _ {i}\\right) \\\\ = \\sum_ {i} \\Delta q _ {i} z _ {i} + \\sum_ {i} q _ {i} ^ {\\prime} \\bar {\\delta} _ {i} \\\\ \\end{array}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "es, the average trait value over all the descendants becomes $$ \\bar {z} ^ {\\prime} = \\sum_ {i} q _ {i} ^ {\\prime} \\bar {z} _ {i} $$ Recalling Equations 6.1, 6.2b, and 6.3b, the response in trait value, $ R_{z}=\\overline{z}^{\\prime}-\\overline{z} $ ,becomes The second line follows by adding and subtracting $ \\sum q_{i}^{\\prime} z_{i} $ , and the third by suitably gathering terms. This version of the Price equation is based on Frank (1997, 2012). The first term (containing $ \\Delta q_{i} z_{i} $ ) represents the",
+      "description": null
+    },
+    {
+      "id": "6.5a",
+      "label_format": "Equation 6.5a",
+      "latex": "\\begin{array}{l} \\sum_ {i} \\Delta q _ {i} z _ {i} = \\sum_ {i} \\left(w _ {i} q _ {i} - q _ {i}\\right) z _ {i} = \\sum_ {i} w _ {i} z _ {i} q _ {i} - \\sum z _ {i} q _ {i} = E \\left(w _ {i} z _ {i}\\right) - E (z) \\cdot 1 \\\\ = E \\left(w _ {i} z _ {i}\\right) - E (z) \\cdot E (w) \\\\ = \\sigma \\left(w _ {i}, z _ {i}\\right) \\\\ \\end{array}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "composes the response into two separate components, one strictly based on the nature of selection $ (\\Delta q_{i}) $ and the other on transmission $ (\\overline{\\delta}_{i}). $ Both these terms can be expressed in a more transparent form. For the first term, Note that to obtain this result, we use the identity $ E(w)=1 $ . For the second term, $$ \\sum_ {i} q _ {i} ^ {\\prime} \\bar {\\delta} _ {i} = \\sum_ {i} q _ {i} w _ {i} \\bar {\\delta} _ {i} = E \\left(w _ {i} \\bar {\\delta} _ {i}\\right) $$ Substituting Equation",
+      "description": null
+    },
+    {
+      "id": "6.5b",
+      "label_format": "Equation 6.5b",
+      "latex": "\\sum_ {i} q _ {i} ^ {\\prime} \\bar {\\delta} _ {i} = \\sum_ {i} q _ {i} w _ {i} \\bar {\\delta} _ {i} = E \\left(w _ {i} \\bar {\\delta} _ {i}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "_ {i} = E \\left(w _ {i} z _ {i}\\right) - E (z) \\cdot 1 \\\\ = E \\left(w _ {i} z _ {i}\\right) - E (z) \\cdot E (w) \\\\ = \\sigma \\left(w _ {i}, z _ {i}\\right) \\\\ \\end{array} $$ Note that to obtain this result, we use the identity $ E(w)=1 $ . For the second term, Substituting Equations 6.5a and 6.5b into Equation 6.4 yields the more traditional form of the Price equation, $$ R _ {z} = \\bar {z} ^ {\\prime} - \\bar {z} = \\sigma \\left(w _ {i}, z _ {i}\\right) + E \\left(w _ {i} \\bar {\\delta} _ {i}\\right) $$ (Price 1970, 1",
+      "description": null
+    },
+    {
+      "id": "6.6",
+      "label_format": "Equation 6.6",
+      "latex": "R _ {z} = \\bar {z} ^ {\\prime} - \\bar {z} = \\sigma \\left(w _ {i}, z _ {i}\\right) + E \\left(w _ {i} \\bar {\\delta} _ {i}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "$ \\sum_ {i} q _ {i} ^ {\\prime} \\bar {\\delta} _ {i} = \\sum_ {i} q _ {i} w _ {i} \\bar {\\delta} _ {i} = E \\left(w _ {i} \\bar {\\delta} _ {i}\\right) $$ Substituting Equations 6.5a and 6.5b into Equation 6.4 yields the more traditional form of the Price equation, (Price 1970, 1972a). Note that all expectations are computed with respect to the pre-selection frequencies of the ancestral categories $ ( q_{i} ) $ . The first term is the covariance between phenotype and fitness (the within-generation change, S, in the mea",
+      "description": null
+    },
+    {
+      "id": "6.7a",
+      "label_format": "Equation 6.7a",
+      "latex": "E \\left(w _ {i} \\bar {\\delta} _ {i}\\right) = \\sigma \\left(w _ {i}, \\bar {\\delta} _ {i}\\right) + E \\left(w _ {i}\\right) \\cdot E \\left(\\bar {\\delta} _ {i}\\right) = \\sigma \\left(w _ {i}, \\bar {\\delta} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "ghted transmission of any changes between the value of an ancestor and the mean of its descendants. Several equivalent expressions for the Price equation are useful in that they emphasize different features. For example, using the definition of a covariance and substituting this result into Equation 6.6 yields $$ R _ {z} = \\sigma \\left(w _ {i}, z _ {i}\\right) + \\sigma \\left(w _ {i}, \\bar {\\delta} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right) $$ Using Equation 6.3a to combine the first two covariances in E",
+      "description": null
+    },
+    {
+      "id": "6.7b",
+      "label_format": "Equation 6.7b",
+      "latex": "R _ {z} = \\sigma \\left(w _ {i}, z _ {i}\\right) + \\sigma \\left(w _ {i}, \\bar {\\delta} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "igma \\left(w _ {i}, \\bar {\\delta} _ {i}\\right) + E \\left(w _ {i}\\right) \\cdot E \\left(\\bar {\\delta} _ {i}\\right) = \\sigma \\left(w _ {i}, \\bar {\\delta} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right) $$ and substituting this result into Equation 6.6 yields Using Equation 6.3a to combine the first two covariances in Equation 6.7b gives $$ R _ {z} = \\sigma \\left(w _ {i}, \\bar {z} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right) $$ Equation 6.7c relates the selection response to the covariance between the fitn",
+      "description": null
+    },
+    {
+      "id": "6.7c",
+      "label_format": "Equation 6.7c",
+      "latex": "R _ {z} = \\sigma \\left(w _ {i}, \\bar {z} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "his result into Equation 6.6 yields $$ R _ {z} = \\sigma \\left(w _ {i}, z _ {i}\\right) + \\sigma \\left(w _ {i}, \\bar {\\delta} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right) $$ Using Equation 6.3a to combine the first two covariances in Equation 6.7b gives Equation 6.7c relates the selection response to the covariance between the fitness, $ w_{i} $ of an ancestor and the mean value, $ \\overline{z}_{i} $ of its descendants. The second term, $ E(\\overline{\\delta}_{i}) $ , is often thought of as the expected cha",
+      "description": null
+    },
+    {
+      "id": "6.8",
+      "label_format": "Equation 6.8",
+      "latex": "R _ {z} = \\left\\{ \\begin{array}{l l} \\sum_ {i} \\Delta q _ {i} z _ {i} + \\sum_ {i} q _ {i} ^ {\\prime} \\bar {\\delta} _ {i} \\\\ \\sigma \\left(w _ {i}, z _ {i}\\right) + E \\left(w _ {i} \\bar {\\delta} _ {i}\\right) \\\\ \\sigma \\left(w _ {i}, z _ {i}\\right) + \\sigma \\left(w _ {i}, \\bar {\\delta} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right) \\\\ \\sigma \\left(w _ {i}, \\bar {z} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right) \\end{array} \\right.",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "e in category i, which has a frequency of $ q_{i} $ before selection and a frequency of $ q_{i}^{\\prime} $ after selection, and whose offspring have average value $ \\overline{z}_{i}=z_{i}+\\overline{\\delta}_{i} $ , then equivalent forms of Price's theorem are As noted in Table 6.1, and as will be shown shortly (Equation 6.10), the selection differential, S, can be substituted for $ \\sigma(w_{i}, z_{i}) $ in the middle two expressions of Equation 6.8. As is further shown below, many of the standard approximations",
+      "description": null
+    },
+    {
+      "id": "6.9a",
+      "label_format": "Equation 6.9a",
+      "latex": "\\bar {\\delta} _ {i} = \\bar {z} _ {i} - z _ {i} = \\mu + b \\left(z _ {i} - \\mu\\right) + e _ {i} - z _ {i} = (b - 1) \\left(z _ {i} - \\mu\\right) + e _ {i}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "fspring regression, $ z_{ij}=\\mu+b(z_{i}-\\mu)+e_{ij} $ . Here $ z_{ij} $ is the trait value for the jth offspring from midparent i, giving the mean value of offspring from i as $ \\overline{z}_{i}=\\mu+b(z_{i}-\\mu)+e_{i} $ . The expected deviation then becomes Hence, $$ \\begin{array}{l} E \\left(w _ {i} \\bar {\\delta} _ {i}\\right) = E \\left\\{w _ {i} \\left[ (b - 1) \\left(z _ {i} - \\mu\\right) + e _ {i} \\right] \\right\\} \\\\ = (b - 1) \\left[ E \\left(w _ {i} z _ {i}\\right) - \\mu E \\left(w _ {i}\\right) \\right] + E \\left(w",
+      "description": null
+    },
+    {
+      "id": "6.9b",
+      "label_format": "Equation 6.9b",
+      "latex": "R _ {z} = S + E \\left(w _ {i} \\bar {\\delta} _ {i}\\right) = S + (b - 1) \\left(S + \\mu - \\mu\\right) + \\sigma \\left(w _ {i}, e _ {i}\\right) = b S + \\sigma \\left(w _ {i}, e _ {i}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "ght) = S + 1 \\cdot \\mu $$ $$ E \\left(w _ {i} e _ {i}\\right) = \\sigma \\left(w _ {i}, e _ {i}\\right) + E \\left(w _ {i}\\right) E \\left(e _ {i}\\right) = \\sigma \\left(w _ {i}, e _ {i}\\right) + 1 \\cdot 0 $$ Putting these results together into Equation 6.6 yields Provided that the residual, $ e_{i} $ of the midparent-offspring regression and the fitness, $ w_{i} $ of the midparent are uncorrelated, $ R=bS $ . When these are uncorrelated and the midparent-offspring slope equals the heritability, $ b=h^{2} $ , we recov",
+      "description": null
+    },
+    {
+      "id": "6.10",
+      "label_format": "Equation 6.10",
+      "latex": "S = \\sigma (w, z)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_004",
+        "chapter": "chapter6",
+        "subsection": "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+      },
+      "context": "mu_{z} $ , which is the selection differential S (Chapter 13). Because the within-generation change is not influenced by cross-generation transmission, any terms involving $ \\bar{\\delta} $ in Equation 6.6 are zero, and we recover the Robertson-Price identity as first obtained by Robertson (1966a) and Price (1970). We derive this result by another route in Chapter 13, where we use this identity extensively in selection-response theory. The critical insight from Equation 6.10 is that no matter how complex the rela",
+      "description": null
+    },
+    {
+      "id": "6.11",
+      "label_format": "Equation 6.11",
+      "latex": "\\begin{array}{l} \\delta_ {i} = \\bar {z} _ {i} - z _ {i} = \\mu_ {o} + b \\left(z _ {i} - \\mu_ {p}\\right) + e _ {i} - z _ {i} \\\\ = (b - 1) z _ {i} - b \\mu_ {p} + \\mu_ {o} + e _ {i} \\\\ = (b - 1) \\left(z _ {i} - \\mu_ {p}\\right) + \\left(\\mu_ {o} - \\mu_ {p}\\right) + e _ {i} \\\\ \\end{array}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "an is the same in the offspring (o) and parental populations (p) in the absence of selection $ (\\mu_{o}=\\mu_{p}=\\mu) $ More generally, the parent and offspring means can differ, making the regression $ z_{ij}=\\mu_{o}+b(z_{i}-\\mu_{p})+e_{ij} $ , in which case Following the same logic leading to Equation 6.9b yields the response to selecition $$ R = b S + \\sigma \\left(w _ {i}, e _ {i}\\right) + \\left(\\mu_ {o} - \\mu_ {p}\\right) $$ where the last term $ \\left( \\mu_{o}-\\mu_{p}\\right) $ accounts for changes in mean p",
+      "description": null
+    },
+    {
+      "id": "6.12",
+      "label_format": "Equation 6.12",
+      "latex": "R = b S + \\sigma \\left(w _ {i}, e _ {i}\\right) + \\left(\\mu_ {o} - \\mu_ {p}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "- z _ {i} \\\\ = (b - 1) z _ {i} - b \\mu_ {p} + \\mu_ {o} + e _ {i} \\\\ = (b - 1) \\left(z _ {i} - \\mu_ {p}\\right) + \\left(\\mu_ {o} - \\mu_ {p}\\right) + e _ {i} \\\\ \\end{array} $$ Following the same logic leading to Equation 6.9b yields the response to selecition where the last term $ \\left( \\mu_{o}-\\mu_{p}\\right) $ accounts for changes in mean phenotype from parent to offspring (in the absence of selection), due, for example, to the decay of linkage disequilibrium (Chapter 15), nonrandom associations of environmenta",
+      "description": null
+    },
+    {
+      "id": "6.13a",
+      "label_format": "Equation 6.13a",
+      "latex": "\\bar {z} _ {i} = a + b z _ {i} + c z _ {i} ^ {2} + e _ {i}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "LW Chapter 10). Now suppose the parent-offspring regression is nonlinear. Assuming the simplest such departure, a quadratic, makes the key point. The mean value $ \\overline{{z}}_{i} $ of offspring from a midparent with phenotypic value $ z_{i} $ is given by Hence, $$ \\sigma \\left(w _ {i}, \\bar {z} _ {i}\\right) = b \\sigma \\left(w _ {i}, z _ {i}\\right) + c \\sigma \\left(w _ {i}, z _ {i} ^ {2}\\right) + \\sigma \\left(w _ {i}, e _ {i}\\right) $$ Assuming the residuals from the midparent-offspring regression are uncor",
+      "description": null
+    },
+    {
+      "id": "6.13b",
+      "label_format": "Equation 6.13b",
+      "latex": "\\sigma \\left(w _ {i}, \\bar {z} _ {i}\\right) = b \\sigma \\left(w _ {i}, z _ {i}\\right) + c \\sigma \\left(w _ {i}, z _ {i} ^ {2}\\right) + \\sigma \\left(w _ {i}, e _ {i}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "Assuming the simplest such departure, a quadratic, makes the key point. The mean value $ \\overline{{z}}_{i} $ of offspring from a midparent with phenotypic value $ z_{i} $ is given by $$ \\bar {z} _ {i} = a + b z _ {i} + c z _ {i} ^ {2} + e _ {i} $$ Hence, Assuming the residuals from the midparent-offspring regression are uncorrelated with the fitness of the midparent $ \\sigma \\left( w_{i}, e_{i}\\right)=0 $ , Equation 6.13b becomes $$ \\sigma \\left(w _ {i}, \\bar {z} _ {i}\\right) = b S + c \\sigma \\left(w _ {i},",
+      "description": null
+    },
+    {
+      "id": "6.13c",
+      "label_format": "Equation 6.13c",
+      "latex": "\\sigma \\left(w _ {i}, \\bar {z} _ {i}\\right) = b S + c \\sigma \\left(w _ {i}, z _ {i} ^ {2}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "\\left(w _ {i}, z _ {i} ^ {2}\\right) + \\sigma \\left(w _ {i}, e _ {i}\\right) $$ Assuming the residuals from the midparent-offspring regression are uncorrelated with the fitness of the midparent $ \\sigma \\left( w_{i}, e_{i}\\right)=0 $ , Equation 6.13b becomes From Equation 6.7c, the selection response is given by this expression plus $ E(\\bar{\\delta}_{i}) $ . Thus, with a nonlinear parent-offspring regression, selection on the variance $ z_{i}^{2} $ (i.e., $ \\sigma \\left( w_{i}, z_{i}^{2} \\right) \\neq0 $ ; see C",
+      "description": null
+    },
+    {
+      "id": "6.14",
+      "label_format": "Equation 6.14",
+      "latex": "z _ {i} = \\sum_ {j = 1} ^ {k} b _ {j} x _ {i j} + e _ {i}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "fficient may differ between selected and unselected parents. To explicate this point, we follow Frank (1997) and consider any generalized linear predictor of some value $ z_{i} $ for individual i from k underlying predictor variables $ x_{i1},\\dots,x_{ik}, $ For example, an individual's phenotype can be written as the sum of average allelic effects over all k loci plus a residual error. With a single diallelic locus, $ z_{i}=b_{1} x_{i 1}+b_{2} x_{i 2}+e_{i} $ , where $ b_{j} $ is the average effect of allele j",
+      "description": null
+    },
+    {
+      "id": "6.15a",
+      "label_format": "Equation 6.15a",
+      "latex": "\\overline {{z}} = \\sum_ {j} b _ {j} \\overline {{x}} _ {. j} = \\sum_ {j} 2 b _ {j} p _ {j}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "where $ b_{j} $ is the average effect of allele j and $ x_{ij} $ is the number of copies of allele j in individual i (values of 0,1,or 2), so that (for a diploid) $ \\overline{x}_{j}/2=p_{j} $ , the frequency of allele j. The average of Equation 6.14 becomes At some time in the future, the values of both $ p_{j} $ (the allele frequency) and $ b_{j} $ (its average effect) may change to new values $$ p _ {j} ^ {\\prime} = p _ {j} + \\Delta p _ {j} \\quad \\mathrm {a n d} \\quad b _ {j} ^ {\\prime} = b _ {j} + \\Delta b",
+      "description": null
+    },
+    {
+      "id": "6.15b",
+      "label_format": "Equation 6.15b",
+      "latex": "p _ {j} ^ {\\prime} = p _ {j} + \\Delta p _ {j} \\quad \\mathrm {a n d} \\quad b _ {j} ^ {\\prime} = b _ {j} + \\Delta b _ {j}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "quation 6.14 becomes $$ \\overline {{z}} = \\sum_ {j} b _ {j} \\overline {{x}} _ {. j} = \\sum_ {j} 2 b _ {j} p _ {j} $$ At some time in the future, the values of both $ p_{j} $ (the allele frequency) and $ b_{j} $ (its average effect) may change to new values We write the new mean as $$ \\bar {z} ^ {\\prime} = \\sum_ {j} 2 b _ {j} ^ {\\prime} p _ {j} ^ {\\prime} $$ and the same logic leading to Equation 6.4 allows us to decompose the total change as $$ \\bar {z} ^ {\\prime} - \\bar {z} = \\sum_ {j} 2 b _ {j} \\Delta p _",
+      "description": null
+    },
+    {
+      "id": "6.15c",
+      "label_format": "Equation 6.15c",
+      "latex": "\\bar {z} ^ {\\prime} = \\sum_ {j} 2 b _ {j} ^ {\\prime} p _ {j} ^ {\\prime}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "lues of both $ p_{j} $ (the allele frequency) and $ b_{j} $ (its average effect) may change to new values $$ p _ {j} ^ {\\prime} = p _ {j} + \\Delta p _ {j} \\quad \\mathrm {a n d} \\quad b _ {j} ^ {\\prime} = b _ {j} + \\Delta b _ {j} $$ We write the new mean as and the same logic leading to Equation 6.4 allows us to decompose the total change as $$ \\bar {z} ^ {\\prime} - \\bar {z} = \\sum_ {j} 2 b _ {j} \\Delta p _ {j} + \\sum_ {j} 2 p _ {j} ^ {\\prime} \\Delta b _ {j} $$ There are two sources for response: a change, $",
+      "description": null
+    },
+    {
+      "id": "6.15d",
+      "label_format": "Equation 6.15d",
+      "latex": "\\bar {z} ^ {\\prime} - \\bar {z} = \\sum_ {j} 2 b _ {j} \\Delta p _ {j} + \\sum_ {j} 2 p _ {j} ^ {\\prime} \\Delta b _ {j}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "hrm {a n d} \\quad b _ {j} ^ {\\prime} = b _ {j} + \\Delta b _ {j} $$ We write the new mean as $$ \\bar {z} ^ {\\prime} = \\sum_ {j} 2 b _ {j} ^ {\\prime} p _ {j} ^ {\\prime} $$ and the same logic leading to Equation 6.4 allows us to decompose the total change as There are two sources for response: a change, $ b_{j}\\Delta p_{j} $ , from the change in allele frequencies weighted by their original average effects, and a change, $ p_{j}^{\\prime}\\Delta b_{j} $ , in the average effects weighted by the new allele frequenci",
+      "description": null
+    },
+    {
+      "id": "6.16a",
+      "label_format": "Equation 6.16a",
+      "latex": "p ^ {\\prime} = \\frac {(1 / 2) 2 p (1 - p) + 2 p ^ {2}}{1 + p ^ {2}} = \\frac {p (1 + p)}{1 + p ^ {2}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "The trait mean before selection is $ \\mu ( p )=1-p^{2} $ , with a mean fitness of $ \\overline{{W}} ( p )=1+p^{2} $ . The new frequency, $ p^{\\prime} $ , of allele q after selection is half the frequency of Qq plus the frequency of qq (both after selection) yielding an allele-frequency change of $$ \\Delta p = p ^ {\\prime} - p = \\frac {p (1 + p)}{1 + p ^ {2}} - p \\frac {1 + p ^ {2}}{1 + p ^ {2}} = \\frac {p ^ {2} (1 - p)}{1 + p ^ {2}} $$ which translates into a change in mean phenotype of $$ R _ {z} = \\mu \\lef",
+      "description": null
+    },
+    {
+      "id": "6.16b",
+      "label_format": "Equation 6.16b",
+      "latex": "R _ {z} = \\mu \\left(p ^ {\\prime}\\right) - \\mu (p) = p ^ {2} - \\left(p ^ {\\prime}\\right) ^ {2} = - 2 p ^ {3} \\left(\\frac {1 - p \\left(1 + p ^ {2}\\right) / 2}{\\left(1 + p ^ {2}\\right) ^ {2}}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "+ p)}{1 + p ^ {2}} $$ yielding an allele-frequency change of $$ \\Delta p = p ^ {\\prime} - p = \\frac {p (1 + p)}{1 + p ^ {2}} - p \\frac {1 + p ^ {2}}{1 + p ^ {2}} = \\frac {p ^ {2} (1 - p)}{1 + p ^ {2}} $$ which translates into a change in mean phenotype of This exact single-generation response in the trait mean is plotted in Figure 6.4. Now consider the response predicted from the breeder's equation. Applying the standard trait-value parameterization of 2a : a(1+k) : 0 to the preceding trait values, we have a",
+      "description": null
+    },
+    {
+      "id": "6.16c",
+      "label_format": "Equation 6.16c",
+      "latex": "h ^ {2} = \\frac {\\sigma_ {A} ^ {2}}{\\sigma_ {A} ^ {2} + \\sigma_ {D} ^ {2}} = \\frac {2 p ^ {3} (1 - p)}{2 p ^ {3} (1 - p) + p ^ {2} (1 - p) ^ {2}} = \\frac {2 p}{1 + p}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "= 2 p (1 - p) a ^ {2} [ 1 + k (2 p - 1) ] ^ {2} = 2 p (1 - p) (1 / 4) (2 p) ^ {2} = 2 p ^ {3} (1 - p) $$ $$ \\sigma_ {D} ^ {2} = [ 2 p (1 - p) a k ] ^ {2} = p ^ {2} (1 - p) ^ {2} $$ Because $ \\sigma_{E}^{2} $ is assumed to be zero, the heritability becomes Following selection (but before reproduction), only QQ and Qq survive, each with a trait value of one, yielding the fitness-weighted mean $$ \\mu^ {*} = 1 \\cdot \\frac {1}{W} \\left(1 - p ^ {2}\\right) + 0 \\cdot \\frac {2}{W} p ^ {2} = \\frac {1 - p ^ {2}}{\\overl",
+      "description": null
+    },
+    {
+      "id": "6.16d",
+      "label_format": "Equation 6.16d",
+      "latex": "\\mu^ {*} = 1 \\cdot \\frac {1}{W} \\left(1 - p ^ {2}\\right) + 0 \\cdot \\frac {2}{W} p ^ {2} = \\frac {1 - p ^ {2}}{\\overline {{W}}} = \\frac {1 - p ^ {2}}{1 + p ^ {2}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "{2} + \\sigma_ {D} ^ {2}} = \\frac {2 p ^ {3} (1 - p)}{2 p ^ {3} (1 - p) + p ^ {2} (1 - p) ^ {2}} = \\frac {2 p}{1 + p} $$ Following selection (but before reproduction), only QQ and Qq survive, each with a trait value of one, yielding the fitness-weighted mean yielding the selectional differential $$ S = \\mu^ {*} - \\mu = \\frac {1 - p ^ {2}}{1 + p ^ {2}} - \\left(1 - p ^ {2}\\right) = - p ^ {2} \\frac {1 - p ^ {2}}{1 + p ^ {2}} $$ Equations 6.16c and 6.16e give the predicted response from the breeder's equation as",
+      "description": null
+    },
+    {
+      "id": "6.16e",
+      "label_format": "Equation 6.16e",
+      "latex": "S = \\mu^ {*} - \\mu = \\frac {1 - p ^ {2}}{1 + p ^ {2}} - \\left(1 - p ^ {2}\\right) = - p ^ {2} \\frac {1 - p ^ {2}}{1 + p ^ {2}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "t value of one, yielding the fitness-weighted mean $$ \\mu^ {*} = 1 \\cdot \\frac {1}{W} \\left(1 - p ^ {2}\\right) + 0 \\cdot \\frac {2}{W} p ^ {2} = \\frac {1 - p ^ {2}}{\\overline {{W}}} = \\frac {1 - p ^ {2}}{1 + p ^ {2}} $$ yielding the selectional differential Equations 6.16c and 6.16e give the predicted response from the breeder's equation as $$ R _ {z} = h ^ {2} S = \\left(\\frac {2 p}{1 + p}\\right) \\left(- p ^ {2} \\frac {1 - p ^ {2}}{1 + p ^ {2}}\\right) = - \\frac {2 p ^ {3} (1 - p)}{1 + p ^ {2}} $$ As shown in",
+      "description": null
+    },
+    {
+      "id": "6.16f",
+      "label_format": "Equation 6.16f",
+      "latex": "R _ {z} = h ^ {2} S = \\left(\\frac {2 p}{1 + p}\\right) \\left(- p ^ {2} \\frac {1 - p ^ {2}}{1 + p ^ {2}}\\right) = - \\frac {2 p ^ {3} (1 - p)}{1 + p ^ {2}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_005",
+        "chapter": "chapter6",
+        "subsection": "The Breeder's Equation, $ R=h^{2} S $"
+      },
+      "context": "yielding the selectional differential $$ S = \\mu^ {*} - \\mu = \\frac {1 - p ^ {2}}{1 + p ^ {2}} - \\left(1 - p ^ {2}\\right) = - p ^ {2} \\frac {1 - p ^ {2}}{1 + p ^ {2}} $$ Equations 6.16c and 6.16e give the predicted response from the breeder's equation as As shown in Figure 6.1, we see that the approximation given by the breeder's equation (Equation 6.16f) generally does well but slightly underestimates the exact response (Equation 6.16b), predicting (in the worst case) only about 90% of the actual response w",
+      "description": null
+    },
+    {
+      "id": "6.17a",
+      "label_format": "Equation 6.17a",
+      "latex": "S _ {W} = \\sigma (z, w) = \\sigma (W, w) = \\frac {\\sigma (W , W)}{\\overline {{W}}} = \\frac {\\sigma^ {2} (W)}{\\overline {{W}}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "fitness is just a trait, and use the breeder's equation, $ R=h^{2} S $ , to predict the response to selection on that trait. Letting z=W, and recalling that w=W/$ \\overline{W} $ , the Robertson-Price identity (Equation 6.10) yields the selection differential Substituting into the breeder's equation shows $$ R _ {W} = h _ {W} ^ {2} S _ {W} = \\frac {\\sigma_ {A} ^ {2} (W)}{\\sigma^ {2} (W)} \\frac {\\sigma^ {2} (W)}{\\overline {{W}}} = \\frac {\\sigma_ {A} ^ {2} (W)}{\\overline {{W}}} $$ Expressed in terms of relative f",
+      "description": null
+    },
+    {
+      "id": "6.17b",
+      "label_format": "Equation 6.17b",
+      "latex": "R _ {W} = h _ {W} ^ {2} S _ {W} = \\frac {\\sigma_ {A} ^ {2} (W)}{\\sigma^ {2} (W)} \\frac {\\sigma^ {2} (W)}{\\overline {{W}}} = \\frac {\\sigma_ {A} ^ {2} (W)}{\\overline {{W}}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "the Robertson-Price identity (Equation 6.10) yields the selection differential $$ S _ {W} = \\sigma (z, w) = \\sigma (W, w) = \\frac {\\sigma (W , W)}{\\overline {{W}}} = \\frac {\\sigma^ {2} (W)}{\\overline {{W}}} $$ Substituting into the breeder's equation shows Expressed in terms of relative fitnesses, $$ R _ {w} = \\Delta \\bar {w} = \\frac {R _ {W}}{\\bar {W}} = \\frac {\\sigma_ {A} ^ {2} (W)}{\\bar {W} ^ {2}} = \\sigma_ {A} ^ {2} (w) $$ recovering the classical view of Fisher's theorem. One can also use a population-",
+      "description": null
+    },
+    {
+      "id": "6.17c",
+      "label_format": "Equation 6.17c",
+      "latex": "R _ {w} = \\Delta \\bar {w} = \\frac {R _ {W}}{\\bar {W}} = \\frac {\\sigma_ {A} ^ {2} (W)}{\\bar {W} ^ {2}} = \\sigma_ {A} ^ {2} (w)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "ing into the breeder's equation shows $$ R _ {W} = h _ {W} ^ {2} S _ {W} = \\frac {\\sigma_ {A} ^ {2} (W)}{\\sigma^ {2} (W)} \\frac {\\sigma^ {2} (W)}{\\overline {{W}}} = \\frac {\\sigma_ {A} ^ {2} (W)}{\\overline {{W}}} $$ Expressed in terms of relative fitnesses, recovering the classical view of Fisher's theorem. One can also use a population-genetics framework to motivate Fisher's theorem in terms of allele-frequency change. Consider a diallelic locus with constant fitnesses under random mating, and define $ \\overl",
+      "description": null
+    },
+    {
+      "id": "6.18a",
+      "label_format": "Equation 6.18a",
+      "latex": "R _ {W} = \\overline {{W}} (p + \\Delta p) - \\overline {{W}} (p)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "der a diallelic locus with constant fitnesses under random mating, and define $ \\overline{W} (p) $ to be the mean population fitness at allele frequency p (Equation 5.1a). The change in mean fitness is a function of the allele-frequency change, $ \\Delta p, $ If the allele-frequency change is small, a first-order Taylor-series approximation yields $$ \\overline {{W}} (p + \\Delta p) \\simeq \\overline {{W}} (p) + \\frac {d \\overline {{W}}}{d p} \\Delta p $$ SO $$ R _ {W} = \\overline {{W}} (p + \\Delta p) - \\overline",
+      "description": null
+    },
+    {
+      "id": "6.18b",
+      "label_format": "Equation 6.18b",
+      "latex": "\\overline {{W}} (p + \\Delta p) \\simeq \\overline {{W}} (p) + \\frac {d \\overline {{W}}}{d p} \\Delta p",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "ion 5.1a). The change in mean fitness is a function of the allele-frequency change, $ \\Delta p, $ $$ R _ {W} = \\overline {{W}} (p + \\Delta p) - \\overline {{W}} (p) $$ If the allele-frequency change is small, a first-order Taylor-series approximation yields SO $$ R _ {W} = \\overline {{W}} (p + \\Delta p) - \\overline {{W}} (p) \\simeq \\frac {d \\overline {{W}}}{d p} \\Delta p $$ From Equation 5.5a $$ \\begin{array}{l} \\frac {d \\overline {{W}}}{d p} = 2 p W _ {A A} + 2 (1 - 2 p) W _ {A a} + 2 (p - 1) W _ {a a} \\\\ =",
+      "description": null
+    },
+    {
+      "id": "6.18c",
+      "label_format": "Equation 6.18c",
+      "latex": "R _ {W} = \\overline {{W}} (p + \\Delta p) - \\overline {{W}} (p) \\simeq \\frac {d \\overline {{W}}}{d p} \\Delta p",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "\\overline {{W}} (p + \\Delta p) - \\overline {{W}} (p) $$ If the allele-frequency change is small, a first-order Taylor-series approximation yields $$ \\overline {{W}} (p + \\Delta p) \\simeq \\overline {{W}} (p) + \\frac {d \\overline {{W}}}{d p} \\Delta p $$ SO From Equation 5.5a $$ \\begin{array}{l} \\frac {d \\overline {{W}}}{d p} = 2 p W _ {A A} + 2 (1 - 2 p) W _ {A a} + 2 (p - 1) W _ {a a} \\\\ = 2 \\left[ p \\left(W _ {A A} - W _ {A a}\\right) + (1 - p) \\left(W _ {A a} - W _ {a a}\\right) \\right] = 2 \\left(\\alpha_ {A}",
+      "description": null
+    },
+    {
+      "id": "6.18d",
+      "label_format": "Equation 6.18d",
+      "latex": "\\begin{array}{l} \\frac {d \\overline {{W}}}{d p} = 2 p W _ {A A} + 2 (1 - 2 p) W _ {A a} + 2 (p - 1) W _ {a a} \\\\ = 2 \\left[ p \\left(W _ {A A} - W _ {A a}\\right) + (1 - p) \\left(W _ {A a} - W _ {a a}\\right) \\right] = 2 \\left(\\alpha_ {A} - \\alpha_ {a}\\right) \\\\ \\end{array}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "ion yields $$ \\overline {{W}} (p + \\Delta p) \\simeq \\overline {{W}} (p) + \\frac {d \\overline {{W}}}{d p} \\Delta p $$ SO $$ R _ {W} = \\overline {{W}} (p + \\Delta p) - \\overline {{W}} (p) \\simeq \\frac {d \\overline {{W}}}{d p} \\Delta p $$ From Equation 5.5a where the last equality follows from the definition of the average effects (under random mating; see LW Chapter 4) of alleles A and a on fitness, namely, $$ \\alpha_ {A} = p W _ {A A} + (1 - p) W _ {A a} - \\overline {{W}} \\quad \\mathrm {a n d} \\quad \\alpha_",
+      "description": null
+    },
+    {
+      "id": "6.18e",
+      "label_format": "Equation 6.18e",
+      "latex": "\\alpha_ {A} = p W _ {A A} + (1 - p) W _ {A a} - \\overline {{W}} \\quad \\mathrm {a n d} \\quad \\alpha_ {a} = p W _ {A a} + (1 - p) W _ {a a} - \\overline {{W}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "\\left(W _ {A a} - W _ {a a}\\right) \\right] = 2 \\left(\\alpha_ {A} - \\alpha_ {a}\\right) \\\\ \\end{array} $$ where the last equality follows from the definition of the average effects (under random mating; see LW Chapter 4) of alleles A and a on fitness, namely, Recall that the quantity $ \\alpha=\\alpha_{A}-\\alpha_{a} $ is the average effect of an allelic substitution (LW Equation 4.6), as the difference in the average effects of these two alleles yields the mean effect on fitness from replacing a randomly chosen a a",
+      "description": null
+    },
+    {
+      "id": "6.18f",
+      "label_format": "Equation 6.18f",
+      "latex": "\\Delta p = \\frac {p (1 - p)}{2 \\overline {{W}}} \\frac {d \\overline {{W}}}{d p} = \\frac {p (1 - p)}{2 \\overline {{W}}} (2 \\alpha)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "ion (LW Equation 4.6), as the difference in the average effects of these two alleles yields the mean effect on fitness from replacing a randomly chosen a allele with an A allele. Applying Wright's formula (Equation 5.5b) together with Equation 6.18d returns and substitution into Equation 6.18c then yields $$ R _ {W} \\simeq \\frac {p (1 - p) (2 \\alpha) ^ {2}}{2 \\overline {{W}}} = \\frac {\\sigma_ {A} ^ {2} (W)}{\\overline {{W}}} $$ The last step follows from the fact that the additive genetic variance is related t",
+      "description": null
+    },
+    {
+      "id": "6.18g",
+      "label_format": "Equation 6.18g",
+      "latex": "R _ {W} \\simeq \\frac {p (1 - p) (2 \\alpha) ^ {2}}{2 \\overline {{W}}} = \\frac {\\sigma_ {A} ^ {2} (W)}{\\overline {{W}}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "ng Wright's formula (Equation 5.5b) together with Equation 6.18d returns $$ \\Delta p = \\frac {p (1 - p)}{2 \\overline {{W}}} \\frac {d \\overline {{W}}}{d p} = \\frac {p (1 - p)}{2 \\overline {{W}}} (2 \\alpha) $$ and substitution into Equation 6.18c then yields The last step follows from the fact that the additive genetic variance is related to $ \\alpha $ by $ \\sigma_{A}^{2}=2 p(1-p)\\alpha^{2} $ (LW Equation 4.12a). Thus, under this approximation of small allelefrequency change (in which terms of order $ (\\Delta p)",
+      "description": null
+    },
+    {
+      "id": "6.19",
+      "label_format": "Equation 6.19",
+      "latex": "R _ {W} = \\frac {\\sigma_ {A} ^ {2} (W)}{\\overline {{W}}} + O \\left(s ^ {3}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "t<2\\ln s / \\ln[1-c_{min}]$ generations), any initial disequilibrium has a transient impact on the dynamics until the point where disequilibrium reaches a steady-state value. At this point, we enter the central phase, with the change in mean fitness becoming where $ O(s^{3}) $ means that terms on the order of $ s^{3} $ have been ignored. Because additive genetic variance is expected to be of order $ s^{2} $ , Fisher's theorem is expected to hold to a good approximation during this period. The central phase of ev",
+      "description": null
+    },
+    {
+      "id": "6.20a",
+      "label_format": "Equation 6.20a",
+      "latex": "\\bar {z} _ {i} = A _ {i} + \\bar {\\delta} _ {i}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "m is exact, we can go further and apply Price's results to make an exact statement about the evolution of mean fitness. Letting $ z_{i}=A_{i} $ denote the breeding value for the fitness of the ith midparent, the mean breeding value in their offspring becomes where (as above) $ \\bar{\\delta}_{i} $ is the difference between the trait value in the ancestor (the breeding value of the midparent) and the mean value in its offspring. The phenotypic value of fitness for this midparent (the average of the two parental fit",
+      "description": null
+    },
+    {
+      "id": "6.20b",
+      "label_format": "Equation 6.20b",
+      "latex": "\\begin{array}{l} R _ {A _ {W}} = \\sigma \\left(w _ {i}, A _ {i} + \\bar {\\delta} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right) \\\\ = \\sigma \\left(w _ {i}, A _ {i}\\right) + \\sigma \\left(w _ {i}, \\bar {\\delta} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right) \\\\ = \\frac {1}{W} \\sigma \\left(A _ {i} + \\epsilon_ {i}, A _ {i}\\right) + \\sigma \\left(w _ {i}, \\bar {\\delta} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right) \\\\ = \\frac {\\sigma_ {A} ^ {2} (W)}{\\bar {W}} + \\sigma \\left(w _ {i}, \\bar {\\delta} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right) \\\\ \\end{array}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_007",
+        "chapter": "chapter6",
+        "subsection": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_{w}=\\sigma_{A}^{2}(w) $"
+      },
+      "context": "his midparent (the average of the two parental fitnesses) can be written as $ W_{i}=A_{i}+\\epsilon_{i} $ Substituting these results into Equation 6.7c gives the between-generation change in the mean breeding value $ (\\Delta \\overline{A}_{W}) $ for fitness as where the last expression follows because $ \\sigma(A_{i},\\epsilon_{i})=0 $ by construction. When $ E(\\overline{\\delta}_{i})=\\sigma(w_{i},\\overline{\\delta}_{i})=0 $ , we recover the classic version of Fisher's fundamental theorem. If the mean breeding value f",
+      "description": null
+    },
+    {
+      "id": "6.21a",
+      "label_format": "Equation 6.21a",
+      "latex": "R _ {w} = \\sum_ {j} 2 \\alpha_ {j} \\Delta p _ {j} + \\sum_ {j} 2 p _ {j} ^ {\\prime} \\Delta \\alpha_ {j}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_008",
+        "chapter": "chapter6",
+        "subsection": "What Did Fisher Really Mean?"
+      },
+      "context": "e excesses or effects of these alleles. Placed in the framework of Price's theorem, this \"partial increase\" interpretation becomes clear. From Equation 6.15d (setting $ b_{j}=\\alpha_{j} $), the total response in fitness can be decomposed into two components where $ \\alpha_{j} $ is the average effect of an allele on fitness. Recalling Equation 6.5a, the first sum is simply $ \\sigma(w_{i}, A_{i})=\\sigma(A_{i}+\\epsilon_{i}, A_{i})=\\sigma_{A}^{2}(w) $ , yielding $$ R _ {w} = \\sigma_ {A} ^ {2} (w) + \\sum_ {j} 2 p _",
+      "description": null
+    },
+    {
+      "id": "6.21b",
+      "label_format": "Equation 6.21b",
+      "latex": "R _ {w} = \\sigma_ {A} ^ {2} (w) + \\sum_ {j} 2 p _ {j} ^ {\\prime} \\Delta \\alpha_ {j}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_008",
+        "chapter": "chapter6",
+        "subsection": "What Did Fisher Really Mean?"
+      },
+      "context": "\\sum_ {j} 2 p _ {j} ^ {\\prime} \\Delta \\alpha_ {j} $$ where $ \\alpha_{j} $ is the average effect of an allele on fitness. Recalling Equation 6.5a, the first sum is simply $ \\sigma(w_{i}, A_{i})=\\sigma(A_{i}+\\epsilon_{i}, A_{i})=\\sigma_{A}^{2}(w) $ , yielding Note that the first term in Equation 6.21a is the partial change due solely to changes in allele frequencies $$ \\sum_ {j} 2 \\alpha_ {j} \\Delta p _ {j} $$ which we denote by $ \\partial R_{w} $ to emphasize that only a specific part of the total change is be",
+      "description": null
+    },
+    {
+      "id": "6.21c",
+      "label_format": "Equation 6.21c",
+      "latex": "\\partial R _ {w} = \\sigma^ {2} \\left(A _ {w}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_008",
+        "chapter": "chapter6",
+        "subsection": "What Did Fisher Really Mean?"
+      },
+      "context": "anges in allele frequencies $$ \\sum_ {j} 2 \\alpha_ {j} \\Delta p _ {j} $$ which we denote by $ \\partial R_{w} $ to emphasize that only a specific part of the total change is being considered. Price argued that Fisher's interpretation of his theorem was that Thus, the exact version of Fisher's theorem (Equation 6.21c) simply concerns the partial evolutionary response caused by natural selection, as Price argued that Fisher essentially regarded the second term as a change in the \"environment\" within which alleles",
+      "description": null
+    },
+    {
+      "id": "6.22a",
+      "label_format": "Equation 6.22a",
+      "latex": "R _ {W} = \\left(\\overline {{W}} ^ {\\prime} \\mid E ^ {\\prime}\\right) - \\left(\\overline {{W}} \\mid E\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_008",
+        "chapter": "chapter6",
+        "subsection": "What Did Fisher Really Mean?"
+      },
+      "context": "pecies—he regarded as a matter of the environment. A nice discussion of this point was offered by Frank and Slatkin (1992), who pointed out that the change in mean fitness over a generation is also influenced by the change in \"environment,\" E. Specifically, where the prime denotes the fitness or environment in the next generation. Expanding the preceding expression, we can partition the contributions from the change in fitness and the change in the environment by writing $$ R _ {W} = \\left[ \\left(\\bar {W} ^ {\\",
+      "description": null
+    },
+    {
+      "id": "6.22b",
+      "label_format": "Equation 6.22b",
+      "latex": "R _ {W} = \\left[ \\left(\\bar {W} ^ {\\prime} \\mid E\\right) - \\left(\\bar {W} \\mid E\\right) \\right] + \\left[ \\left(\\bar {W} ^ {\\prime} \\mid E ^ {\\prime}\\right) - \\left(\\bar {W} ^ {\\prime} \\mid E\\right) \\right]",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_008",
+        "chapter": "chapter6",
+        "subsection": "What Did Fisher Really Mean?"
+      },
+      "context": "\\left(\\overline {{W}} \\mid E\\right) $$ where the prime denotes the fitness or environment in the next generation. Expanding the preceding expression, we can partition the contributions from the change in fitness and the change in the environment by writing where the first term in brackets represents the change in mean fitness under the initial \"environment,\" while the second represents the change in mean fitness due to changes in the environmental conditions. This decomposition is simply another way of stating",
+      "description": null
+    },
+    {
+      "id": "6.23",
+      "label_format": "Equation 6.23",
+      "latex": "h _ {W} ^ {2} = \\frac {\\beta^ {2} \\sigma_ {A} ^ {2}}{\\beta^ {2} \\left(\\sigma_ {A} ^ {2} + \\sigma_ {E} ^ {2}\\right) + \\sigma_ {e} ^ {2}} = \\frac {\\sigma_ {A} ^ {2}}{\\sigma_ {A} ^ {2} + \\sigma_ {E} ^ {2} + \\sigma_ {e} ^ {2} / \\beta^ {2}} < h _ {z} ^ {2} = \\frac {\\sigma_ {A} ^ {2}}{\\sigma_ {A} ^ {2} + \\sigma_ {E} ^ {2}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_010",
+        "chapter": "chapter6",
+        "subsection": "Traits Correlated With Fitness Have Lower Heritabilities"
+      },
+      "context": "(1991) study of Phlox drummondii, with fruit production used as a measure of total fitness. </div> additive variance in fitness $ \\beta^{2}\\sigma_{A}^{2} $ . The heritability of fitness can be expressed in terms of the variance components for z as follows: Thus, even when fitness is entirely determined by a single trait, the heritability of fitness is less than the heritability of the character under selection, due to the variation, $ \\sigma_{e}^{2} $ , in fitness about its expected value for a given trait val",
+      "description": null
+    },
+    {
+      "id": "6.24a",
+      "label_format": "Equation 6.24a",
+      "latex": "R _ {z} = \\sigma_ {A} (w, z) = \\sigma \\left(A _ {w}, A _ {z}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_014",
+        "chapter": "chapter6",
+        "subsection": "1968 Version: $ R_{z}=\\sigma_{A}(w,z) $"
+      },
+      "context": "mal expression, just the clear statement that \"The secondary theorem of natural selection states that the change in any character produced by a selection process is equal to the additive covariance between fitness and the character itself.\" In equation form, The expression $ \\sigma_{A}(w,z) $ , which is shorthand for the covariance between the breeding values for the trait and relative fitness $ \\sigma(A_{w},A_{z}) $ , is often called the Robertson covariance. The term secondary theorem is reasonable for this ve",
+      "description": null
+    },
+    {
+      "id": "6.24b",
+      "label_format": "Equation 6.24b",
+      "latex": "R _ {z} = \\Delta A _ {z} = \\beta_ {A _ {z} | A _ {w}} \\Delta A _ {w}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_014",
+        "chapter": "chapter6",
+        "subsection": "1968 Version: $ R_{z}=\\sigma_{A}(w,z) $"
+      },
+      "context": "change in a trait is given by its change in mean breeding value, $ \\Delta A_{z} $ , which in turn is the change in the breeding value of relative fitness, $ R_{w}=\\Delta A_{w} $ times the regression of the trait breeding value $ A_{z} $ given $ A_{w} $ , or From standard regression theory (LW Chapter 3), the slope of the regression of $ A_{z} $ on $ A_{w} $ is simply $$ \\beta_ {A _ {z} \\mid A _ {w}} = \\frac {\\sigma \\left(A _ {w} , A _ {z}\\right)}{\\sigma^ {2} \\left(A _ {w}\\right)} $$ Likewise, under the fundam",
+      "description": null
+    },
+    {
+      "id": "6.24c",
+      "label_format": "Equation 6.24c",
+      "latex": "R _ {z} = \\left(\\frac {\\sigma \\left(A _ {w} , A _ {z}\\right)}{\\sigma^ {2} \\left(A _ {w}\\right)}\\right) \\sigma^ {2} \\left(A _ {w}\\right) = \\sigma \\left(A _ {w}, A _ {z}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_014",
+        "chapter": "chapter6",
+        "subsection": "1968 Version: $ R_{z}=\\sigma_{A}(w,z) $"
+      },
+      "context": "_ {w} , A _ {z}\\right)}{\\sigma^ {2} \\left(A _ {w}\\right)} $$ Likewise, under the fundamental theorem (Equation 6.17c), $ \\Delta A_{w}=\\sigma^{2}(A_{w}). $ Substituting these two results into Equation 6.24b recovers Robertson's 1968 version of his theorem, 1966 Version: $ R_{z}=\\sigma(w,A_{z}) $ Although Robertson coined the term \"secondary theorem\" in his 1968 paper, a careful reading of Robertson's rather opaque 1966 paper suggests that his original result arose as a natural extension of the Robertson-Price",
+      "description": null
+    },
+    {
+      "id": "6.25a",
+      "label_format": "Equation 6.25a",
+      "latex": "R _ {z} = \\sigma \\left(w, A _ {z}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_015",
+        "chapter": "chapter6",
+        "subsection": "1966 Version: $ R_{z}=\\sigma(w,A_{z}) $"
+      },
+      "context": "R_{z}=\\sigma(w,A_{z}) $ Although Robertson coined the term \"secondary theorem\" in his 1968 paper, a careful reading of Robertson's rather opaque 1966 paper suggests that his original result arose as a natural extension of the Robertson-Price identity, with Equation 6.10 shows that the within-generation change in the mean of a trait z is simply $ \\sigma(w,z)=S $ . If one takes z as the breeding value of the trait, the Robertson-Price identity yields Equation 6.25a as the within-generation change in the breeding",
+      "description": null
+    },
+    {
+      "id": "6.25b",
+      "label_format": "Equation 6.25b",
+      "latex": "R _ {z} = \\sigma \\left[ w, h ^ {2} (z - \\mu) + e _ {A} \\right] = h ^ {2} \\sigma (w, z) + \\sigma (w, e _ {A}) = h ^ {2} S + \\sigma (w, e _ {A})",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_015",
+        "chapter": "chapter6",
+        "subsection": "1966 Version: $ R_{z}=\\sigma(w,A_{z}) $"
+      },
+      "context": "titative genetics (e.g., Lande 1976; Frank 1997), and is closely connected with the breeder's equation. To see this connection, taking the regression of breeding value on phenotype as $ A_{z}= h^{2}(z-\\mu)+e_{A} $ and substituting into Equation 6.25a yields and we recover the breeder's equation when $ \\sigma(w,e_{A})=0 $ . Biologically, this last assumption implies that the relative fitness of an individual is uncorrelated with the residual error, $ e_{A} $ when using their phenotype to predict their breeding v",
+      "description": null
+    },
+    {
+      "id": "6.25c",
+      "label_format": "Equation 6.25c",
+      "latex": "R _ {z} = \\sigma \\left(w, A _ {z}\\right) = \\sigma \\left(A _ {w} + e _ {w}, A _ {z}\\right) = \\sigma \\left(A _ {w}, A _ {z}\\right) + \\sigma \\left(e _ {w}, A _ {z}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_015",
+        "chapter": "chapter6",
+        "subsection": "1966 Version: $ R_{z}=\\sigma(w,A_{z}) $"
+      },
+      "context": "_{w} $ , plus a residual, $ e_{w} $ (note that this is different from the residual $ e_{A} $ from Equation 6.25b, which is the error in predicting trait breeding value given trait phenotypic value). Substituting this expression for w in Equation 6.25a yields showing that while the 1966 version is more general, the two versions (Equations 6.24a and 6.25a) are equal when $ \\sigma \\left( e_{w}, A_{z}\\right)=0. $ ## Accuracy of the Secondary Theorem Formal population-genetic analysis of the secondary theorem is ba",
+      "description": null
+    },
+    {
+      "id": "6.26",
+      "label_format": "Equation 6.26",
+      "latex": "R _ {z, k} = 2 \\sum_ {j} \\alpha_ {j} s _ {j} p _ {j} + \\sum_ {i, j} \\delta_ {i j} p _ {i} s _ {i} p _ {j} s _ {j}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_016",
+        "chapter": "chapter6",
+        "subsection": "Accuracy of the Secondary Theorem"
+      },
+      "context": "968 version, and is very closely related to work on the accuracy of the classical interpretation of Fisher's theorem. Recall Equation 5.22, which showed the contribution to the selection response in trait z from the kth locus (in the absence of epistasis) as where $ \\alpha_{j} $ is the average effect of allele $ i,\\delta_{ij} $ the dominance deviation associated with alleles $ i $ and $ j $ , and all terms relate to the values for locus $ k $ . The first sum is the expected product of the average effect, $ \\alp",
+      "description": null
+    },
+    {
+      "id": "6.27",
+      "label_format": "Equation 6.27",
+      "latex": "R _ {z} = \\sigma_ {A} (z, w) + B",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_016",
+        "chapter": "chapter6",
+        "subsection": "Accuracy of the Secondary Theorem"
+      },
+      "context": "definition), $ E(\\alpha_{j})=0 $ the first sum is thus the covariance between $ \\alpha_{j} $ and $ s_{j} $ , in other words, the additive genetic covariance between relative fitness and the focal trait. Summing over all loci, we can express Equation 5.22 as If the character has no dominance (all $ \\delta_{ij}=0 $), the correction term, B, vanishes, recovering Robertson's original suggestion. Even if dominance is present, in the absence of epistatic variance, the error in the secondary theorem becomes increasing",
+      "description": null
+    },
+    {
+      "id": "6.28",
+      "label_format": "Equation 6.28",
+      "latex": "R _ {z} = \\sigma_ {A} (z, w) + O \\left(s ^ {2}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_016",
+        "chapter": "chapter6",
+        "subsection": "Accuracy of the Secondary Theorem"
+      },
+      "context": "erlying loci and random mating but allows for arbitrary epistasis and linkage disequilibrium. Similar to his weak selection analysis of Fisher's theorem discussed above, Nagylaki showed that after a sufficient time, the change in mean trait value is given by As with the fundamental theorem, when gametic frequencies approach their equilibrium values, terms of order $ s^{2} $ may become significant and the mean response may differ significantly from Robertson's prediction, but again, the bulk of evolutionary chang",
+      "description": null
+    },
+    {
+      "id": "6.29",
+      "label_format": "Equation 6.29",
+      "latex": "\\begin{array}{l} \\Delta \\bar {A} _ {z} = \\sigma \\left(A _ {w} + e _ {w}, A _ {z}\\right) + \\sigma \\left(w, \\bar {\\delta}\\right) + E (\\bar {\\delta}) \\\\ = \\sigma \\left(A _ {w}, A _ {z}\\right) + \\sigma \\left(e _ {w}, A _ {z}\\right) + \\sigma \\left(w, \\bar {\\delta}\\right) + E (\\bar {\\delta}) \\\\ \\end{array}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_017",
+        "chapter": "chapter6",
+        "subsection": "Connecting Robertson's Results With Those of Price, Fisher, and Lush"
+      },
+      "context": "are good predictors of mean offspring breeding value, meaning that $ \\bar{\\delta} $ is not zero but is still small, then Roberston's (1966a) theorem is a good approximation for the response to selection. If we write $ w=A_{w}+e_{w} $ , Equation 6.28 becomes which recovers Robertson's 1968 version (Equation 6.25a), provided that the last three terms are zero (or else are very small relative to the first term). ## THE BREEDER'S EQUATION FRAMED WITHIN THE PRICE EQUATION The breeder's equation forms the backbone",
+      "description": null
+    },
+    {
+      "id": "6.30a",
+      "label_format": "Equation 6.30a",
+      "latex": "R _ {z} = \\sigma \\left(w _ {i}, \\bar {z} _ {i}\\right) + E \\left(\\bar {\\delta} _ {i}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "the ith parent whose relative fitness is $ w_{i} $ and whose offspring have mean value $ \\overline{z}_{i} $ and, hence, a parent-offspring deviation $ \\overline{\\delta}_{i}=\\overline{z}_{i}-z_{i} $ . Equation 6.7c shows the general expression for response as Heywood's key insight is that Equation 6.30a can be decomposed into contributions from two biologically interpretable linear regressions and their corresponding residuals. The first regression involves offspring $ \\left( \\bar{z}_{i} \\right) $ and parental $",
+      "description": null
+    },
+    {
+      "id": "6.30b",
+      "label_format": "Equation 6.30b",
+      "latex": "\\bar {z} _ {i} = \\mu + \\beta_ {\\bar {z} | z} z _ {i} + e _ {\\bar {z}, i}, \\quad \\mathrm {w h e r e} \\quad \\beta_ {\\bar {z} | z} = \\frac {\\sigma \\left(\\bar {z} _ {i} , z _ {i}\\right)}{\\sigma_ {z} ^ {2}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "Equation 6.30a can be decomposed into contributions from two biologically interpretable linear regressions and their corresponding residuals. The first regression involves offspring $ \\left( \\bar{z}_{i} \\right) $ and parental $ \\left( z_{i} \\right) $ values The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $ $$ w _ {i} = 1 + \\beta_ {w | z} z _ {i} + e _ {w, i}, \\quad \\mathrm {w h e r e} \\quad \\beta_ {w | z} = \\frac {\\sigma \\left(w _ {i} , z _ {i}\\right)}{\\",
+      "description": null
+    },
+    {
+      "id": "6.30c",
+      "label_format": "Equation 6.30c",
+      "latex": "w _ {i} = 1 + \\beta_ {w | z} z _ {i} + e _ {w, i}, \\quad \\mathrm {w h e r e} \\quad \\beta_ {w | z} = \\frac {\\sigma \\left(w _ {i} , z _ {i}\\right)}{\\sigma_ {z} ^ {2}} = \\frac {S}{\\sigma_ {z} ^ {2}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "e _ {\\bar {z}, i}, \\quad \\mathrm {w h e r e} \\quad \\beta_ {\\bar {z} | z} = \\frac {\\sigma \\left(\\bar {z} _ {i} , z _ {i}\\right)}{\\sigma_ {z} ^ {2}} $$ The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $ It is important to stress that we are not assuming that the true relationship between either the mean offspring value $ \\overline{z}_{i} $ or paternal fitness $ w_{i} $ and paternal phenotype value $ z_{i} $ is linear, but rather simply considering the best",
+      "description": null
+    },
+    {
+      "id": "6.31a",
+      "label_format": "Equation 6.31a",
+      "latex": "\\sigma \\left(e _ {w}, e _ {\\bar {z}}\\right) = \\sigma \\left(w, \\bar {z} \\mid \\mid z\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "As developed in Example 6.8, the covariance among the residuals for two variables regressed on a third is as known as the partial covariance between two variables (here $ w_{i} $ and $ \\overline{z}_{i} $ ) given a third (here $ z_{i} $ ), which is denoted as ![](page=24,bbox=[182, 144, 407, 272]) ![](page=24,bbox=[454, 146, 694, 271]) ![](page=24,bbox=[300, 298, 558, 425]) <div align=\"center\"> Offspring residual $ e_{z} $ </div> <div align=\"center\"> Figure 6.5 The partial covariance, $ \\sigma(w,\\overline{",
+      "description": null
+    },
+    {
+      "id": "6.31b",
+      "label_format": "Equation 6.31b",
+      "latex": "\\begin{array}{l} \\sigma (w, \\bar {z}) = \\sigma (w, \\bar {z} \\mid | z) + \\beta_ {\\bar {z} | z} \\sigma (w, z) \\\\ = \\sigma (w, \\bar {z} \\mid z) + \\beta_ {\\bar {z} | z} S \\\\ \\end{array}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "gainst each other shows a strong negative covariance, so while $ \\sigma(w,z),\\sigma(\\overline{z},z), $ and $ \\sigma(w,\\overline{z}) $ are all positive, $ \\sigma(w,\\overline{z}||z) $ is negative. </div> As shown in Example 6.8 (Equation 6.33f), we can write Substitution of this expression into Equation 6.30a yields $$ R _ {z} = \\beta_ {\\bar {z} | z} S + \\sigma (w, \\bar {z} \\| z) + E (\\bar {\\delta}) $$ Thus, even when the parent-offspring regression is nonlinear, we can express the selection response in trait",
+      "description": null
+    },
+    {
+      "id": "6.32",
+      "label_format": "Equation 6.32",
+      "latex": "R _ {z} = \\beta_ {\\bar {z} | z} S + \\sigma (w, \\bar {z} \\| z) + E (\\bar {\\delta})",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "can write $$ \\begin{array}{l} \\sigma (w, \\bar {z}) = \\sigma (w, \\bar {z} \\mid | z) + \\beta_ {\\bar {z} | z} \\sigma (w, z) \\\\ = \\sigma (w, \\bar {z} \\mid z) + \\beta_ {\\bar {z} | z} S \\\\ \\end{array} $$ Substitution of this expression into Equation 6.30a yields Thus, even when the parent-offspring regression is nonlinear, we can express the selection response in trait z as a linear response (breeder's equation) term $ \\beta_{\\overline{z}|z}S $ plus a correction $ \\sigma(w,\\overline{z}||z)=\\sigma(e_{w},e_{\\overline{",
+      "description": null
+    },
+    {
+      "id": "6.33a",
+      "label_format": "Equation 6.33a",
+      "latex": "\\sigma (x, y \\mid z) = E \\left[ \\left(x - E (x \\mid z)\\right) \\left(y - E (y \\mid z)\\right) \\mid z \\right]",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "6.8. One can imagine several measures of the residual dependency between two variables (say x and y) once the effects of a third (z) is removed. One is conditional covariance, $ \\sigma ( x,y\\mid z) $ , defined as the covariance conditioned on the value of z: Heywood's decomposition uses an alternative measure of dependency, the partial covariance $$ \\sigma (x, y | | z) = \\sigma \\left(e _ {x}, e _ {y}\\right) $$ where $ e_{x} $ and $ e_{y} $ are the residuals for the linear regression of x on z and of y on z. We",
+      "description": null
+    },
+    {
+      "id": "6.33b",
+      "label_format": "Equation 6.33b",
+      "latex": "\\sigma (x, y | | z) = \\sigma \\left(e _ {x}, e _ {y}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "ined as the covariance conditioned on the value of z: $$ \\sigma (x, y \\mid z) = E \\left[ \\left(x - E (x \\mid z)\\right) \\left(y - E (y \\mid z)\\right) \\mid z \\right] $$ Heywood's decomposition uses an alternative measure of dependency, the partial covariance where $ e_{x} $ and $ e_{y} $ are the residuals for the linear regression of x on z and of y on z. We use the notation $ ||z $ in place of $ |z $ to distinguish between partial and conditional covariances. If the three variables are multivariate normal, the",
+      "description": null
+    },
+    {
+      "id": "6.33c",
+      "label_format": "Equation 6.33c",
+      "latex": "e _ {x} = x - \\left(\\mu_ {x} + \\beta_ {x | z} z\\right) = x - \\mu_ {x} - \\left(\\frac {\\sigma (x , z)}{\\sigma_ {z} ^ {2}}\\right) z",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "us pairwise covariances between the three variables, as follows. The linear regression of x on z can be written as $$ x = \\mu_ {x} + \\beta_ {x | z} z + e _ {x} = \\mu_ {x} + \\left(\\frac {\\sigma (x , z)}{\\sigma_ {z} ^ {2}}\\right) z + e _ {x} $$ implying that with a similar expression for $ e_{y} $ . Substituting these into Equation 6.33b and ignoring the mean terms (which, as constants, do not factor in the covariance) yields $$ \\sigma (x, y | | z) = \\sigma \\left(e _ {x}, e _ {y}\\right) = \\sigma \\left[ x - \\lef",
+      "description": null
+    },
+    {
+      "id": "6.33d",
+      "label_format": "Equation 6.33d",
+      "latex": "\\begin{array}{l} \\sigma (x, y | | z) = \\sigma (x, y) - \\left(\\frac {\\sigma (x , z)}{\\sigma_ {z} ^ {2}}\\right) \\sigma (y, z) - \\left(\\frac {\\sigma (y , z)}{\\sigma_ {z} ^ {2}}\\right) \\sigma (x, z) + \\left(\\frac {\\sigma (y , z)}{\\sigma_ {z} ^ {2}}\\right) \\left(\\frac {\\sigma (x , z)}{\\sigma_ {z} ^ {2}}\\right) \\sigma_ {z} ^ {2} \\\\ = \\sigma (x, y) - \\frac {\\sigma (x , z) \\sigma (y , z)}{\\sigma_ {z} ^ {2}} \\tag {6.33d} \\\\ \\end{array}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "riance) yields $$ \\sigma (x, y | | z) = \\sigma \\left(e _ {x}, e _ {y}\\right) = \\sigma \\left[ x - \\left(\\frac {\\sigma (x , z)}{\\sigma_ {z} ^ {2}}\\right) z, y - \\left(\\frac {\\sigma (y , z)}{\\sigma_ {z} ^ {2}}\\right) z \\right] $$ which, by expansion, leads to The last term can be expressed as either $ \\beta_{x|z}\\sigma(y,z) $ or $ \\beta_{y|z}\\sigma(x,z). $ Applying Equation 6.33d by taking x=w and y= $ \\overline{z} $ yields $$ \\sigma (w, \\bar {z} \\mid z) = \\sigma (w, \\bar {z}) - \\frac {\\sigma (\\bar {z} , z)}{\\si",
+      "description": null
+    },
+    {
+      "id": "6.33e",
+      "label_format": "Equation 6.33e",
+      "latex": "\\sigma (w, \\bar {z} \\mid z) = \\sigma (w, \\bar {z}) - \\frac {\\sigma (\\bar {z} , z)}{\\sigma_ {z} ^ {2}} \\sigma (w, z) = \\sigma (w, \\bar {z}) - \\beta_ {\\bar {z} \\mid z} \\sigma (w, z)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "- \\frac {\\sigma (x , z) \\sigma (y , z)}{\\sigma_ {z} ^ {2}} \\tag {6.33d} \\\\ \\end{array} $$ The last term can be expressed as either $ \\beta_{x|z}\\sigma(y,z) $ or $ \\beta_{y|z}\\sigma(x,z). $ Applying Equation 6.33d by taking x=w and y= $ \\overline{z} $ yields Rearranging this last expression yields $$ \\begin{array}{l} \\sigma (w, \\bar {z}) = \\sigma (w, \\bar {z} \\mid | z) + \\beta_ {\\bar {z} | z} \\sigma (w, z) \\\\ = \\sigma (w, \\bar {z} \\mid | z) + \\beta_ {\\bar {z} | z} S \\\\ \\end{array} $$ which is used to obtain Eq",
+      "description": null
+    },
+    {
+      "id": "6.33f",
+      "label_format": "Equation 6.33f",
+      "latex": "\\begin{array}{l} \\sigma (w, \\bar {z}) = \\sigma (w, \\bar {z} \\mid | z) + \\beta_ {\\bar {z} | z} \\sigma (w, z) \\\\ = \\sigma (w, \\bar {z} \\mid | z) + \\beta_ {\\bar {z} | z} S \\\\ \\end{array}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_019",
+        "chapter": "chapter6",
+        "subsection": "Partial Covariance and the Spurious Response to Selection"
+      },
+      "context": "and y= $ \\overline{z} $ yields $$ \\sigma (w, \\bar {z} \\mid z) = \\sigma (w, \\bar {z}) - \\frac {\\sigma (\\bar {z} , z)}{\\sigma_ {z} ^ {2}} \\sigma (w, z) = \\sigma (w, \\bar {z}) - \\beta_ {\\bar {z} \\mid z} \\sigma (w, z) $$ Rearranging this last expression yields which is used to obtain Equation 6.32. ## Parent-Offspring Regressions Before and After Selection The second feature leading to Heywood's decomposition concerns the reference population for the parent-offspring regression. A subtle but important point to s",
+      "description": null
+    },
+    {
+      "id": "6.34",
+      "label_format": "Equation 6.34",
+      "latex": "\\sigma \\left(\\bar {z} _ {i}, z _ {i}\\right) = \\sigma \\left(\\bar {z} _ {i} ^ {\\circ} + \\delta_ {i} ^ {\\circ}, z _ {i}\\right) = \\sigma \\left(\\bar {z} _ {i} ^ {\\circ}, z _ {i}\\right) + \\sigma \\left(\\delta_ {i} ^ {\\circ}, z _ {i}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_020",
+        "chapter": "chapter6",
+        "subsection": "Parent-Offspring Regressions Before and After Selection"
+      },
+      "context": "\\delta_{i}^{\\circ}=\\overline{{{z}}}_{i}-\\overline{{{z}}}_{i}^{\\circ} $ as the difference in the offspring means for parent i when crossed to selected versus unselected parents. Because $ \\overline{{{z}}}_{i}=\\overline{{{z}}}_{i}^{\\circ}+\\delta_{i}^{\\circ} $ $$ \\beta_ {\\bar {z} | z} = \\frac {\\sigma (\\bar {z} , z)}{\\sigma_ {z} ^ {2}} = \\frac {\\sigma \\left(\\bar {z} ^ {\\circ} , z\\right) + \\sigma \\left(\\delta^ {\\circ} , z\\right)}{\\sigma_ {z} ^ {2}} = \\beta_ {\\bar {z} ^ {\\circ} | z} + \\frac {\\sigma \\left(\\delta^ {\\ci",
+      "description": null
+    },
+    {
+      "id": "6.35",
+      "label_format": "Equation 6.35",
+      "latex": "\\beta_ {\\bar {z} | z} = \\frac {\\sigma (\\bar {z} , z)}{\\sigma_ {z} ^ {2}} = \\frac {\\sigma \\left(\\bar {z} ^ {\\circ} , z\\right) + \\sigma \\left(\\delta^ {\\circ} , z\\right)}{\\sigma_ {z} ^ {2}} = \\beta_ {\\bar {z} ^ {\\circ} | z} + \\frac {\\sigma \\left(\\delta^ {\\circ} , z\\right)}{\\sigma_ {z} ^ {2}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_020",
+        "chapter": "chapter6",
+        "subsection": "Parent-Offspring Regressions Before and After Selection"
+      },
+      "context": "elta_{i}^{\\circ} $ $$ \\sigma \\left(\\bar {z} _ {i}, z _ {i}\\right) = \\sigma \\left(\\bar {z} _ {i} ^ {\\circ} + \\delta_ {i} ^ {\\circ}, z _ {i}\\right) = \\sigma \\left(\\bar {z} _ {i} ^ {\\circ}, z _ {i}\\right) + \\sigma \\left(\\delta_ {i} ^ {\\circ}, z _ {i}\\right) $$ Thus Equation 6.35 relates the parent-offspring regressions using unselected $ \\left( \\beta_{\\overline{z}^{\\circ}}|z\\right) $ versus selected $ \\left( \\beta_{\\overline{z}}|z\\right) $ parents. The same logic leading to Equation 6.33f (Example 6.8) can be us",
+      "description": null
+    },
+    {
+      "id": "6.36a",
+      "label_format": "Equation 6.36a",
+      "latex": "\\sigma \\left(w, \\bar {z} ^ {\\circ}\\right) = \\sigma \\left(w, \\bar {z} ^ {\\circ} \\mid \\mid z\\right) + \\beta_ {\\bar {z} ^ {\\circ} \\mid z} \\sigma (w, z)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_020",
+        "chapter": "chapter6",
+        "subsection": "Parent-Offspring Regressions Before and After Selection"
+      },
+      "context": "ent-offspring regressions using unselected $ \\left( \\beta_{\\overline{z}^{\\circ}}|z\\right) $ versus selected $ \\left( \\beta_{\\overline{z}}|z\\right) $ parents. The same logic leading to Equation 6.33f (Example 6.8) can be used to obtain two useful identities: and $$ \\sigma (w, \\bar {z} \\| z) = \\sigma (w, \\bar {z} ^ {\\circ} \\| z) + \\sigma (w, \\delta^ {\\circ}) - \\frac {\\sigma \\left(\\delta^ {\\circ} , z\\right) \\sigma (w , z)}{\\sigma_ {z} ^ {2}} $$ Finally, while $ \\bar{\\delta}_{i} $ is often considered to be the ch",
+      "description": null
+    },
+    {
+      "id": "6.36b",
+      "label_format": "Equation 6.36b",
+      "latex": "\\sigma (w, \\bar {z} \\| z) = \\sigma (w, \\bar {z} ^ {\\circ} \\| z) + \\sigma (w, \\delta^ {\\circ}) - \\frac {\\sigma \\left(\\delta^ {\\circ} , z\\right) \\sigma (w , z)}{\\sigma_ {z} ^ {2}}",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_020",
+        "chapter": "chapter6",
+        "subsection": "Parent-Offspring Regressions Before and After Selection"
+      },
+      "context": "e same logic leading to Equation 6.33f (Example 6.8) can be used to obtain two useful identities: $$ \\sigma \\left(w, \\bar {z} ^ {\\circ}\\right) = \\sigma \\left(w, \\bar {z} ^ {\\circ} \\mid \\mid z\\right) + \\beta_ {\\bar {z} ^ {\\circ} \\mid z} \\sigma (w, z) $$ and Finally, while $ \\bar{\\delta}_{i} $ is often considered to be the change from parent to offspring in the absence of selection, this is not strictly correct. Formally, it has two components, $$ \\bar {\\delta} _ {i} = \\bar {z} _ {i} - z _ {i} = \\left(\\bar {z}",
+      "description": null
+    },
+    {
+      "id": "6.37",
+      "label_format": "Equation 6.37",
+      "latex": "\\bar {\\delta} _ {i} = \\bar {z} _ {i} - z _ {i} = \\left(\\bar {z} _ {i} ^ {\\circ} + \\delta_ {i} ^ {\\circ}\\right) - z _ {i} = \\delta_ {i} ^ {\\circ} + \\left(\\bar {z} _ {i} ^ {\\circ} - z _ {i}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_020",
+        "chapter": "chapter6",
+        "subsection": "Parent-Offspring Regressions Before and After Selection"
+      },
+      "context": "ft(\\delta^ {\\circ} , z\\right) \\sigma (w , z)}{\\sigma_ {z} ^ {2}} $$ Finally, while $ \\bar{\\delta}_{i} $ is often considered to be the change from parent to offspring in the absence of selection, this is not strictly correct. Formally, it has two components, <div align=\"center\"> Table 6.3 Terms in Heywood's (2005) decomposition of response and their biological interpretations. See the text for further details. </div> <table border=\"1\"><tr><td>Term</td><td>Heywood&#x27;s Interpretation</td></tr><tr><td>$\\beta",
+      "description": null
+    },
+    {
+      "id": "6.38",
+      "label_format": "Equation 6.38",
+      "latex": "E \\left(\\bar {\\delta} _ {i}\\right) = E \\left(\\delta_ {i} ^ {\\circ}\\right) + E \\left(\\bar {z} _ {i} ^ {\\circ} - z _ {i}\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_021",
+        "chapter": "chapter6",
+        "subsection": "Hence"
+      },
+      "context": "whether regression is based on selected (Equation 6.40) or unselected (Equation 6.39) parents.</td></tr><tr><td>$E(\\overline{z}^{\\circ}-z)$</td><td>Constitutive transmission bias Change in offspring mean in unselected individuals.</td></tr></table> ## Hence where $ E(\\bar{z}_{i}^{\\circ}-z_{i}) $ , which Heywood calls the constitutive transmission bias, is the change from parent to offspring using unselected parents. Inbreeding, the decay of linkage disequilibrium, and randomization of correlated environmental e",
+      "description": null
+    },
+    {
+      "id": "6.39",
+      "label_format": "Equation 6.39",
+      "latex": "R = \\beta_ {\\bar {z} ^ {\\circ} | z} S + \\sigma \\left(w, \\bar {z} ^ {\\circ} \\mid \\mid z\\right) + \\sigma \\left(w, \\delta^ {\\circ}\\right) + E \\left(\\delta^ {\\circ}\\right) + E \\left(\\bar {z} ^ {\\circ} - z\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_022",
+        "chapter": "chapter6",
+        "subsection": "Heywood's Decomposition of Response"
+      },
+      "context": "e now have all of the components in place for Heywood's decomposition of the selection response. Expressed in terms of a regression using parents before selection $ (\\beta_{\\overline{z}^{\\circ},z}) $ substituting Equations 6.35-6.38 into Equation 6.32 yields Conversely, when expressed in terms of the regression after selection $ (\\beta_{\\overline{z}|z}) $ , the response is $$ R = \\beta_ {\\bar {z}, z} S + \\sigma \\left(w, \\bar {z} ^ {\\circ} \\mid \\mid z\\right) + \\sigma \\left(w, \\delta^ {\\circ} \\mid \\mid z\\right) +",
+      "description": null
+    },
+    {
+      "id": "6.40",
+      "label_format": "Equation 6.40",
+      "latex": "R = \\beta_ {\\bar {z}, z} S + \\sigma \\left(w, \\bar {z} ^ {\\circ} \\mid \\mid z\\right) + \\sigma \\left(w, \\delta^ {\\circ} \\mid \\mid z\\right) + E \\left(\\delta^ {\\circ}\\right) + E \\left(\\bar {z} ^ {\\circ} - z\\right).",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_022",
+        "chapter": "chapter6",
+        "subsection": "Heywood's Decomposition of Response"
+      },
+      "context": "irc} \\mid \\mid z\\right) + \\sigma \\left(w, \\delta^ {\\circ}\\right) + E \\left(\\delta^ {\\circ}\\right) + E \\left(\\bar {z} ^ {\\circ} - z\\right) $$ Conversely, when expressed in terms of the regression after selection $ (\\beta_{\\overline{z}|z}) $ , the response is This is obtained from Equation 6.39, using Equation 6.35 and the identity $$ \\sigma \\left(w, \\delta^ {\\circ}\\right) - \\frac {\\sigma \\left(\\delta^ {\\circ} , z\\right) \\sigma \\left(w , z\\right)}{\\sigma_ {z} ^ {2}} = \\sigma \\left(w, \\delta^ {\\circ} \\mid \\mid z\\",
+      "description": null
+    },
+    {
+      "id": "6.41",
+      "label_format": "Equation 6.41",
+      "latex": "\\sigma \\left(w, \\delta^ {\\circ}\\right) - \\frac {\\sigma \\left(\\delta^ {\\circ} , z\\right) \\sigma \\left(w , z\\right)}{\\sigma_ {z} ^ {2}} = \\sigma \\left(w, \\delta^ {\\circ} \\mid \\mid z\\right)",
+      "formula_type": "block",
+      "source": {
+        "unit_id": "chapter6_022",
+        "chapter": "chapter6",
+        "subsection": "Heywood's Decomposition of Response"
+      },
+      "context": "\\sigma \\left(w, \\bar {z} ^ {\\circ} \\mid \\mid z\\right) + \\sigma \\left(w, \\delta^ {\\circ} \\mid \\mid z\\right) + E \\left(\\delta^ {\\circ}\\right) + E \\left(\\bar {z} ^ {\\circ} - z\\right). $$ This is obtained from Equation 6.39, using Equation 6.35 and the identity Equation 6.41 follows, using the same logic leading to Equation 6.31f. Beside the different regression coefficients $ (\\beta_{\\overline{z}^{\\circ}|z} $ vs. $ \\beta_{\\overline{z}|z} $ ), Equations 6.39 and 6.40 differ in that $ \\sigma(w,\\delta^{\\circ}) $ in E",
+      "description": null
+    }
+  ]
+}

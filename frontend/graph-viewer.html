@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>知识图谱可视化</title>
+    <link rel="stylesheet" href="graph-styles.css">
+    <link rel="stylesheet" href="graph-viewer.css">
+</head>
+<body>
+    <div id="graph-viewer-container">
+        <!-- 顶部工具栏 -->
+        <div class="graph-toolbar">
+            <div class="toolbar-left">
+                <h2>知识图谱</h2>
+                <div class="graph-stats" id="graph-stats">
+                    <span class="stat-item">节点: <span id="node-count">0</span></span>
+                    <span class="stat-item">边: <span id="edge-count">0</span></span>
+                </div>
+            </div>
+            <div class="toolbar-right">
+                <div class="search-box">
+                    <input type="text" id="graph-search-input" placeholder="搜索节点..." class="search-input">
+                    <button onclick="searchGraph()" class="btn-search">🔍</button>
+                </div>
+                <select id="node-type-filter" class="filter-select" onchange="filterByType()">
+                    <option value="">所有类型</option>
+                    <option value="chapter">章节</option>
+                    <option value="concept">概念</option>
+                    <option value="note">笔记</option>
+                    <option value="observation">观察</option>
+                </select>
+                <button onclick="fitView()" class="btn-tool" title="适应视图">⛶</button>
+                <button onclick="zoomIn()" class="btn-tool" title="放大">➕</button>
+                <button onclick="zoomOut()" class="btn-tool" title="缩小">➖</button>
+                <button onclick="toggleLayout()" class="btn-tool" title="切换布局">🔄</button>
+                <button onclick="exportGraph()" class="btn-tool" title="导出">📥</button>
+            </div>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="graph-main-content">
+            <!-- 图谱画布 -->
+            <div id="graph-canvas" class="graph-canvas"></div>
+
+            <!-- 侧边面板 -->
+            <div class="graph-sidebar" id="graph-sidebar">
+                <div class="sidebar-header">
+                    <h3>节点详情</h3>
+                    <button onclick="closeSidebar()" class="btn-close">×</button>
+                </div>
+                <div class="sidebar-content" id="sidebar-content">
+                    <p class="placeholder-text">点击节点查看详情</p>
+                </div>
+
+                <!-- 关系列表 -->
+                <div class="sidebar-section" id="relations-section" style="display: none;">
+                    <h4>关联节点</h4>
+                    <div id="relations-list" class="relations-list"></div>
+                </div>
+
+                <!-- 路径追踪 -->
+                <div class="sidebar-section" id="path-section" style="display: none;">
+                    <h4>知识路径</h4>
+                    <div class="path-controls">
+                        <button onclick="getPrerequisites()" class="btn-small btn-primary">前置知识</button>
+                        <button onclick="getFollowUp()" class="btn-small btn-primary">后置知识</button>
+                    </div>
+                    <div id="path-list" class="path-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部状态栏 -->
+        <div class="graph-statusbar" id="graph-statusbar">
+            <span id="status-text">就绪</span>
+            <span id="loading-indicator" class="loading-indicator" style="display: none;">
+                <span class="spinner"></span> 加载中...
+            </span>
+        </div>
+
+        <!-- 导入对话框 -->
+        <div id="import-dialog" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>导入知识图谱</h3>
+                    <button onclick="closeImportDialog()" class="btn-close">×</button>
+                </div>
+                <div class="modal-body">
+                    <div class="import-option">
+                        <h4>从GraphML文件导入</h4>
+                        <input type="file" id="graphml-file-input" accept=".graphml,.xml" class="input-field">
+                        <button onclick="importGraphML()" class="btn btn-primary">导入GraphML</button>
+                    </div>
+                    <div class="import-option">
+                        <h4>从数据库加载</h4>
+                        <button onclick="loadFromDatabase()" class="btn btn-success">从数据库加载</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 分析面板 -->
+        <div id="analytics-panel" class="analytics-panel" style="display: none;">
+            <div class="panel-header">
+                <h3>图谱分析</h3>
+                <button onclick="toggleAnalytics()" class="btn-close">×</button>
+            </div>
+            <div class="panel-body">
+                <div class="analytics-grid">
+                    <div class="analytics-card">
+                        <h4>节点统计</h4>
+                        <div id="node-stats"></div>
+                    </div>
+                    <div class="analytics-card">
+                        <h4>关系统计</h4>
+                        <div id="relation-stats"></div>
+                    </div>
+                    <div class="analytics-card">
+                        <h4>连接性</h4>
+                        <div id="connectivity-stats"></div>
+                    </div>
+                </div>
+                <div class="analytics-actions">
+                    <button onclick="validateGraph()" class="btn btn-info">验证图谱</button>
+                    <button onclick="cleanOrphans()" class="btn btn-warning">清理孤立节点</button>
+                </div>
+                <div id="validation-results" class="validation-results"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cytoscape.js 库 -->
+    <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+    <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
+
+    <script src="graph-viewer.js"></script>
+</body>
+</html>
