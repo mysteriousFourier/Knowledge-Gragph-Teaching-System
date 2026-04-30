@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any
 import asyncio
 import hmac
 import os
+import re
 import sys
 import uvicorn
 from datetime import datetime
@@ -35,7 +36,6 @@ if str(CURRENT_DIR) not in sys.path:
 from mcp_client import get_mcp_client, close_mcp_client, call_mcp_tool
 from deepseek_api import DeepSeekAPIClient, get_deepseek_model
 from kg_constraints import (
-    build_kg_grounded_exercise,
     build_learning_plan,
     check_generation_consistency,
     evidence_from_graph,
@@ -229,6 +229,18 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 
+@app.get("/api/config-status")
+async def config_status():
+    """Return non-secret runtime configuration status for the frontend settings panel."""
+    return {
+        "success": True,
+        "deepseek_api_key_configured": bool(os.getenv("DEEPSEEK_API_KEY")),
+        "flash_model": get_deepseek_model("flash"),
+        "pro_model": get_deepseek_model("pro"),
+        "env_file": str(ROOT_DIR / ".env"),
+    }
+
+
 def _build_plan_from_rag(question: str, rag: Dict[str, Any], task: str = "qa") -> Dict[str, Any]:
     evidence = evidence_from_rag(rag.get("llm_context") or [], limit=8)
     return build_learning_plan(
@@ -238,6 +250,68 @@ def _build_plan_from_rag(question: str, rag: Dict[str, Any], task: str = "qa") -
         learning_level="beginner",
         task=task,
     )
+
+
+def _safe_consistency_report(output: str, learning_plan: Dict[str, Any], task: str) -> Dict[str, Any]:
+    try:
+        return check_generation_consistency(output, learning_plan, task=task)
+    except Exception as exc:
+        return {
+            "knowledge_support_ratio": 0.0,
+            "unsupported_concept_rate": 1.0,
+            "learning_goal_alignment": 0.0,
+            "difficulty_match": "unknown",
+            "hint_policy_violated": False,
+            "is_safe_to_show": bool(str(output or "").strip()),
+            "warnings": [f"Consistency check unavailable: {exc}"],
+        }
+
+
+def _build_question_fallback_response(
+    question: str,
+    *,
+    model: Optional[str] = None,
+    warning: Optional[str] = None,
+) -> Dict[str, Any]:
+    try:
+        local = build_local_answer(question)
+    except Exception as exc:
+        local = {
+            "answer": "当前知识图谱和记忆检索暂不可用，无法生成可靠回答。请确认后端服务和图谱数据已启动。",
+            "context": "",
+            "llm_context": [],
+            "keyword_hits": [],
+            "semantic_hits": [],
+            "memory_hits": [],
+        }
+        warning = f"{warning or 'Question fallback used'}; local retrieval failed: {exc}"
+
+    sources = local.get("llm_context") or []
+    learning_plan = build_learning_plan(
+        query=question,
+        evidence=evidence_from_rag(sources, limit=8),
+        learner_intent=None,
+        learning_level="beginner",
+        task="qa",
+    )
+    answer = str(local.get("answer") or "").strip() or "当前知识图谱证据不足，未检索到可用于回答该问题的内容。"
+    payload = {
+        "success": True,
+        "answer": answer,
+        "question": question,
+        "model": model or get_deepseek_model("flash"),
+        "answered_at": datetime.now().isoformat(),
+        "retrieval_context": local.get("context") or "",
+        "sources": sources,
+        "learning_plan": learning_plan,
+        "consistency_report": _safe_consistency_report(answer, learning_plan, task="qa"),
+        "keyword_hits": local.get("keyword_hits") or [],
+        "semantic_hits": local.get("semantic_hits") or [],
+        "memory_hits": local.get("memory_hits") or [],
+    }
+    if warning:
+        payload["warning"] = warning
+    return payload
 
 
 def _build_plan_from_graph(
@@ -259,6 +333,201 @@ def _build_plan_from_graph(
         task=task,
         chapter_data=chapter_data,
     )
+
+
+def _normalize_exercise_options(options: Any) -> List[str]:
+    if isinstance(options, dict):
+        normalized = []
+        for key, value in options.items():
+            key_text = str(key).strip()
+            value_text = str(value).strip()
+            if not value_text:
+                continue
+            if key_text and len(key_text) <= 3:
+                normalized.append(f"{key_text}. {value_text}")
+            else:
+                normalized.append(value_text)
+        return normalized
+
+    if isinstance(options, list):
+        normalized = []
+        for item in options:
+            if isinstance(item, dict):
+                key = str(item.get("key") or item.get("label") or item.get("id") or "").strip()
+                text = str(item.get("text") or item.get("content") or item.get("value") or "").strip()
+                if not text:
+                    continue
+                normalized.append(f"{key}. {text}" if key and len(key) <= 3 else text)
+            else:
+                text = str(item).strip()
+                if text:
+                    normalized.append(text)
+        return normalized
+
+    return []
+
+
+def _normalize_correct_answer(value: Any) -> str:
+    if isinstance(value, int):
+        return chr(65 + value) if 0 <= value < 26 else str(value)
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    match = text[:1].upper()
+    return match if "A" <= match <= "Z" else text
+
+
+def _is_placeholder_exercise(item: Dict[str, Any], question: str, options: List[str]) -> bool:
+    text = " ".join([str(item.get("id") or ""), question, " ".join(options)])
+    placeholder_markers = [
+        "sample",
+        "示例",
+        "测试",
+        "选项一",
+        "选项二",
+        "选项三",
+        "选项四",
+        "当前图谱是否有足够证据",
+        "kg_gap",
+    ]
+    return any(marker.lower() in text.lower() for marker in placeholder_markers)
+
+
+def _clean_exercise_text(value: Any, limit: int = 180) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    text = re.sub(r"^[#>*\-\d.)、\s]+", "", text).strip()
+    if len(text) > limit:
+        text = text[:limit].rstrip("，。；;,. ") + "..."
+    return text
+
+
+def _chapter_content_evidence(
+    *,
+    chapter_id: str,
+    chapter_title: str,
+    chapter_content: str,
+    limit: int = 8,
+) -> List[Dict[str, Any]]:
+    content = str(chapter_content or "").strip()
+    if not content:
+        return []
+
+    chunks = re.split(r"(?<=[。！？.!?])\s*|\n+", content)
+    candidates: List[str] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        clean = _clean_exercise_text(chunk, limit=220)
+        if len(clean) < 8 or clean in seen:
+            continue
+        seen.add(clean)
+        candidates.append(clean)
+        if len(candidates) >= limit:
+            break
+
+    if not candidates:
+        clean = _clean_exercise_text(content, limit=220)
+        if clean:
+            candidates.append(clean)
+
+    return [
+        {
+            "index": index,
+            "id": f"{chapter_id}_content_{index}",
+            "label": _clean_exercise_text(item, limit=36) or chapter_title or f"章节内容 {index}",
+            "type": "chapter_content",
+            "content": item,
+            "source": "chapter",
+        }
+        for index, item in enumerate(candidates, start=1)
+    ]
+
+
+def _exercise_distractor_pool(
+    sources: List[Dict[str, Any]],
+    current_index: int,
+    chapter_title: str,
+) -> List[str]:
+    pool: List[str] = []
+    for index, item in enumerate(sources):
+        if index == current_index:
+            continue
+        label = _clean_exercise_text(item.get("label"), limit=70)
+        content = _clean_exercise_text(item.get("content"), limit=130)
+        if label and content and label not in content:
+            pool.append(f"{label} 的核心内容是：{content}")
+        elif content:
+            pool.append(content)
+    pool.extend(
+        [
+            f"{chapter_title or '本章'}中的知识点可以脱离图谱证据任意扩展。",
+            "只要出现相似关键词，就可以忽略原始定义和上下文。",
+            "该知识点与本章主题没有关系，因此不需要结合上下文理解。",
+        ]
+    )
+
+    result: List[str] = []
+    seen: set[str] = set()
+    for item in pool:
+        clean = _clean_exercise_text(item, limit=150)
+        if clean and clean not in seen:
+            seen.add(clean)
+            result.append(clean)
+        if len(result) >= 8:
+            break
+    return result
+
+
+def _build_local_choice_exercise(
+    *,
+    chapter_id: str,
+    chapter_title: str,
+    chapter_content: str,
+    source: Dict[str, Any],
+    all_sources: List[Dict[str, Any]],
+    source_index: int,
+    exercise_index: int,
+) -> Dict[str, Any]:
+    label = _clean_exercise_text(source.get("label") or chapter_title or f"知识点 {exercise_index}", limit=80)
+    content = _clean_exercise_text(source.get("content") or label, limit=170)
+    if not content:
+        raise ValueError("题库生成失败：章节内容和图谱证据为空，无法生成可靠练习题")
+
+    distractors = _exercise_distractor_pool(all_sources, source_index, chapter_title)
+    options = [content]
+    for distractor in distractors:
+        if distractor != content:
+            options.append(distractor)
+        if len(options) == 4:
+            break
+    while len(options) < 4:
+        options.append(f"该说法缺少《{chapter_title or chapter_id}》中的直接证据支持。")
+
+    options = options[:4]
+    correct_slot = (exercise_index - 1) % len(options)
+    if correct_slot:
+        correct_option = options.pop(0)
+        options.insert(correct_slot, correct_option)
+
+    letters = ["A", "B", "C", "D"]
+    formatted_options = [f"{letters[index]}. {option}" for index, option in enumerate(options)]
+    correct_answer = letters[correct_slot]
+    evidence = [source]
+    plan = build_learning_plan(
+        query=chapter_title or label,
+        evidence=evidence,
+        learner_intent="practice",
+        task="practice",
+        chapter_data={"id": chapter_id, "title": chapter_title, "content": chapter_content},
+    )
+    return {
+        "id": f"ex_{re.sub(r'[^a-zA-Z0-9_-]+', '_', chapter_id or 'chapter')}_{exercise_index}",
+        "question": f"根据《{chapter_title or chapter_id}》的内容，关于“{label}”哪一项表述最符合当前证据？",
+        "options": formatted_options,
+        "correct_answer": correct_answer,
+        "explanation": f"正确选项来自证据[{source.get('index', exercise_index)}]：{content}",
+        "source_evidence": evidence,
+        "learning_plan": plan,
+    }
 
 
 def _get_exercise_evidence(chapter_id: str, chapter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -308,15 +577,75 @@ def _normalize_exercise_bank(payload: Any) -> List[Dict[str, Any]]:
     for index, item in enumerate(raw_items, start=1):
         if not isinstance(item, dict):
             continue
-        question = str(item.get("question") or "").strip()
-        options = item.get("options")
-        if not question or not isinstance(options, list) or not options:
+        question = str(item.get("question") or item.get("stem") or item.get("prompt") or item.get("title") or "").strip()
+        options = _normalize_exercise_options(item.get("options") or item.get("choices") or item.get("answers"))
+        if not question or not options:
+            continue
+        if _is_placeholder_exercise(item, question, options):
             continue
         exercise = dict(item)
         exercise.setdefault("id", f"exercise_{index}")
-        exercise["options"] = [str(option) for option in options]
+        exercise["question"] = question
+        exercise["options"] = options
+        answer = _normalize_correct_answer(
+            item.get("correct_answer")
+            or item.get("answer")
+            or item.get("correct")
+            or item.get("correct_option")
+        )
+        if answer:
+            exercise["correct_answer"] = answer
         bank.append(exercise)
     return bank
+
+
+def _build_local_exercise_response(
+    request: GenerateExercisesRequest,
+    *,
+    graph_data: Optional[Dict[str, Any]] = None,
+    warning: Optional[str] = None,
+) -> Dict[str, Any]:
+    chapter_payload = {
+        "id": request.chapter_id,
+        "title": request.chapter_title,
+        "content": request.chapter_content,
+    }
+    if isinstance(graph_data, dict):
+        chapter_payload["graph_data"] = graph_data
+
+    evidence = _get_exercise_evidence(request.chapter_id, chapter_payload)
+    exercise_bank = _build_local_exercise_bank(
+        chapter_id=request.chapter_id,
+        chapter_title=request.chapter_title,
+        chapter_content=request.chapter_content,
+        evidence=evidence,
+        count=request.count,
+    )
+    saved_chapter = chapter_store.save_exercise_bank(
+        chapter_id=request.chapter_id,
+        exercises=exercise_bank,
+    )
+    first_exercise = exercise_bank[0]
+    learning_plan = first_exercise.get("learning_plan") or build_learning_plan(
+        query=request.chapter_title or request.chapter_id,
+        evidence=evidence,
+        task="practice",
+        chapter_data=chapter_payload,
+    )
+    payload = {
+        "success": True,
+        "exercise": first_exercise,
+        "exercise_bank": exercise_bank,
+        "chapter": saved_chapter,
+        "learning_plan": learning_plan,
+        "consistency_report": _safe_consistency_report(str(exercise_bank), learning_plan, task="practice"),
+        "generated_at": datetime.now().isoformat(),
+        "cached": False,
+        "fallback": True,
+    }
+    if warning:
+        payload["warning"] = warning
+    return payload
 
 
 def _build_local_exercise_bank(
@@ -328,35 +657,61 @@ def _build_local_exercise_bank(
     count: int = 5,
 ) -> List[Dict[str, Any]]:
     target_count = max(1, min(max(count, 1), 10))
-    source_evidence = evidence or []
-    bank: List[Dict[str, Any]] = []
+    content_evidence = _chapter_content_evidence(
+        chapter_id=chapter_id,
+        chapter_title=chapter_title,
+        chapter_content=chapter_content,
+        limit=target_count,
+    )
+    source_evidence = content_evidence + (evidence or [])
     if not source_evidence:
-        return [
-            build_kg_grounded_exercise(
+        raise ValueError("题库生成失败：章节内容和图谱证据为空，无法生成可靠练习题")
+
+    normalized_sources = []
+    for index, item in enumerate(source_evidence, start=1):
+        if not isinstance(item, dict):
+            continue
+        content = _clean_exercise_text(item.get("content") or item.get("label"), limit=220)
+        if not content:
+            continue
+        normalized = dict(item)
+        normalized["index"] = normalized.get("index") or index
+        normalized["label"] = _clean_exercise_text(normalized.get("label") or chapter_title or f"知识点 {index}", limit=80)
+        normalized["content"] = content
+        normalized.setdefault("source", "graph")
+        normalized_sources.append(normalized)
+
+    if not normalized_sources:
+        raise ValueError("题库生成失败：没有可用于组题的有效知识点")
+
+    bank: List[Dict[str, Any]] = []
+    for index, item in enumerate(normalized_sources[:target_count], start=1):
+        bank.append(
+            _build_local_choice_exercise(
                 chapter_id=chapter_id,
                 chapter_title=chapter_title,
                 chapter_content=chapter_content,
-                evidence=[],
+                source=item,
+                all_sources=normalized_sources,
+                source_index=index - 1,
+                exercise_index=index,
             )
-        ]
-
-    for index, item in enumerate(source_evidence[:target_count], start=1):
-        exercise = build_kg_grounded_exercise(
-            chapter_id=chapter_id,
-            chapter_title=chapter_title,
-            chapter_content=chapter_content,
-            evidence=[item],
         )
-        exercise["id"] = f"{exercise.get('id', f'ex_{chapter_id}')}_{index}"
-        bank.append(exercise)
     return bank
 
 
 async def answer_with_retrieval(question: str, api_key: Optional[str] = None, timeout_seconds: int = 40) -> Dict[str, Any]:
     """Answer with retrieved graph context, then fall back to local retrieval."""
     qa_model = get_deepseek_model("flash")
-    rag = build_rag_context(question, limit=6)
-    learning_plan = _build_plan_from_rag(question, rag, task="qa")
+    try:
+        rag = build_rag_context(question, limit=6)
+        learning_plan = _build_plan_from_rag(question, rag, task="qa")
+    except Exception as exc:
+        return _build_question_fallback_response(
+            question,
+            model=qa_model,
+            warning=f"Retrieval unavailable; used local graph fallback: {exc}",
+        )
     fallback_lines = [
         f"- [{item.get('source', 'graph')}] {item.get('label', 'context')}: {str(item.get('content') or '')[:180]}"
         for item in learning_plan.get("evidence", [])
@@ -373,7 +728,7 @@ async def answer_with_retrieval(question: str, api_key: Optional[str] = None, ti
             client.answer_question({"nodes": []}, question, rag["llm_context"]),
             timeout=timeout_seconds,
         )
-        consistency_report = check_generation_consistency(answer, learning_plan, task="qa")
+        consistency_report = _safe_consistency_report(answer, learning_plan, task="qa")
         return {
             "success": True,
             "answer": answer,
@@ -402,7 +757,7 @@ async def answer_with_retrieval(question: str, api_key: Optional[str] = None, ti
         "retrieval_context": rag["context"],
         "sources": rag["llm_context"],
         "learning_plan": learning_plan,
-        "consistency_report": check_generation_consistency(fallback_answer, learning_plan, task="qa"),
+        "consistency_report": _safe_consistency_report(fallback_answer, learning_plan, task="qa"),
         "memory_hits": rag["memory_hits"],
         "semantic_hits": rag["semantic_hits"],
     }
@@ -410,19 +765,21 @@ async def answer_with_retrieval(question: str, api_key: Optional[str] = None, ti
 
 @app.post("/api/education/generate-lecture")
 async def generate_lecture(request: GenerateLectureRequest):
-    """
-    生成授课文案
-
-    基于知识图谱和章节内容，使用Claude生成授课文案
-    """
+    """Generate lecture text with KG constraints."""
+    graph_data = None
     try:
-        # 1. 获取知识图谱
-        graph_data = await call_mcp_tool("read_graph")
+        try:
+            graph_data = await call_mcp_tool("read_graph")
+        except Exception:
+            try:
+                graph_data = build_frontend_graph()
+            except Exception:
+                graph_data = None
 
-        # 2. 构建章节数据
         chapter_data = {
+            "id": request.chapter_id,
             "title": request.chapter_title,
-            "content": request.chapter_content
+            "content": request.chapter_content,
         }
         learning_plan = _build_plan_from_graph(
             query=request.chapter_title,
@@ -430,18 +787,25 @@ async def generate_lecture(request: GenerateLectureRequest):
             task="lecture",
             chapter_data=chapter_data,
         )
+        if not learning_plan.get("evidence"):
+            rag = build_rag_context(f"{request.chapter_title}\n{request.chapter_content[:800]}", limit=6)
+            learning_plan = build_learning_plan(
+                query=request.chapter_title,
+                evidence=evidence_from_rag(rag.get("llm_context") or [], limit=6),
+                learner_intent="explain",
+                learning_level="beginner",
+                task="lecture",
+                chapter_data=chapter_data,
+            )
 
-        # 3. 调用Claude生成文案
-        # 使用用户提供的API密钥，如果没有则使用环境变量中的API密钥
         claude_client = DeepSeekAPIClient(
             api_key=request.api_key,
             model=request.model or get_deepseek_model("pro"),
         )
-
         lecture_content = await claude_client.generate_lecture(
-            graph_data,
+            graph_data if isinstance(graph_data, dict) else {"nodes": [], "relations": []},
             chapter_data,
-            request.style
+            request.style,
         )
 
         return {
@@ -451,23 +815,20 @@ async def generate_lecture(request: GenerateLectureRequest):
             "style": request.style,
             "model": claude_client.model,
             "learning_plan": learning_plan,
-            "consistency_report": check_generation_consistency(lecture_content, learning_plan, task="lecture"),
-            "generated_at": datetime.now().isoformat()
+            "consistency_report": _safe_consistency_report(lecture_content, learning_plan, task="lecture"),
+            "generated_at": datetime.now().isoformat(),
         }
-
     except ValueError as e:
-        # DeepSeek API未配置
-        if "API密钥" in str(e):
+        if "API" in str(e).upper():
             return {
                 "success": False,
-                "error": "DeepSeek API未配置",
-                "message": "请在设置中配置DeepSeek API密钥，或设置DEEPSEEK_API_KEY环境变量",
-                "fallback": "可使用本地生成功能"
+                "error": "DeepSeek API is not configured",
+                "message": "Please configure a DeepSeek API key in settings or DEEPSEEK_API_KEY.",
+                "fallback": "Local generation is available.",
             }
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生成授课文案失败: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=f"Generate lecture failed: {str(e)}")
 
 @app.post("/api/education/ask-question")
 async def ask_question(request: AskQuestionRequest):
@@ -512,19 +873,17 @@ async def ask_question(request: AskQuestionRequest):
         }
 
     except ValueError as e:
-        if "API密钥" in str(e):
-            fallback = build_local_answer(request.question)
-            return {
-                "success": True,
-                "answer": fallback["answer"],
-                "question": request.question,
-                "warning": "DeepSeek API未配置，已使用图谱和记忆检索结果回答",
-                "memory_hits": fallback["memory_hits"],
-                "semantic_hits": fallback["semantic_hits"],
-            }
-        raise HTTPException(status_code=400, detail=str(e))
+        return _build_question_fallback_response(
+            request.question,
+            model=get_deepseek_model("flash"),
+            warning=f"问答模型不可用，已使用本地图谱检索回答：{e}",
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"回答问题失败: {str(e)}")
+        return _build_question_fallback_response(
+            request.question,
+            model=get_deepseek_model("flash"),
+            warning=f"问答服务异常，已使用本地图谱检索回答：{e}",
+        )
 
 
 @app.post("/api/education/learning-plan")
@@ -759,6 +1118,10 @@ async def get_chapter(chapter_id: str):
                 "success": False,
                 "error": "章节不存在"
             }
+        cleaned_bank = _normalize_exercise_bank(chapter.get("exercise_bank") or chapter.get("exercises"))
+        chapter = dict(chapter)
+        chapter["exercise_bank"] = cleaned_bank
+        chapter["exercises"] = cleaned_bank[0] if cleaned_bank else None
         return {
             "success": True,
             "chapter": chapter
@@ -933,6 +1296,7 @@ async def generate_exercises(request: GenerateExercisesRequest):
 
     基于章节内容和知识图谱，使用Claude生成练习题
     """
+    graph_data = None
     try:
         cached_chapter = chapter_store.get_chapter(request.chapter_id)
         cached_bank = _normalize_exercise_bank((cached_chapter or {}).get("exercise_bank") or (cached_chapter or {}).get("exercises"))
@@ -946,7 +1310,13 @@ async def generate_exercises(request: GenerateExercisesRequest):
             }
 
         # 1. 获取知识图谱
-        graph_data = await call_mcp_tool("read_graph")
+        try:
+            graph_data = await call_mcp_tool("read_graph")
+        except Exception:
+            try:
+                graph_data = build_frontend_graph()
+            except Exception:
+                graph_data = None
         chapter_data = {
             "id": request.chapter_id,
             "title": request.chapter_title,
@@ -964,6 +1334,12 @@ async def generate_exercises(request: GenerateExercisesRequest):
             task="exercise",
             chapter_data=chapter_data,
         )
+        if not learning_plan.get("evidence"):
+            return _build_local_exercise_response(
+                request,
+                graph_data=graph_data if isinstance(graph_data, dict) else None,
+                warning="当前图谱证据不足，已预创建本地兜底题库；请先补充章节相关图谱证据。",
+            )
 
         # 2. 调用 DeepSeek 生成题库（结合知识图谱）
         claude_client = DeepSeekAPIClient(
@@ -971,11 +1347,15 @@ async def generate_exercises(request: GenerateExercisesRequest):
             model=request.model or get_deepseek_model("pro"),
         )
 
-        exercise_data = await claude_client.generate_exercises(
-            request.chapter_title,
-            request.chapter_content,
-            request.count,
-            graph_data
+        exercise_timeout = float(os.getenv("EXERCISE_GENERATION_TIMEOUT_SECONDS", "45"))
+        exercise_data = await asyncio.wait_for(
+            claude_client.generate_exercises(
+                request.chapter_title,
+                request.chapter_content,
+                request.count,
+                graph_data,
+            ),
+            timeout=exercise_timeout,
         )
         exercise_bank = _normalize_exercise_bank(exercise_data)
         if not exercise_bank:
@@ -992,7 +1372,7 @@ async def generate_exercises(request: GenerateExercisesRequest):
             "chapter": saved_chapter,
             "model": claude_client.model,
             "learning_plan": learning_plan,
-            "consistency_report": check_generation_consistency(
+            "consistency_report": _safe_consistency_report(
                 str(exercise_bank),
                 learning_plan,
                 task="practice",
@@ -1000,45 +1380,27 @@ async def generate_exercises(request: GenerateExercisesRequest):
             "generated_at": datetime.now().isoformat()
         }
 
+    except asyncio.TimeoutError:
+        return _build_local_exercise_response(
+            request,
+            graph_data=graph_data if isinstance(graph_data, dict) else None,
+            warning="DeepSeek 题库生成超时，已使用章节内容和知识图谱证据预创建本地题库。",
+        )
     except ValueError as e:
-        if "API密钥" in str(e):
-            evidence = _get_exercise_evidence(
-                request.chapter_id,
-                {
-                    "id": request.chapter_id,
-                    "title": request.chapter_title,
-                    "content": request.chapter_content,
-                    "graph_data": graph_data if isinstance(graph_data, dict) else None,
-                },
-            )
-            exercise_bank = _build_local_exercise_bank(
-                chapter_id=request.chapter_id,
-                chapter_title=request.chapter_title,
-                chapter_content=request.chapter_content,
-                evidence=evidence,
-                count=request.count,
-            )
-            saved_chapter = chapter_store.save_exercise_bank(
-                chapter_id=request.chapter_id,
-                exercises=exercise_bank,
-            )
-            first_exercise = exercise_bank[0]
-            return {
-                "success": True,
-                "exercise": first_exercise,
-                "exercise_bank": exercise_bank,
-                "chapter": saved_chapter,
-                "learning_plan": first_exercise.get("learning_plan"),
-                "consistency_report": check_generation_consistency(
-                    str(exercise_bank),
-                    first_exercise.get("learning_plan") or {},
-                    task="practice",
-                ),
-                "warning": "DeepSeek API未配置，已使用知识图谱证据预创建本地题库",
-            }
-        raise HTTPException(status_code=400, detail=str(e))
+        return _build_local_exercise_response(
+            request,
+            graph_data=graph_data if isinstance(graph_data, dict) else None,
+            warning=f"DeepSeek 题库生成不可用，已使用知识图谱证据预创建本地题库：{e}",
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生成练习题失败: {str(e)}")
+        try:
+            return _build_local_exercise_response(
+                request,
+                graph_data=graph_data if isinstance(graph_data, dict) else None,
+                warning=f"题库生成失败，已使用知识图谱证据预创建本地题库：{e}",
+            )
+        except Exception as fallback_error:
+            raise HTTPException(status_code=500, detail=f"生成练习题失败: {fallback_error}")
 
 
 @app.get("/api/student/exercises")
@@ -1085,7 +1447,7 @@ async def get_student_exercises(chapter_id: str):
             "exercise_bank": exercise_bank,
             "chapter": saved_chapter,
             "learning_plan": first_exercise.get("learning_plan"),
-            "consistency_report": check_generation_consistency(
+            "consistency_report": _safe_consistency_report(
                 str(exercise_bank),
                 first_exercise.get("learning_plan") or {},
                 task="practice",
@@ -1111,7 +1473,11 @@ async def student_ask_question_backend(request: QuestionRequest):
             "semantic_hits": result["semantic_hits"],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"回答问题失败: {str(e)}")
+        return _build_question_fallback_response(
+            request.question,
+            model=get_deepseek_model("flash"),
+            warning=f"问答服务异常，已使用本地图谱检索回答：{e}",
+        )
 
 
 @app.get("/api/student/review")
@@ -1185,7 +1551,7 @@ async def check_student_answer_backend(request: CheckAnswerRequest):
             "explanation": explanation,
             "correct_answer": "",
             "learning_plan": learning_plan,
-            "consistency_report": check_generation_consistency(
+            "consistency_report": _safe_consistency_report(
                 f"{feedback}\n{explanation}",
                 learning_plan,
                 task="feedback",

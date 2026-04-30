@@ -57,6 +57,8 @@ class GraphVizAPI(BaseHTTPRequestHandler):
         """设置HTTP响应头"""
         self.send_response(200)
         self.send_header("Content-type", content_type)
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Pragma", "no-cache")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -552,7 +554,7 @@ class GraphVizAPI(BaseHTTPRequestHandler):
 
     def _serve_visualization(self):
         """提供可视化界面"""
-        self._set_headers("text/html")
+        self._set_headers("text/html; charset=utf-8")
 
         # 优先使用外部HTML文件，如果不存在则使用内嵌版本
         html_path = KNOWLEDGE_GRAPH_DIR / "graph_viz.html"
@@ -565,7 +567,7 @@ class GraphVizAPI(BaseHTTPRequestHandler):
         self.wfile.write(html_content.encode())
 
     def _serve_admin(self):
-        self._set_headers("text/html")
+        self._set_headers("text/html; charset=utf-8")
         html_path = KNOWLEDGE_GRAPH_DIR / "backend_admin.html"
         if html_path.exists():
             html_content = html_path.read_text(encoding="utf-8")

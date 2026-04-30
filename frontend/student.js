@@ -756,7 +756,7 @@ async function loadExercises() {
 
                 if (exerciseData.success) {
                     exerciseBank = normalizeExerciseBank(exerciseData.exercise_bank || exerciseData.exercises || exerciseData.exercise || exerciseData);
-                    currentExercise = exerciseBank[currentExerciseIndex] || exerciseData.exercise;
+                    currentExercise = exerciseBank[currentExerciseIndex] || null;
                     if (!currentExercise) throw new Error('题库为空');
                     displayExercise(currentExercise);
                     showToast(exerciseData.cached ? '已从题库加载' : `题库已预创建（${exerciseBank.length || 1} 题）`, 'success');
@@ -768,7 +768,7 @@ async function loadExercises() {
             const exerciseData = await callAPI('/api/student/exercises', 'GET', { chapter_id: selectedId });
             if (exerciseData.success) {
                 exerciseBank = normalizeExerciseBank(exerciseData.exercise_bank || exerciseData.exercises || exerciseData.exercise || exerciseData);
-                currentExercise = exerciseBank[currentExerciseIndex] || exerciseData.exercise;
+                currentExercise = exerciseBank[currentExerciseIndex] || null;
                 if (!currentExercise) throw new Error('题库为空');
                 displayExercise(currentExercise);
                 showToast(exerciseData.cached ? '已从题库加载' : `题库已预创建（${exerciseBank.length || 1} 题）`, 'success');
@@ -790,27 +790,39 @@ async function loadExercises() {
 function normalizeExerciseBank(payload) {
     if (!payload) return [];
     if (Array.isArray(payload)) {
-        return payload.filter(item => item && item.question);
+        return payload.filter(isUsableExercise);
     }
-    if (payload.exercise_bank) {
+    if (Array.isArray(payload.exercise_bank) && payload.exercise_bank.length) {
         return normalizeExerciseBank(payload.exercise_bank);
     }
-    if (payload.exercises && Array.isArray(payload.exercises)) {
+    if (payload.exercises && Array.isArray(payload.exercises) && payload.exercises.length) {
         return normalizeExerciseBank(payload.exercises);
     }
-    if (payload.questions && Array.isArray(payload.questions)) {
+    if (payload.questions && Array.isArray(payload.questions) && payload.questions.length) {
         return normalizeExerciseBank(payload.questions);
     }
-    if (payload.items && Array.isArray(payload.items)) {
+    if (payload.items && Array.isArray(payload.items) && payload.items.length) {
         return normalizeExerciseBank(payload.items);
     }
     if (payload.data) {
         return normalizeExerciseBank(payload.data);
     }
     if (payload.question) {
-        return [payload];
+        return isUsableExercise(payload) ? [payload] : [];
     }
     return [];
+}
+
+function isUsableExercise(item) {
+    if (!item || !item.question) return false;
+    const options = Array.isArray(item.options) ? item.options : [];
+    const text = [
+        item.id,
+        item.question,
+        options.map(getOptionText).join(' ')
+    ].join(' ').toLowerCase();
+    const blocked = ['sample', '示例', '测试', '选项一', '选项二', '选项三', '选项四', 'kg_gap', '当前图谱是否有足够证据'];
+    return !blocked.some(marker => text.includes(marker.toLowerCase()));
 }
 
 function getExerciseOptions(exercise) {
@@ -1366,9 +1378,15 @@ function toggleQaWindow() {
     const qaWindow = document.getElementById('qa-float-window');
     if (qaWindow) {
         if (qaWindow.classList.contains('hidden')) {
+            qaWindow.style.left = '';
+            qaWindow.style.top = '';
+            qaWindow.style.right = '';
+            qaWindow.style.bottom = '';
             qaWindow.classList.remove('hidden');
+            document.body.classList.add('qa-panel-open');
         } else {
             qaWindow.classList.add('hidden');
+            document.body.classList.remove('qa-panel-open');
         }
     }
 }
@@ -1498,7 +1516,6 @@ function initDragFunctionality() {
     const qaWindow = document.getElementById('qa-float-window');
     const lectureFloat = document.getElementById('lecture-float-window');
 
-    if (qaWindow) makeDraggable(qaWindow, document.getElementById('qa-float-header'));
     if (lectureFloat) makeDraggable(lectureFloat, document.querySelector('.lecture-float-header'));
 }
 
@@ -1812,19 +1829,13 @@ function escapeHtml(text) {
 
 // 鍒囨崲璁剧疆寮圭獥
 function toggleSettingsWindow() {
-    console.log('toggleSettingsWindow called');
     const settingsModal = document.getElementById('settings-modal');
-    console.log('settingsModal:', settingsModal);
     if (settingsModal) {
         if (settingsModal.classList.contains('hidden')) {
-            
-            const savedApiKey = getStoredApiKey();
-            document.getElementById('deepseek-api-key').value = savedApiKey || '';
             settingsModal.classList.remove('hidden');
-            console.log('settings modal opened');
+            testApiKey();
         } else {
             closeSettingsModal();
-            console.log('settings modal closed');
         }
     }
 }
@@ -1839,63 +1850,39 @@ function closeSettingsModal() {
 
 // 淇濆瓨璁剧疆
 function saveSettings() {
-    const apiKey = document.getElementById('deepseek-api-key').value.trim();
-
-    if (apiKey) {
-        // 淇濆瓨鍒?localStorage
-        localStorage.setItem('deepseek_api_key', apiKey);
-        showToast('API key saved', 'success');
-        closeSettingsModal();
-    } else {
-        // 娓呴櫎淇濆瓨鐨凙PI瀵嗛挜
-        localStorage.removeItem('deepseek_api_key');
-        localStorage.removeItem('claude_api_key');
-        showToast('API key cleared', 'info');
-        closeSettingsModal();
-    }
+    localStorage.removeItem('deepseek_api_key');
+    localStorage.removeItem('claude_api_key');
+    showToast('请在项目根目录 .env 中修改 DeepSeek 配置，然后重启 start.bat', 'info');
+    closeSettingsModal();
 }
 
 // 娴嬭瘯 API 瀵嗛挜
 async function testApiKey() {
-    const apiKey = document.getElementById('deepseek-api-key').value.trim();
-
-    if (!apiKey) {
-        showToast('请输入 API 密钥', 'warning');
-        return;
-    }
-
-    showToast('正在测试 API 连接...', 'info');
+    showToast('正在检测后端配置...', 'info');
 
     try {
-        const response = await fetch(`${EDUCATION_API_BASE_URL}/api/education/ask-question`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                question: '娴嬭瘯',
-                api_key: apiKey
-            })
-        });
-
+        const response = await fetch(`${EDUCATION_API_BASE_URL}/api/config-status`, { cache: 'no-store' });
         const result = await response.json();
+        const statusText = document.getElementById('config-status-text');
+        const configured = Boolean(result.deepseek_api_key_configured);
+        const message = configured
+            ? `后端已读取 .env：flash=${result.flash_model || '-'}，pro=${result.pro_model || '-'}`
+            : '后端未读取到 DEEPSEEK_API_KEY，请修改项目根目录 .env 后重启 start.bat';
 
-        if (result.success) {
-            showToast('API 测试成功', 'success');
-        } else if (result.error && result.error.includes('API瀵嗛挜')) {
-            showToast('API 密钥无效，请检查后重试', 'error');
-        } else {
-            showToast('API 测试失败：' + (result.error || '未知错误'), 'error');
+        if (statusText) {
+            statusText.textContent = message;
         }
+        showToast(message, configured ? 'success' : 'warning');
     } catch (error) {
-        console.error('API 测试失败:', error);
-        showToast('API 测试失败，请检查连接', 'error');
+        console.error('配置检测失败:', error);
+        showToast('配置检测失败，请确认后端服务已启动', 'error');
     }
 }
 
 // 鍒囨崲 API 瀵嗛挜鏄剧ず/闅愯棌
 function toggleApiKeyVisibility() {
     const apiKeyInput = document.getElementById('deepseek-api-key');
+    if (!apiKeyInput || !('type' in apiKeyInput)) return;
     if (apiKeyInput.type === 'password') {
         apiKeyInput.type = 'text';
     } else {
@@ -1905,11 +1892,11 @@ function toggleApiKeyVisibility() {
 
 // 鑾峰彇褰撳墠鐢ㄦ埛鐨?API 瀵嗛挜
 function getStoredApiKey() {
-    return localStorage.getItem('deepseek_api_key') || localStorage.getItem('claude_api_key') || '';
+    return '';
 }
 
 function getUserApiKey() {
-    return getStoredApiKey();
+    return '';
 }
 
 

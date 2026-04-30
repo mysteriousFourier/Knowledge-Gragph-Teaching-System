@@ -109,6 +109,45 @@ function queueLatexRender(root) {
     }
 }
 
+function looksLikeBareLatexBlock(text) {
+    const value = String(text || '').trim();
+    if (!value) return false;
+    if (/\$\$|\\\[|\\\(|\\begin\{(equation|align|gather)/.test(value)) return false;
+    return /\\(bar|overline|hat|frac|sqrt|sum|prod|int|begin|sigma|Delta|delta|partial|left|right|cdot|times)\b|[_^]\s*\{/.test(value);
+}
+
+function renderGraphDetailText(text, nodeType) {
+    const value = String(text || '').trim();
+    if (value && (nodeType === 'formula' || looksLikeBareLatexBlock(value))) {
+        return renderRichText(`\\[${value}\\]`);
+    }
+    return renderRichText(value);
+}
+
+function refreshNodeEditPreviews() {
+    const labelInput = document.getElementById('node-edit-label');
+    const contentInput = document.getElementById('node-edit-content');
+    const labelPreview = document.getElementById('node-edit-label-preview');
+    const contentPreview = document.getElementById('node-edit-content-preview');
+    if (labelInput && labelPreview) {
+        labelPreview.innerHTML = renderRichInline(labelInput.value || '');
+        queueLatexRender(labelPreview);
+    }
+    if (contentInput && contentPreview) {
+        contentPreview.innerHTML = renderGraphDetailText(contentInput.value || '', contentInput.dataset.nodeType || '');
+        queueLatexRender(contentPreview);
+    }
+}
+
+function refreshEdgeEditPreviews() {
+    const descriptionInput = document.getElementById('edge-edit-description');
+    const descriptionPreview = document.getElementById('edge-edit-description-preview');
+    if (descriptionInput && descriptionPreview) {
+        descriptionPreview.innerHTML = renderRichText(descriptionInput.value || '');
+        queueLatexRender(descriptionPreview);
+    }
+}
+
 function openBackendGraphAdmin() {
     window.open(`${BACKEND_ADMIN_ROOT}/admin`, '_blank', 'noopener');
 }
@@ -397,11 +436,11 @@ function generateLocalLecture(chapter) {
         if (graphData && graphData.nodes && graphData.nodes.length > 0) {
             generatedLecture = generateLectureFromGraph(chapter.title, graphData);
         } else {
-            generatedLecture = `今天我们学习 ${chapter.title}。\n\n${chapter.content}\n\n接下来我们通过例子进一步理解这些知识点。`;
+            generatedLecture = generateLectureFromChapterContent(chapter);
         }
     } catch (error) {
         console.error('鐢熸垚鎺堣鏂囨鍑洪敊:', error);
-        generatedLecture = `今天我们学习 ${chapter.title}。\n\n${chapter.content}\n\n接下来我们通过例子进一步理解这些知识点。`;
+        generatedLecture = generateLectureFromChapterContent(chapter);
     }
 
     document.getElementById('lecture-note').value = generatedLecture;
@@ -411,6 +450,43 @@ function generateLocalLecture(chapter) {
     }
     showToast('已生成本地授课文案', 'info');
     playAudioText(generatedLecture);
+}
+
+function generateLectureFromChapterContent(chapter) {
+    const title = (chapter && chapter.title) || '当前章节';
+    const rawContent = String((chapter && chapter.content) || '').trim();
+    const paragraphs = rawContent
+        .split(/\n+|(?<=[。！？.!?])\s*/)
+        .map(text => text.trim())
+        .filter(text => text.length > 10)
+        .slice(0, 8);
+    const mainPoints = paragraphs.length ? paragraphs : ['本章内容需要结合已导入的章节正文和知识图谱进行讲解。'];
+
+    return [
+        `## ${title}`,
+        '',
+        '### 导入',
+        `同学们好，本节课我们围绕“${title}”展开。先把注意力放在本章最关键的问题上：这些概念各自解决什么问题，它们之间又怎样形成推导或应用链路。`,
+        '',
+        '### 核心概念',
+        mainPoints.map((point, index) => `${index + 1}. ${point}`).join('\n'),
+        '',
+        '### 关系链路',
+        '理解本节内容时，不要孤立记忆概念。建议按“定义或背景 -> 关键条件 -> 推导过程 -> 应用场景”的顺序建立联系，并在图谱中核对相邻节点之间的关系。',
+        '',
+        '### 例题或推导',
+        `以“${mainPoints[0]}”为起点，先判断它需要哪些前置条件，再说明这些条件如何支持后续结论。若涉及公式，请先解释符号含义，再进行代入或变形。`,
+        '',
+        '### 课堂提问',
+        `1. ${title} 中最容易混淆的两个概念是什么？`,
+        '2. 如果删去某个前置条件，结论是否仍然成立？为什么？',
+        '',
+        '### 易错点',
+        '常见错误是只背结论，不检查适用条件；或看到相似关键词就忽略上下文。答题时要回到章节证据和图谱关系。 ',
+        '',
+        '### 总结',
+        `本节课的重点是把“${title}”中的概念、条件和关系串成可复述的知识链路。课后练习应优先检查自己能否说明每一步依据。`
+    ].join('\n');
 }
 
 /**
@@ -642,9 +718,15 @@ function toggleQaWindow() {
     const qaWindow = document.getElementById('qa-float-window');
     if (qaWindow) {
         if (qaWindow.classList.contains('hidden')) {
+            qaWindow.style.left = '';
+            qaWindow.style.top = '';
+            qaWindow.style.right = '';
+            qaWindow.style.bottom = '';
             qaWindow.classList.remove('hidden');
+            document.body.classList.add('qa-panel-open');
         } else {
             qaWindow.classList.add('hidden');
+            document.body.classList.remove('qa-panel-open');
         }
     }
 }
@@ -1459,9 +1541,11 @@ async function loadNodeEditor(nodeId, fallbackData) {
     if (chapter) html += `<div><strong>章节:</strong> ${escapeHtml(chapter)}</div>`;
     if (source) html += `<div><strong>来源:</strong> ${escapeHtml(String(source).split(/[\\\\/]/).pop())}</div>`;
     html += `<label style="font-weight:600;">节点名称</label>`;
-    html += `<input id="node-edit-label" type="text" value="${escapeHtml(label)}" style="padding:8px 10px;border:1px solid #ddd;border-radius:6px;">`;
+    html += `<input id="node-edit-label" type="text" value="${escapeHtml(label)}" oninput="refreshNodeEditPreviews()" style="padding:8px 10px;border:1px solid #ddd;border-radius:6px;">`;
+    html += `<div class="graph-detail-preview markdown-inline" id="node-edit-label-preview"></div>`;
     html += `<label style="font-weight:600;">节点内容</label>`;
-    html += `<textarea id="node-edit-content" style="min-height:180px;padding:10px;border:1px solid #ddd;border-radius:6px;line-height:1.5;">${escapeHtml(content)}</textarea>`;
+    html += `<textarea id="node-edit-content" data-node-type="${escapeHtml(type)}" oninput="refreshNodeEditPreviews()" style="min-height:180px;padding:10px;border:1px solid #ddd;border-radius:6px;line-height:1.5;">${escapeHtml(content)}</textarea>`;
+    html += `<div class="graph-detail-preview markdown-body" id="node-edit-content-preview"></div>`;
     html += `<div style="display:grid;gap:8px;margin-top:4px;">`;
     html += `<div style="font-weight:600;">关联关系</div>`;
     html += `<div id="node-relation-list" style="display:grid;gap:6px;font-size:12px;color:#374151;">正在加载...</div>`;
@@ -1473,6 +1557,7 @@ async function loadNodeEditor(nodeId, fallbackData) {
 
     contentEl.innerHTML = html;
     detailEl.classList.remove('hidden');
+    refreshNodeEditPreviews();
     renderNodeRelationList(nodeId);
 }
 
@@ -1537,7 +1622,8 @@ async function loadEdgeEditor(edgeId, edgeData) {
     html += `<label style="font-weight:600;">关系类型</label>`;
     html += `<input id="edge-edit-type" type="text" value="${escapeHtml(edgeData._type || edgeData.label || 'related')}" style="padding:8px 10px;border:1px solid #ddd;border-radius:6px;">`;
     html += `<label style="font-weight:600;">关系说明</label>`;
-    html += `<textarea id="edge-edit-description" style="min-height:120px;padding:10px;border:1px solid #ddd;border-radius:6px;line-height:1.5;">${escapeHtml(edgeData._description || '')}</textarea>`;
+    html += `<textarea id="edge-edit-description" oninput="refreshEdgeEditPreviews()" style="min-height:120px;padding:10px;border:1px solid #ddd;border-radius:6px;line-height:1.5;">${escapeHtml(edgeData._description || '')}</textarea>`;
+    html += `<div class="graph-detail-preview markdown-body" id="edge-edit-description-preview"></div>`;
     html += `<div style="display:flex;gap:8px;justify-content:flex-end;">`;
     html += `<button onclick="saveCurrentEdgeEdit()" class="btn btn-primary">保存关系</button>`;
     html += `</div>`;
@@ -1545,6 +1631,7 @@ async function loadEdgeEditor(edgeId, edgeData) {
 
     contentEl.innerHTML = html;
     detailEl.classList.remove('hidden');
+    refreshEdgeEditPreviews();
 }
 
 async function saveCurrentNodeEdit() {
@@ -3979,7 +4066,6 @@ function initDragFunctionality() {
     const lectureFloat = document.getElementById('lecture-float-window');
     const voiceWindow = document.getElementById('voice-record-window');
 
-    if (qaWindow) makeDraggable(qaWindow, document.getElementById('qa-float-header'));
     if (lectureFloat) makeDraggable(lectureFloat, document.querySelector('.lecture-float-header'));
     if (voiceWindow) makeDraggable(voiceWindow, document.querySelector('.voice-record-header'));
 
@@ -4438,19 +4524,13 @@ function escapeTeacherHtml(text) {
 
 // 鍒囨崲璁剧疆寮圭獥
 function toggleSettingsWindow() {
-    console.log('toggleSettingsWindow called');
     const settingsModal = document.getElementById('settings-modal');
-    console.log('settingsModal:', settingsModal);
     if (settingsModal) {
         if (settingsModal.classList.contains('hidden')) {
-            
-            const savedApiKey = getStoredApiKey();
-            document.getElementById('deepseek-api-key').value = savedApiKey || '';
             settingsModal.classList.remove('hidden');
-            console.log('璁剧疆寮圭獥宸叉墦寮€');
+            testApiKey();
         } else {
             closeSettingsModal();
-            console.log('settings modal closed');
         }
     }
 }
@@ -4465,66 +4545,39 @@ function closeSettingsModal() {
 
 // 淇濆瓨璁剧疆
 function saveSettings() {
-    const apiKey = document.getElementById('deepseek-api-key').value.trim();
-
-    if (apiKey) {
-        // 淇濆瓨鍒?localStorage
-        localStorage.setItem('deepseek_api_key', apiKey);
-        showToast('API 密钥已保存', 'success');
-        closeSettingsModal();
-    } else {
-        // 娓呴櫎淇濆瓨鐨凙PI瀵嗛挜
-        localStorage.removeItem('deepseek_api_key');
-        localStorage.removeItem('claude_api_key');
-        showToast('API 密钥已清除', 'info');
-        closeSettingsModal();
-    }
+    localStorage.removeItem('deepseek_api_key');
+    localStorage.removeItem('claude_api_key');
+    showToast('请在项目根目录 .env 中修改 DeepSeek 配置，然后重启 start.bat', 'info');
+    closeSettingsModal();
 }
 
 // 娴嬭瘯 API 瀵嗛挜
 async function testApiKey() {
-    const apiKey = document.getElementById('deepseek-api-key').value.trim();
-
-    if (!apiKey) {
-        showToast('请输入 API 密钥', 'warning');
-        return;
-    }
-
-    showToast('正在测试 API 连接...', 'info');
+    showToast('正在检测后端配置...', 'info');
 
     try {
-        const response = await fetch(`${API_BASE_URL}/generate-lecture`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                chapter_id: 'test',
-                chapter_title: '测试',
-                chapter_content: '测试内容',
-                style: '测试',
-                api_key: apiKey
-            })
-        });
-
+        const response = await fetch(`${EDUCATION_API_ROOT}/api/config-status`, { cache: 'no-store' });
         const result = await response.json();
+        const statusText = document.getElementById('config-status-text');
+        const configured = Boolean(result.deepseek_api_key_configured);
+        const message = configured
+            ? `后端已读取 .env：flash=${result.flash_model || '-'}，pro=${result.pro_model || '-'}`
+            : '后端未读取到 DEEPSEEK_API_KEY，请修改项目根目录 .env 后重启 start.bat';
 
-        if (result.success) {
-            showToast('API 测试成功', 'success');
-        } else if (result.error && result.error.includes('API密钥')) {
-            showToast('API 密钥无效，请检查后重试', 'error');
-        } else {
-            showToast('API 测试失败：' + (result.error || '未知错误'), 'error');
+        if (statusText) {
+            statusText.textContent = message;
         }
+        showToast(message, configured ? 'success' : 'warning');
     } catch (error) {
-        console.error('API 测试失败:', error);
-        showToast('API 测试失败，请检查连接', 'error');
+        console.error('配置检测失败:', error);
+        showToast('配置检测失败，请确认后端服务已启动', 'error');
     }
 }
 
 // 鍒囨崲 API 瀵嗛挜鏄剧ず/闅愯棌
 function toggleApiKeyVisibility() {
     const apiKeyInput = document.getElementById('deepseek-api-key');
+    if (!apiKeyInput || !('type' in apiKeyInput)) return;
     if (apiKeyInput.type === 'password') {
         apiKeyInput.type = 'text';
     } else {
@@ -4534,11 +4587,11 @@ function toggleApiKeyVisibility() {
 
 // 鑾峰彇褰撳墠鐢ㄦ埛鐨?API 瀵嗛挜
 function getStoredApiKey() {
-    return localStorage.getItem('deepseek_api_key') || localStorage.getItem('claude_api_key') || '';
+    return '';
 }
 
 function getUserApiKey() {
-    return getStoredApiKey();
+    return '';
 }
 
 

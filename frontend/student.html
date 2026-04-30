@@ -6,9 +6,9 @@
     <title>知识图谱教学系统 - 学生端</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="graph-styles.css">
-    <link rel="stylesheet" href="new-styles.css">
-    <link rel="stylesheet" href="student-styles.css?v=2">
-    <link rel="stylesheet" href="workspace-ambient.css?v=6">
+    <link rel="stylesheet" href="new-styles.css?v=3">
+    <link rel="stylesheet" href="student-styles.css?v=3">
+    <link rel="stylesheet" href="workspace-ambient.css?v=8">
     <link rel="stylesheet" href="https://unpkg.com/katex@0.16.9/dist/katex.min.css">
     <link rel="stylesheet" href="latex-renderer.css?v=2">
     <link rel="stylesheet" href="markdown-renderer.css?v=1">
@@ -180,28 +180,27 @@
         <div class="modal-content" style="max-width:500px;">
             <h3>系统设置</h3>
             <div class="settings-section">
-                <h4>DeepSeek API 配置</h4>
-                <p class="settings-description">配置你的 DeepSeek API 密钥以启用 AI 功能（智能问答等）。</p>
+                <h4>DeepSeek 配置</h4>
+                <p class="settings-description">模型密钥只从项目根目录的 <code>.env</code> 读取，前端不再保存或发送 API Key。</p>
                 <div class="input-row">
-                    <label class="input-label">API 密钥：</label>
-                    <input type="password" id="deepseek-api-key" placeholder="sk-..." class="input-field">
-                    <button onclick="toggleApiKeyVisibility()" class="btn-icon" title="显示/隐藏密钥">👁</button>
+                    <label class="input-label">配置来源：</label>
+                    <code id="deepseek-api-key" class="input-field">由项目根目录 .env 中的 DEEPSEEK_API_KEY 控制</code>
+                    <button onclick="testApiKey()" class="btn-icon" title="检测配置">↻</button>
                 </div>
                 <div class="settings-help">
-                    <p><strong>如何获取 API 密钥：</strong></p>
+                    <p><strong>需要修改时：</strong></p>
                     <ol>
-                        <li>访问 <a href="https://platform.deepseek.com/api_keys" target="_blank">DeepSeek 平台</a></li>
-                        <li>登录或注册账号</li>
-                        <li>进入 API Keys 页面</li>
-                        <li>创建新的 API 密钥</li>
-                        <li>将密钥粘贴到上方输入框</li>
+                        <li>打开项目根目录的 <code>.env</code> 文件</li>
+                        <li>设置 <code>DEEPSEEK_API_KEY</code></li>
+                        <li>可选设置 <code>DEEPSEEK_FLASH_MODEL</code> 和 <code>DEEPSEEK_PRO_MODEL</code></li>
+                        <li>重新运行 <code>start.bat</code> 让后端加载新配置</li>
                     </ol>
+                    <p id="config-status-text" class="settings-description">点击“检测配置”查看后端当前读取状态。</p>
                 </div>
             </div>
             <div class="modal-buttons">
-                <button onclick="saveSettings()" class="btn btn-primary">保存设置</button>
-                <button onclick="testApiKey()" class="btn btn-info">测试连接</button>
-                <button onclick="closeSettingsModal()" class="btn btn-secondary">取消</button>
+                <button onclick="testApiKey()" class="btn btn-info">检测配置</button>
+                <button onclick="closeSettingsModal()" class="btn btn-secondary">关闭</button>
             </div>
         </div>
     </div>
@@ -212,6 +211,6 @@
     <script src="latex-renderer.js?v=3" charset="UTF-8"></script>
     <script src="markdown-renderer.js?v=2" charset="UTF-8"></script>
     <script src="workspace-ambient.js?v=5" charset="UTF-8"></script>
-    <script src="student.js?v=18" charset="UTF-8"></script>
+    <script src="student.js?v=21" charset="UTF-8"></script>
 </body>
 </html>

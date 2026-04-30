@@ -83,6 +83,10 @@
     align-items: center;
 }
 
+.student-page .qa-float-window .float-header {
+    cursor: default;
+}
+
 .student-page .drag-line {
     color: #999;
     font-size: 14px;
@@ -513,8 +517,24 @@
 
 /* 问答浮窗 */
 .qa-float-window {
-    right: 20px;
-    top: 100px;
+    top: 72px;
+    right: 16px;
+    bottom: 16px;
+    width: min(430px, calc(100vw - 32px));
+    max-width: none;
+    min-width: 320px;
+    display: flex;
+    flex-direction: column;
+}
+
+.qa-float-window .float-body {
+    flex: 1 1 auto;
+    max-height: none;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) minmax(120px, 0.55fr);
+    gap: 12px;
+    overflow: hidden;
 }
 
 /* 授课文案浮窗 */

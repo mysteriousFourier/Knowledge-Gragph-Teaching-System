@@ -576,6 +576,13 @@ body.workspace-ambient {
     background: rgba(18, 27, 35, 0.72);
 }
 
+@media (min-width: 1080px) {
+    body.workspace-ambient.qa-panel-open .main-content {
+        margin-right: 450px;
+        transition: margin-right 0.22s ease;
+    }
+}
+
 .workspace-ambient .btn-close {
     border: 0;
     background: transparent;
@@ -643,6 +650,19 @@ body.workspace-ambient {
 .workspace-ambient #exercise-content .exercise-answer-text:focus {
     border-color: rgba(142, 232, 220, 0.7);
     outline: none;
+}
+
+.workspace-ambient .graph-detail-preview {
+    min-height: 38px;
+    max-height: 220px;
+    overflow: auto;
+    padding: 10px 12px;
+    border: 1px solid rgba(142, 232, 220, 0.24);
+    border-radius: 10px;
+    background: rgba(5, 12, 18, 0.58);
+    color: var(--workspace-field-text);
+    font-size: 13px;
+    line-height: 1.6;
 }
 
 .workspace-ambient #exercise-content .exercise-answer-state.correct {
@@ -852,4 +872,39 @@ body.workspace-ambient {
     .workspace-ambient .api-error-message {
         display: none;
     }
+}
+
+/* Keep Q&A as a side drawer even when generic floating-window rules change. */
+.workspace-ambient .qa-float-window {
+    position: fixed !important;
+    top: 72px !important;
+    right: 16px !important;
+    bottom: 16px !important;
+    left: auto !important;
+    width: min(430px, calc(100vw - 32px)) !important;
+    height: auto !important;
+    max-width: none !important;
+    min-width: min(320px, calc(100vw - 32px)) !important;
+    display: flex;
+    flex-direction: column;
+    transform: none !important;
+}
+
+.workspace-ambient .qa-float-window.hidden {
+    display: none !important;
+}
+
+.workspace-ambient .qa-float-window .float-header {
+    cursor: default !important;
+    flex: 0 0 auto;
+}
+
+.workspace-ambient .qa-float-window .float-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) minmax(120px, 0.55fr);
+    gap: 12px;
+    overflow: hidden;
 }

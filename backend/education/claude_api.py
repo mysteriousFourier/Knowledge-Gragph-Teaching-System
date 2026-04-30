@@ -42,7 +42,37 @@ class DeepSeekAPIClient:
 
     async def generate_lecture(self, graph_data: Dict, chapter_data: Dict, style: str = "引导式教学") -> str:
         prompt = self._build_lecture_prompt(graph_data, chapter_data, style)
-        return await self._call_deepseek(prompt, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT)
+        lecture = await self._call_deepseek(prompt, max_tokens=5200, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT)
+        if self._lecture_needs_completion(lecture):
+            repair_prompt = f"""
+请基于原始任务重写一份完整授课文案，不要只补几句话。
+
+原始任务：
+{prompt}
+
+上一次输出不完整或结构不足：
+{lecture}
+
+必须满足：
+1. 输出完整可直接授课的 Markdown 文案。
+2. 至少覆盖导入、核心概念、关系链路、例题/推导、课堂提问、易错点、总结。
+3. 不要输出题纲、备注、自检说明或 JSON。
+4. 保留知识图谱/章节证据约束，不要扩展未授权内容。
+"""
+            lecture = await self._call_deepseek(repair_prompt, max_tokens=5200, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT)
+        return lecture
+
+    @staticmethod
+    def _lecture_needs_completion(text: str) -> bool:
+        content = str(text or "").strip()
+        if len(content) < 900:
+            return True
+        required_markers = ["导入", "核心", "关系", "例", "提问", "易错", "总结"]
+        present = sum(1 for marker in required_markers if marker in content)
+        if present < 5:
+            return True
+        trailing_markers = ("...", "……", "如下", "包括", "首先", "例如")
+        return content.endswith(trailing_markers)
 
     async def answer_question(self, graph_data: Dict, question: str, search_results: Optional[List[Dict]] = None) -> str:
         prompt = self._build_qa_prompt(graph_data, question, search_results)
@@ -79,6 +109,18 @@ class DeepSeekAPIClient:
             chapter_data=chapter_data,
             limit=8,
         )
+        if chapter_content.strip():
+            chapter_evidence = {
+                "index": 1,
+                "id": "chapter_content",
+                "label": chapter_title,
+                "type": "chapter_content",
+                "content": chapter_content[:1200],
+                "source": "chapter",
+            }
+            evidence = [chapter_evidence] + [
+                item for item in evidence if isinstance(item, dict) and item.get("id") != "chapter_content"
+            ]
         relations = relation_evidence_from_graph(graph_data, evidence)
         learning_plan = build_learning_plan(
             query=chapter_title,
@@ -95,15 +137,16 @@ class DeepSeekAPIClient:
             source_content=chapter_content,
             learning_plan=learning_plan,
             requirements=[
-                f"生成 {max(1, count)} 道单选题；如果前端只支持单题，返回最核心的一题。",
-                "题干、选项、正确答案和解析都必须能在 LearningPlan.evidence 中找到依据。",
-                "不要把图谱中没有的高级概念做成正确选项。",
-                "解析必须标注依据编号，如“依据[1]”。",
-                "只返回 JSON，不要返回额外说明。",
-                'JSON 格式：{"exercises":[{"id":"题目ID","question":"题目内容","options":["A. ...","B. ...","C. ...","D. ..."],"correct_answer":"A/B/C/D","explanation":"答案解析"}]}',
+                f"生成 {max(1, count)} 道单选题，不要生成示例题、占位题或模板题。",
+                "题干、正确选项和解析必须能在 LearningPlan.evidence 或章节正文中找到依据。",
+                "每道题必须有 4 个选项，且只有 1 个正确答案；错误选项要与本章内容相关，但不能与证据冲突。",
+                "禁止输出‘选项一/选项二/示例/测试/sample’等占位内容。",
+                "解析必须标注依据编号，例如‘依据[1]’。",
+                "只返回合法 JSON，不要返回 Markdown、代码块或额外说明。",
+                'JSON 格式：{"exercises":[{"id":"ex_1","question":"题目内容","options":["A. ...","B. ...","C. ...","D. ..."],"correct_answer":"A","explanation":"答案解析，依据[1]..."}]}',
             ],
         )
-        response = await self._call_deepseek(prompt, max_tokens=1000, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT)
+        response = await self._call_deepseek(prompt, max_tokens=2600, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT)
         try:
             payload = json.loads(_strip_json_fence(response))
             if isinstance(payload, list):
@@ -113,19 +156,24 @@ class DeepSeekAPIClient:
             if isinstance(payload, dict) and "id" not in payload:
                 payload["id"] = f"ex_{chapter_title.replace(' ', '_')}_1"
             return payload
-        except json.JSONDecodeError:
-            return {
-                "id": f"ex_{chapter_title.replace(' ', '_')}_1",
-                "question": f"关于 {chapter_title}，以下哪项说法是正确的？",
-                "options": ["A. 选项一", "B. 选项二", "C. 选项三", "D. 选项四"],
-                "correct_answer": "A",
-                "explanation": response,
-            }
-
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"DeepSeek did not return valid exercise JSON: {response[:300]}") from exc
     def _build_lecture_prompt(self, graph_data: Dict, chapter_data: Dict, style: str) -> str:
         title = chapter_data.get("title", "未命名章节")
         content = chapter_data.get("content", "")
         evidence = evidence_from_graph(graph_data, query=f"{title}\n{content[:1200]}", chapter_data=chapter_data, limit=10)
+        if content.strip():
+            chapter_evidence = {
+                "index": 1,
+                "id": "chapter_content",
+                "label": title,
+                "type": "chapter_content",
+                "content": content[:1800],
+                "source": "chapter",
+            }
+            evidence = [chapter_evidence] + [
+                item for item in evidence if isinstance(item, dict) and item.get("id") != "chapter_content"
+            ]
         relations = relation_evidence_from_graph(graph_data, evidence)
         learning_plan = build_learning_plan(
             query=title,
@@ -142,12 +190,13 @@ class DeepSeekAPIClient:
             source_content=content,
             learning_plan=learning_plan,
             requirements=[
-                f"教学风格为：{style}。",
-                "文案适合课堂讲解，结构清晰，便于教师直接备课使用。",
+                f"教学风格：{style}。",
+                "生成完整授课文案，使用 Markdown 二级/三级标题组织，不要只给提纲。",
+                "必须覆盖：导入、核心概念讲解、关系链路、例题或推导、课堂提问、易错点、收束总结。",
                 "讲解顺序必须跟随 LearningPlan 中的知识点和关系，不要跳到未授权高级内容。",
-                "适当加入启发式提问，但问题必须基于图谱证据。",
-                "长度控制在 600-1000 字左右。",
-                "不要附加解释或前缀，只输出授课文案。",
+                "每个核心段落都要落到证据或章节正文，不要泛泛而谈。",
+                "长度控制在 1400-2200 字；若内容复杂，优先保证完整性，不要突然截断。",
+                "只输出授课文案本身，不要附加自检说明。",
             ],
         )
 
@@ -202,7 +251,7 @@ class DeepSeekAPIClient:
             "temperature": 0.3,
         }
 
-        timeout = httpx.Timeout(connect=10.0, read=45.0, write=10.0, pool=10.0)
+        timeout = httpx.Timeout(connect=10.0, read=90.0, write=10.0, pool=10.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
             if response.status_code != 200:

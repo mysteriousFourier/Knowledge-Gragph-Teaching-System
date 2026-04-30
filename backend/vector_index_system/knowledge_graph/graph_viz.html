@@ -293,6 +293,28 @@
             color: #495057;
         }
 
+        .latex-fallback {
+            display: inline-block;
+            padding: 1px 5px;
+            margin: 0 2px;
+            border-radius: 4px;
+            background: #eef6ff;
+            color: #0f172a;
+            font-family: "Times New Roman", serif;
+        }
+
+        div.latex-fallback {
+            display: block;
+            margin: 8px 0;
+            padding: 8px 10px;
+            overflow-x: auto;
+        }
+
+        .latex-overline {
+            text-decoration: overline;
+            text-decoration-thickness: 1px;
+        }
+
         .loading {
             position: absolute;
             top: 50%;
@@ -798,10 +820,34 @@
             }
         }
 
+        function escapeHtml(value) {
+            const div = document.createElement('div');
+            div.textContent = value == null ? '' : String(value);
+            return div.innerHTML;
+        }
+
+        function renderDetailText(value) {
+            return escapeHtml(value || '')
+                .replace(/\$\$([\s\S]+?)\$\$/g, '<div class="latex-fallback">$1</div>')
+                .replace(/\\\[([\s\S]+?)\\\]/g, '<div class="latex-fallback">$1</div>')
+                .replace(/\\\(([\s\S]+?)\\\)/g, '<span class="latex-fallback">$1</span>')
+                .replace(/\$([^$\n]+?)\$/g, '<span class="latex-fallback">$1</span>')
+                .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)')
+                .replace(/\\sqrt\{([^{}]+)\}/g, 'sqrt($1)')
+                .replace(/\\(?:bar|overline|hat)\s*\{([^{}]+)\}/g, '<span class="latex-overline">$1</span>')
+                .replace(/\^\\?\{([^{}]+)\}/g, '<sup>$1</sup>')
+                .replace(/_\\?\{([^{}]+)\}/g, '<sub>$1</sub>')
+                .replace(/\\begin\{(?:array|aligned|gathered|matrix|pmatrix)\}(?:\{[^}]*\})?/g, '')
+                .replace(/\\end\{(?:array|aligned|gathered|matrix|pmatrix)\}/g, '')
+                .replace(/\\\\/g, '<br>')
+                .replace(/\n/g, '<br>');
+        }
+
         function showDetail(node) {
-            document.getElementById('detail-title').textContent = node.label;
+            document.getElementById('detail-title').innerHTML = renderDetailText(node.label);
             document.getElementById('detail-type').textContent = node.type || '未分类';
-            document.getElementById('detail-content').textContent = node.content || '暂无描述';
+            const content = node.type === 'formula' && node.content ? `\\[${node.content}\\]` : (node.content || '暂无描述');
+            document.getElementById('detail-content').innerHTML = renderDetailText(content);
             document.getElementById('detail-panel').classList.add('show');
         }
 

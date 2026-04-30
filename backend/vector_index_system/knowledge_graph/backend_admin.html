@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>后端知识图谱管理</title>
-  <link rel="stylesheet" href="https://unpkg.com/katex@0.16.9/dist/katex.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/katex@0.16.9/dist/katex.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css'">
   <style>
     :root {
       --bg: #f6f7f9;
@@ -149,6 +149,54 @@
       text-align: center;
       white-space: nowrap;
     }
+    .mini-katex {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      max-width: 100%;
+      font-family: "Cambria Math", "STIX Two Math", "Times New Roman", serif;
+      font-size: 1.06em;
+      line-height: 1.3;
+      color: #111827;
+      vertical-align: middle;
+    }
+    .mini-katex-display {
+      display: flex;
+      justify-content: center;
+      overflow-x: auto;
+      margin: 9px 0;
+      padding: 9px 10px;
+      border-radius: 6px;
+      background: rgba(37, 99, 235, 0.04);
+    }
+    .mini-frac {
+      display: inline-grid;
+      grid-template-rows: auto auto;
+      align-items: center;
+      margin: 0 3px;
+      text-align: center;
+      vertical-align: middle;
+    }
+    .mini-frac > span:first-child {
+      border-bottom: 1px solid currentColor;
+      padding: 0 4px 1px;
+    }
+    .mini-frac > span:last-child {
+      padding: 1px 4px 0;
+    }
+    .mini-sqrt {
+      display: inline-flex;
+      align-items: flex-start;
+      gap: 2px;
+    }
+    .mini-sqrt .radicand {
+      border-top: 1px solid currentColor;
+      padding: 0 3px;
+    }
+    .mini-overline {
+      text-decoration: overline;
+      text-decoration-thickness: 1px;
+    }
     .katex-display {
       overflow-x: auto;
       overflow-y: hidden;
@@ -206,7 +254,7 @@
       #detail { grid-column: 1 / -1; height: 340px; border-top: 1px solid var(--line); }
     }
   </style>
-  <script defer src="https://unpkg.com/katex@0.16.9/dist/katex.min.js"></script>
+  <script defer src="https://unpkg.com/katex@0.16.9/dist/katex.min.js" onload="window.refreshDetailPreviews && window.refreshDetailPreviews()"></script>
 </head>
 <body>
   <header>
@@ -298,15 +346,66 @@
       "\\rightarrow": "→", "\\Rightarrow": "⇒"
     };
 
+    let katexLoadPromise = null;
+    const katexRuntimeUrls = [
+      "https://unpkg.com/katex@0.16.9/dist/katex.min.js",
+      "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js",
+      "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"
+    ];
+
+    function loadScriptSequentially(urls, index = 0) {
+      if (window.katex && typeof window.katex.renderToString === "function") return Promise.resolve();
+      if (index >= urls.length) return Promise.reject(new Error("KaTeX runtime unavailable"));
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = urls[index];
+        script.async = true;
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      }).catch(() => loadScriptSequentially(urls, index + 1));
+    }
+
+    function ensureKatexRuntime() {
+      if (window.katex && typeof window.katex.renderToString === "function") return Promise.resolve();
+      if (!katexLoadPromise) katexLoadPromise = loadScriptSequentially(katexRuntimeUrls);
+      return katexLoadPromise;
+    }
+
     function stripMathDelimiters(token) {
       const text = String(token || "").trim();
       if (text.startsWith("$$") && text.endsWith("$$")) return text.slice(2, -2);
+      if (text.startsWith("\\begin{align}") && text.endsWith("\\end{align}")) {
+        return "\\begin{aligned}" + text.slice("\\begin{align}".length, -"\\end{align}".length) + "\\end{aligned}";
+      }
+      if (text.startsWith("\\begin{align*}") && text.endsWith("\\end{align*}")) {
+        return "\\begin{aligned}" + text.slice("\\begin{align*}".length, -"\\end{align*}".length) + "\\end{aligned}";
+      }
+      if (text.startsWith("\\begin{gather}") && text.endsWith("\\end{gather}")) {
+        return "\\begin{gathered}" + text.slice("\\begin{gather}".length, -"\\end{gather}".length) + "\\end{gathered}";
+      }
+      if (text.startsWith("\\begin{gather*}") && text.endsWith("\\end{gather*}")) {
+        return "\\begin{gathered}" + text.slice("\\begin{gather*}".length, -"\\end{gather*}".length) + "\\end{gathered}";
+      }
+      if (text.startsWith("\\begin{equation}") && text.endsWith("\\end{equation}")) {
+        return text.slice("\\begin{equation}".length, -"\\end{equation}".length);
+      }
+      if (text.startsWith("\\begin{equation*}") && text.endsWith("\\end{equation*}")) {
+        return text.slice("\\begin{equation*}".length, -"\\end{equation*}".length);
+      }
       if (text.startsWith("\\begin{")) return text.replace(/^\\begin\{[^}]+\}/, "").replace(/\\end\{[^}]+\}$/, "");
       if ((text.startsWith("\\[") && text.endsWith("\\]")) || (text.startsWith("\\(") && text.endsWith("\\)"))) {
         return text.slice(2, -2);
       }
       if (text.startsWith("$") && text.endsWith("$")) return text.slice(1, -1);
       return text;
+    }
+
+    function looksLikeBareLatexBlock(value) {
+      const text = String(value || "").trim();
+      if (!text) return false;
+      if (/\$\$|\\\[|\\\(|\\begin\{(equation|align|gather)/.test(text)) return false;
+      return /\\(bar|overline|hat|frac|sqrt|sum|prod|int|begin|sigma|Delta|delta|partial|left|right|cdot|times)\b|[_^]\s*\{/.test(text);
     }
 
     function simplifyLatex(token) {
@@ -319,6 +418,50 @@
         text = text.split(command).join(latexCommandMap[command]);
       });
       return text.replace(/\s+/g, " ").trim() || token;
+    }
+
+    function renderMiniLatexBody(latex) {
+      let text = String(latex || "").trim()
+        .replace(/\\begin\{(?:array|aligned|gathered|matrix|pmatrix)\}(?:\{[^}]*\})?/g, "")
+        .replace(/\\end\{(?:array|aligned|gathered|matrix|pmatrix)\}/g, "")
+        .replace(/\\left/g, "")
+        .replace(/\\right/g, "")
+        .replace(/\\,/g, " ")
+        .replace(/\\;/g, " ")
+        .replace(/\\quad/g, " ")
+        .replace(/\\qquad/g, " ");
+
+      text = text.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, function (_match, top, bottom) {
+        return `<span class="mini-frac"><span>${renderMiniLatexBody(top)}</span><span>${renderMiniLatexBody(bottom)}</span></span>`;
+      });
+      text = text.replace(/\\sqrt\s*\{([^{}]+)\}/g, function (_match, body) {
+        return `<span class="mini-sqrt">√<span class="radicand">${renderMiniLatexBody(body)}</span></span>`;
+      });
+      text = text.replace(/\\(?:bar|overline|hat)\s*\{([^{}]+)\}/g, function (_match, body) {
+        return `<span class="mini-overline">${renderMiniLatexBody(body)}</span>`;
+      });
+      text = text.replace(/\\text\s*\{([^{}]+)\}/g, function (_match, body) { return esc(body); });
+      text = text.replace(/\\operatorname\s*\{([^{}]+)\}/g, function (_match, body) { return esc(body); });
+
+      Object.keys(latexCommandMap).forEach(command => {
+        text = text.split(command).join(esc(latexCommandMap[command]));
+      });
+      return esc(text)
+        .replace(/&lt;span class=&quot;mini-frac&quot;&gt;/g, '<span class="mini-frac">')
+        .replace(/&lt;span class=&quot;mini-sqrt&quot;&gt;/g, '<span class="mini-sqrt">')
+        .replace(/&lt;span class=&quot;mini-overline&quot;&gt;/g, '<span class="mini-overline">')
+        .replace(/&lt;span class=&quot;radicand&quot;&gt;/g, '<span class="radicand">')
+        .replace(/&lt;\/span&gt;/g, '</span>')
+        .replace(/\^\\?\{([^{}]+)\}/g, "<sup>$1</sup>")
+        .replace(/_\\?\{([^{}]+)\}/g, "<sub>$1</sub>")
+        .replace(/\^([A-Za-z0-9+\-]+)/g, "<sup>$1</sup>")
+        .replace(/_([A-Za-z0-9+\-]+)/g, "<sub>$1</sub>")
+        .replace(/\\\\/g, "<br>")
+        .replace(/&amp;/g, "&nbsp;&nbsp;");
+    }
+
+    function renderMiniLatex(token, display) {
+      return `<span class="mini-katex${display ? " mini-katex-display" : ""}" title="${esc(token)}">${renderMiniLatexBody(stripMathDelimiters(token))}</span>`;
     }
 
     function renderLatexToken(token) {
@@ -337,7 +480,7 @@
           console.warn("LaTeX preview failed:", error);
         }
       }
-      return `<span class="latex-fallback${display ? " latex-fallback-display" : ""}" title="${esc(raw)}">${esc(simplifyLatex(raw))}</span>`;
+      return renderMiniLatex(raw, display);
     }
 
     function renderInlineRichText(value) {
@@ -363,7 +506,11 @@
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     }
 
-    function renderContentPreview(value) {
+    function renderContentPreview(value, forceMath = false) {
+      const raw = String(value || "").trim();
+      if (raw && (forceMath || looksLikeBareLatexBlock(raw))) {
+        return `<div class="formula-preview">${renderLatexToken(`\\[${raw}\\]`)}</div>`;
+      }
       const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");
       let html = "";
       let listType = "";
@@ -432,7 +579,15 @@
       const textarea = document.getElementById("node-content");
       const preview = document.getElementById("node-content-preview");
       if (!textarea || !preview) return;
-      preview.innerHTML = renderContentPreview(textarea.value);
+      const forceMath = textarea.dataset.nodeType === "formula";
+      preview.innerHTML = renderContentPreview(textarea.value, forceMath);
+    }
+
+    function updateNodeLabelPreview() {
+      const input = document.getElementById("node-label");
+      const preview = document.getElementById("node-label-preview");
+      if (!input || !preview) return;
+      preview.innerHTML = renderRichLabel(input.value);
     }
 
     function updateRelationDescriptionPreview() {
@@ -441,6 +596,18 @@
       if (!textarea || !preview) return;
       preview.innerHTML = renderContentPreview(textarea.value);
     }
+
+    function refreshDetailPreviews(renderOnly = false) {
+      updateNodeLabelPreview();
+      updateNodeContentPreview();
+      updateRelationDescriptionPreview();
+      if (!renderOnly && !(window.katex && typeof window.katex.renderToString === "function")) {
+        ensureKatexRuntime()
+          .then(() => refreshDetailPreviews(true))
+          .catch(error => console.warn("KaTeX runtime unavailable:", error));
+      }
+    }
+    window.refreshDetailPreviews = refreshDetailPreviews;
 
     function scheduleRender() {
       window.clearTimeout(renderTimer);
@@ -813,18 +980,18 @@
       document.getElementById("detail-content").innerHTML = `
         <div class="muted">${esc(node.id)}</div>
         <label>节点名称</label>
-        <input id="node-label" value="${esc(metadata.label || node.label || node.id)}">
+        <input id="node-label" value="${esc(metadata.label || node.label || node.id)}" oninput="updateNodeLabelPreview()">
         <div class="preview-heading"><span>名称预览（LaTeX）</span></div>
-        <div class="math-preview">${renderRichLabel(metadata.label || node.label || node.id)}</div>
+        <div id="node-label-preview" class="math-preview">${renderRichLabel(metadata.label || node.label || node.id)}</div>
         <label>节点内容</label>
-        <textarea id="node-content" oninput="updateNodeContentPreview()">${esc(node.content || "")}</textarea>
+        <textarea id="node-content" data-node-type="${esc(node.type || "")}" oninput="updateNodeContentPreview()">${esc(node.content || "")}</textarea>
         <div class="preview-heading"><span>内容预览（Markdown / LaTeX）</span><span class="muted">编辑时实时更新</span></div>
         <div id="node-content-preview" class="math-preview"></div>
         <button class="primary" onclick="saveNode('${js(node.id)}')">保存节点</button>
         <label>关联关系</label>
         <div>${relations.map(r => relationRow(nodeId, r)).join("") || '<div class="muted">暂无关系</div>'}</div>
       `;
-      updateNodeContentPreview();
+      refreshDetailPreviews();
       renderSvg(visible.nodes, visible.relations);
     }
 
@@ -852,6 +1019,7 @@
         <div id="rel-description-preview" class="math-preview">${renderContentPreview(metadata.description || "")}</div>
         <button class="primary" onclick="saveRelation('${js(relation.id)}')">保存关系</button>
       `;
+      refreshDetailPreviews();
     }
 
     async function saveNode(nodeId) {
@@ -887,7 +1055,7 @@
     }
 
     window.addEventListener("resize", scheduleRender);
-    window.addEventListener("load", updateNodeContentPreview);
+    window.addEventListener("load", refreshDetailPreviews);
     loadGraph().catch(error => {
       document.getElementById("status").textContent = error.message;
     });
