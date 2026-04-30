@@ -45,7 +45,6 @@
 ├── scripts/                       # 辅助脚本
 ├── structured/                    # 结构化教材章节、公式、表格
 ├── data/                          # 本地数据说明与忽略的数据库文件
-├── GC-DPG参考.md                  # KG 约束学习流程参考说明
 ├── THIRD_PARTY.md                 # 第三方依赖、仓库、论文和链接
 └── LICENSE                        # MIT License
 ```
@@ -143,8 +142,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\stop.ps1
 
 ## 知识图谱约束设计
 
-项目参考 `GC-DPG参考.md` 中的三阶段思想，并泛化为教育场景：
-
 ```text
 学习者输入
   -> Phase 1: Learning Planning
@@ -173,36 +170,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\stop.ps1
 - `frontend/env-config.js`：运行期前端配置，由后端生成，默认不提交。
 
 注意：`.runtime/`、`.env`、数据库、日志、模型文件和虚拟环境都已被 `.gitignore` 忽略。
-
-## Git 使用建议
-
-初始化仓库后，建议先检查状态：
-
-```bash
-git status --short
-```
-
-添加项目源码：
-
-```bash
-git add .gitignore README.md THIRD_PARTY.md LICENSE docs .env.example app_config.py start.bat stop.ps1 scripts backend frontend structured data/README.md GC-DPG参考.md
-```
-
-提交：
-
-```bash
-git commit -m "Initial project structure"
-```
-
-不要提交：
-
-- `.env`
-- `.runtime/`
-- `backend/logs/`
-- `*.db`
-- 虚拟环境
-- 本地模型文件
-- 未确认许可证的第三方源码目录
 
 ## 第三方与引用
 
