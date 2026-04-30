@@ -39,8 +39,8 @@
 | `APP_TEACHER_PASSWORD` | 空 | 教师密码，空值会拒绝登录 |
 | `DEEPSEEK_API_KEY` | 空 | DeepSeek API key |
 | `DEEPSEEK_API_BASE` | `https://api.deepseek.com` | DeepSeek API 地址 |
-| `DEEPSEEK_FLASH_MODEL` | `deepseek-v4flash` | 问答等低延迟任务模型 |
-| `DEEPSEEK_PRO_MODEL` | `deepseek-v4pro` | 授课文案、自然补充、题库等深度生成任务模型 |
+| `DEEPSEEK_FLASH_MODEL` | `deepseek-v4-flash` | 问答等低延迟任务模型 |
+| `DEEPSEEK_PRO_MODEL` | `deepseek-v4-pro` | 授课文案、自然补充、题库等深度生成任务模型 |
 | `AUTO_OPEN_BROWSER` | `1` | 是否在启动完成后自动打开主界面 |
 
 ## 启动流程

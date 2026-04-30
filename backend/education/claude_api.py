@@ -17,8 +17,8 @@ from kg_constraints import (
     relation_evidence_from_graph,
 )
 
-DEFAULT_DEEPSEEK_FLASH_MODEL = "deepseek-v4flash"
-DEFAULT_DEEPSEEK_PRO_MODEL = "deepseek-v4pro"
+DEFAULT_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
+DEFAULT_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
 
 
 def get_deepseek_model(kind: str = "flash") -> str:

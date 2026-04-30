@@ -67,8 +67,8 @@ APP_TEACHER_USERNAME=teacher
 APP_TEACHER_PASSWORD=change-me
 
 DEEPSEEK_API_KEY=
-DEEPSEEK_FLASH_MODEL=deepseek-v4flash
-DEEPSEEK_PRO_MODEL=deepseek-v4pro
+DEEPSEEK_FLASH_MODEL=deepseek-v4-flash
+DEEPSEEK_PRO_MODEL=deepseek-v4-pro
 ```
 
 说明：
@@ -255,8 +255,8 @@ APP_TEACHER_PASSWORD=
 确认 `.env`：
 
 ```env
-DEEPSEEK_FLASH_MODEL=deepseek-v4flash
-DEEPSEEK_PRO_MODEL=deepseek-v4pro
+DEEPSEEK_FLASH_MODEL=deepseek-v4-flash
+DEEPSEEK_PRO_MODEL=deepseek-v4-pro
 ```
 
 重启后端后生效。

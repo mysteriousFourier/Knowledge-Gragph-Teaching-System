@@ -250,7 +250,7 @@ async function generateLectureWithAPI(chapter) {
             chapter_title: chapter.title,
             chapter_content: chapter.content,
             style: 'guided',
-            model: 'deepseek-v4pro'
+            model: 'deepseek-v4-pro'
         });
 
         if (response.success) {
@@ -266,7 +266,7 @@ async function generateLectureWithAPI(chapter) {
             // 鍔犺浇鍒版暀甯堢鎺堣灞曠ず鍖哄煙
             loadTeacherLectureContent(lectureContent);
 
-            showToast(`授课文案已生成（${response.model || 'deepseek-v4pro'}）`, 'success');
+            showToast(`授课文案已生成（${response.model || 'deepseek-v4-pro'}）`, 'success');
 
             // 鎾斁AI璇煶
             playAudioText(lectureContent);
@@ -3699,7 +3699,7 @@ async function generateAIAnswer(question, context) {
                 'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
             },
             body: JSON.stringify({
-                model: 'deepseek-v4flash',
+                model: 'deepseek-v4-flash',
                 max_tokens: 1024,
                 messages: [
                     {
