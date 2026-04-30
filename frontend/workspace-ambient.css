@@ -593,6 +593,7 @@ body.workspace-ambient {
 .workspace-ambient .history-question,
 .workspace-ambient .student-graph-node-title,
 .workspace-ambient #exercise-content h3,
+.workspace-ambient #exercise-content .exercise-question,
 .workspace-ambient .settings-help p {
     color: var(--workspace-ink);
 }
@@ -630,6 +631,18 @@ body.workspace-ambient {
 .workspace-ambient #exercise-content .exercise-option-key {
     background: linear-gradient(135deg, var(--workspace-cyan), var(--workspace-blue));
     color: #061016;
+}
+
+.workspace-ambient #exercise-content .exercise-answer-text {
+    border-color: rgba(142, 232, 220, 0.28);
+    background: rgba(7, 13, 20, 0.56);
+    color: var(--workspace-field-text);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.workspace-ambient #exercise-content .exercise-answer-text:focus {
+    border-color: rgba(142, 232, 220, 0.7);
+    outline: none;
 }
 
 .workspace-ambient #exercise-content .exercise-answer-state.correct {

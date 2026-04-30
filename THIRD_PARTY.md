@@ -25,7 +25,7 @@
 
 | 名称 | 链接 | 用途 | 是否随仓库分发 | 许可证检查 |
 | --- | --- | --- | --- | --- |
-| KaTeX | https://github.com/KaTeX/KaTeX | 数学公式渲染 | 否，CDN 加载 | 发布前确认版本许可证。 |
+| KaTeX | https://github.com/KaTeX/KaTeX | 前端 LaTeX 数学公式渲染 | 否，CDN 加载 | 发布前确认版本许可证。 |
 | vis-network | https://github.com/visjs/vis-network | 教师端知识图谱可视化 | 否，CDN 加载 | 发布前确认版本许可证。 |
 | Cytoscape.js | https://github.com/cytoscape/cytoscape.js | 图谱查看页可视化 | 否，CDN 加载 | 发布前确认版本许可证。 |
 | cytoscape-fcose | https://github.com/iVis-at-Bilkent/cytoscape.js-fcose | Cytoscape 布局插件 | 否，CDN 加载 | 发布前确认版本许可证。 |

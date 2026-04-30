@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>后端知识图谱管理</title>
+  <link rel="stylesheet" href="https://unpkg.com/katex@0.16.9/dist/katex.min.css">
   <style>
     :root {
       --bg: #f6f7f9;
@@ -91,6 +92,71 @@
     .item-title { font-weight: 650; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .item-meta { margin-top: 3px; color: var(--muted); font-size: 12px; }
     .muted { color: var(--muted); font-size: 12px; }
+    .preview-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .preview-heading span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .math-preview {
+      min-height: 72px;
+      max-height: 240px;
+      overflow: auto;
+      margin: 6px 0 12px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfdff;
+      line-height: 1.7;
+      word-break: break-word;
+    }
+    .math-preview p { margin: 0 0 10px; }
+    .math-preview p:last-child { margin-bottom: 0; }
+    .math-preview h1,
+    .math-preview h2,
+    .math-preview h3 {
+      margin: 12px 0 8px;
+      font-size: 15px;
+    }
+    .math-preview ul,
+    .math-preview ol {
+      margin: 0 0 10px;
+      padding-left: 1.35em;
+    }
+    .latex-fallback {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      padding: 1px 5px;
+      border: 1px solid rgba(37, 99, 235, 0.18);
+      border-radius: 6px;
+      background: rgba(37, 99, 235, 0.06);
+      font-family: "Cambria Math", "Times New Roman", serif;
+      line-height: 1.35;
+      vertical-align: baseline;
+    }
+    .latex-fallback-display {
+      display: block;
+      overflow-x: auto;
+      margin: 9px 0;
+      padding: 9px 10px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .katex-display {
+      overflow-x: auto;
+      overflow-y: hidden;
+      margin: 10px 0;
+      padding: 8px;
+      border-radius: 6px;
+      background: rgba(37, 99, 235, 0.04);
+    }
     .status { color: var(--muted); font-size: 13px; }
     .node { cursor: grab; }
     .node:active { cursor: grabbing; }
@@ -140,6 +206,7 @@
       #detail { grid-column: 1 / -1; height: 340px; border-top: 1px solid var(--line); }
     }
   </style>
+  <script defer src="https://unpkg.com/katex@0.16.9/dist/katex.min.js"></script>
 </head>
 <body>
   <header>
@@ -157,7 +224,7 @@
   </header>
   <main>
     <aside>
-      <input id="search" placeholder="搜索节点、内容、类型或章节" oninput="render()">
+      <input id="search" placeholder="搜索节点、内容、类型或章节" oninput="scheduleRender()">
       <label>视图</label>
       <div class="segmented">
         <button id="view-network" class="active" onclick="setView('network')">图谱</button>
@@ -201,6 +268,9 @@
     let dragState = null;
     let panState = null;
     let layoutSignature = "";
+    let renderTimer = null;
+    let svgFrameRequested = false;
+    const networkNodeHardLimit = 320;
 
     const colors = {
       chapter: "#f59e0b", formula: "#10b981", table: "#0ea5e9", note: "#0ea5e9",
@@ -216,6 +286,165 @@
 
     function js(value) {
       return esc(String(value || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
+    }
+
+    const latexCommandMap = {
+      "\\alpha": "α", "\\beta": "β", "\\gamma": "γ", "\\delta": "δ",
+      "\\epsilon": "ε", "\\theta": "θ", "\\lambda": "λ", "\\mu": "μ",
+      "\\pi": "π", "\\rho": "ρ", "\\sigma": "σ", "\\phi": "φ",
+      "\\omega": "ω", "\\times": "×", "\\cdot": "·", "\\leq": "≤",
+      "\\geq": "≥", "\\neq": "≠", "\\approx": "≈", "\\infty": "∞",
+      "\\sum": "∑", "\\prod": "∏", "\\int": "∫",
+      "\\rightarrow": "→", "\\Rightarrow": "⇒"
+    };
+
+    function stripMathDelimiters(token) {
+      const text = String(token || "").trim();
+      if (text.startsWith("$$") && text.endsWith("$$")) return text.slice(2, -2);
+      if (text.startsWith("\\begin{")) return text.replace(/^\\begin\{[^}]+\}/, "").replace(/\\end\{[^}]+\}$/, "");
+      if ((text.startsWith("\\[") && text.endsWith("\\]")) || (text.startsWith("\\(") && text.endsWith("\\)"))) {
+        return text.slice(2, -2);
+      }
+      if (text.startsWith("$") && text.endsWith("$")) return text.slice(1, -1);
+      return text;
+    }
+
+    function simplifyLatex(token) {
+      let text = stripMathDelimiters(token);
+      text = text.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "($1)/($2)");
+      text = text.replace(/\\sqrt\s*\{([^{}]+)\}/g, "√($1)");
+      text = text.replace(/\\text\s*\{([^{}]+)\}/g, "$1");
+      text = text.replace(/\\operatorname\s*\{([^{}]+)\}/g, "$1");
+      Object.keys(latexCommandMap).forEach(command => {
+        text = text.split(command).join(latexCommandMap[command]);
+      });
+      return text.replace(/\s+/g, " ").trim() || token;
+    }
+
+    function renderLatexToken(token) {
+      const raw = String(token || "");
+      const display = raw.startsWith("$$") || raw.startsWith("\\[") || raw.startsWith("\\begin{");
+      const latex = stripMathDelimiters(raw);
+      if (window.katex && typeof window.katex.renderToString === "function") {
+        try {
+          return window.katex.renderToString(latex, {
+            displayMode: display,
+            throwOnError: false,
+            strict: "ignore",
+            trust: false
+          });
+        } catch (error) {
+          console.warn("LaTeX preview failed:", error);
+        }
+      }
+      return `<span class="latex-fallback${display ? " latex-fallback-display" : ""}" title="${esc(raw)}">${esc(simplifyLatex(raw))}</span>`;
+    }
+
+    function renderInlineRichText(value) {
+      const text = String(value || "")
+        .replace(/\\\\([()[\]])/g, "\\$1")
+        .replace(/\\\\begin\{/g, "\\begin{")
+        .replace(/\\\\end\{/g, "\\end{");
+      const regex = /\\begin\{(equation\*?|align\*?|gather\*?)\}[\s\S]*?\\end\{\1\}|\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(^|[^\\])\$[^$\n]+?\$/g;
+      let html = "";
+      let lastIndex = 0;
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        const raw = match[0];
+        const tokenOffset = raw.startsWith("$") || raw.startsWith("\\") ? 0 : 1;
+        const tokenStart = match.index + tokenOffset;
+        if (tokenStart > lastIndex) html += esc(text.slice(lastIndex, tokenStart));
+        html += renderLatexToken(text.slice(tokenStart, match.index + raw.length));
+        lastIndex = match.index + raw.length;
+      }
+      if (lastIndex < text.length) html += esc(text.slice(lastIndex));
+      return html
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    }
+
+    function renderContentPreview(value) {
+      const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");
+      let html = "";
+      let listType = "";
+      function closeList() {
+        if (listType) {
+          html += `</${listType}>`;
+          listType = "";
+        }
+      }
+      lines.forEach(line => {
+        if (!line.trim()) {
+          closeList();
+          return;
+        }
+        const heading = line.match(/^\s{0,3}(#{1,3})\s+(.+)$/);
+        if (heading) {
+          closeList();
+          const level = heading[1].length;
+          html += `<h${level}>${renderInlineRichText(heading[2])}</h${level}>`;
+          return;
+        }
+        const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
+        if (unordered) {
+          if (listType !== "ul") {
+            closeList();
+            html += "<ul>";
+            listType = "ul";
+          }
+          html += `<li>${renderInlineRichText(unordered[1])}</li>`;
+          return;
+        }
+        const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+        if (ordered) {
+          if (listType !== "ol") {
+            closeList();
+            html += "<ol>";
+            listType = "ol";
+          }
+          html += `<li>${renderInlineRichText(ordered[1])}</li>`;
+          return;
+        }
+        closeList();
+        html += `<p>${renderInlineRichText(line)}</p>`;
+      });
+      closeList();
+      return html || '<span class="muted">暂无可预览内容</span>';
+    }
+
+    function renderRichLabel(value) {
+      return renderInlineRichText(value);
+    }
+
+    function plainLatexLabel(value) {
+      return String(value || "")
+        .replace(/\\\\([()[\]])/g, "\\$1")
+        .replace(/\\begin\{(equation\*?|align\*?|gather\*?)\}([\s\S]*?)\\end\{\1\}/g, function (_match, _env, body) {
+          return simplifyLatex(body);
+        })
+        .replace(/\$\$([\s\S]*?)\$\$/g, function (_match, body) { return simplifyLatex(body); })
+        .replace(/\\\[([\s\S]*?)\\\]/g, function (_match, body) { return simplifyLatex(body); })
+        .replace(/\\\(([\s\S]*?)\\\)/g, function (_match, body) { return simplifyLatex(body); })
+        .replace(/(^|[^\\])\$([^$\n]+?)\$/g, function (_match, prefix, body) { return prefix + simplifyLatex(body); });
+    }
+
+    function updateNodeContentPreview() {
+      const textarea = document.getElementById("node-content");
+      const preview = document.getElementById("node-content-preview");
+      if (!textarea || !preview) return;
+      preview.innerHTML = renderContentPreview(textarea.value);
+    }
+
+    function updateRelationDescriptionPreview() {
+      const textarea = document.getElementById("rel-description");
+      const preview = document.getElementById("rel-description-preview");
+      if (!textarea || !preview) return;
+      preview.innerHTML = renderContentPreview(textarea.value);
+    }
+
+    function scheduleRender() {
+      window.clearTimeout(renderTimer);
+      renderTimer = window.setTimeout(render, 90);
     }
 
     function labelOf(nodeOrId) {
@@ -287,7 +516,9 @@
       const term = document.getElementById("search").value.trim().toLowerCase();
       const type = document.getElementById("type-filter").value;
       const maxValue = document.getElementById("max-nodes").value || "140";
-      const max = maxValue === "all" ? graph.nodes.length : Number(maxValue);
+      const max = maxValue === "all"
+        ? (viewMode === "table" ? graph.nodes.length : Math.min(graph.nodes.length, networkNodeHardLimit))
+        : Number(maxValue);
       let nodes = graph.nodes.filter(node => {
         const metadata = node.metadata || {};
         const text = [node.id, node.label, node.type, node.content, metadata.label, metadata.chapter].join(" ").toLowerCase();
@@ -314,6 +545,7 @@
     }
 
     function render() {
+      window.clearTimeout(renderTimer);
       const nodes = filteredNodesBase();
       const relations = filteredRelations(nodes);
       visible = { nodes, relations };
@@ -329,7 +561,7 @@
       document.getElementById("node-list").innerHTML = nodes.slice(0, 70).map(node => {
         const chapter = (node.metadata && node.metadata.chapter) || "";
         return `<div class="item" onclick="showNode('${js(node.id)}')">
-          <div class="item-title">${esc(labelOf(node))}</div>
+          <div class="item-title">${renderRichLabel(labelOf(node))}</div>
           <div class="item-meta">${esc(node.type || "concept")}${chapter ? " / " + esc(chapter) : ""}</div>
         </div>`;
       }).join("");
@@ -339,9 +571,9 @@
       const svg = document.getElementById("graph-svg");
       svg.innerHTML = `<foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:16px;height:100%;overflow:auto;">
         <div class="table">${relations.map(rel => `<div class="row" onclick="showRelation('${js(rel.id)}')">
-          <div>${esc(labelOf(rel.source_id))}</div>
+          <div>${renderRichLabel(labelOf(rel.source_id))}</div>
           <div><b>${esc(rel.relation_type || "related")}</b></div>
-          <div>${esc(labelOf(rel.target_id))}</div>
+          <div>${renderRichLabel(labelOf(rel.target_id))}</div>
         </div>`).join("") || '<div class="row"><div>暂无关系</div><div></div><div></div></div>'}</div>
       </div></foreignObject>`;
     }
@@ -358,9 +590,11 @@
 
     function layout(nodes, relations, width, height) {
       const map = new Map(nodes.map((node, index) => [node.id, initialPosition(node, index, nodes.length, width, height)]));
-      for (let step = 0; step < 130; step++) {
+      const steps = nodes.length > 240 ? 32 : nodes.length > 160 ? 45 : nodes.length > 100 ? 65 : 90;
+      const pairStride = nodes.length > 240 ? 4 : nodes.length > 160 ? 3 : nodes.length > 100 ? 2 : 1;
+      for (let step = 0; step < steps; step++) {
         for (let i = 0; i < nodes.length; i++) {
-          for (let j = i + 1; j < nodes.length; j++) {
+          for (let j = i + 1; j < nodes.length; j += pairStride) {
             const a = map.get(nodes[i].id);
             const b = map.get(nodes[j].id);
             let dx = b.x - a.x;
@@ -403,7 +637,7 @@
       const height = Math.max(box.height, 560);
       svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
       const signature = `${viewMode}|${nodes.map(n => n.id).join("|")}|${relations.map(r => r.id).join("|")}|${width}|${height}`;
-      if (allowLayout || signature !== layoutSignature) {
+      if (signature !== layoutSignature || positions.size === 0) {
         layout(nodes, relations, width, height);
         layoutSignature = signature;
       }
@@ -457,7 +691,7 @@
         const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
         text.setAttribute("x", 14);
         text.setAttribute("y", 4);
-        text.textContent = labelOf(node).slice(0, viewMode === "focus" ? 48 : 30);
+        text.textContent = plainLatexLabel(labelOf(node)).slice(0, viewMode === "focus" ? 48 : 30);
         group.appendChild(circle);
         group.appendChild(text);
         root.appendChild(group);
@@ -467,6 +701,15 @@
         event.preventDefault();
         zoomBy(event.deltaY < 0 ? 1.12 : 0.88, event);
       };
+    }
+
+    function scheduleSvgRender() {
+      if (svgFrameRequested) return;
+      svgFrameRequested = true;
+      requestAnimationFrame(() => {
+        svgFrameRequested = false;
+        renderSvg(visible.nodes, visible.relations);
+      });
     }
 
     function startNodeDrag(event, nodeId) {
@@ -484,7 +727,7 @@
       const p = positions.get(dragState.nodeId);
       p.x = dragState.x + (event.clientX - dragState.startX) / viewport.scale;
       p.y = dragState.y + (event.clientY - dragState.startY) / viewport.scale;
-      renderSvg(visible.nodes, visible.relations);
+      scheduleSvgRender();
     }
 
     function stopNodeDrag() {
@@ -510,7 +753,7 @@
       if (!panState) return;
       viewport.x = panState.x + event.clientX - panState.startX;
       viewport.y = panState.y + event.clientY - panState.startY;
-      renderSvg(visible.nodes, visible.relations);
+      scheduleSvgRender();
     }
 
     function stopPan() {
@@ -531,7 +774,7 @@
       viewport.scale = nextScale;
       viewport.x = cx - graphX * nextScale;
       viewport.y = cy - graphY * nextScale;
-      renderSvg(visible.nodes, visible.relations);
+      scheduleSvgRender();
     }
 
     function forceRelayout() {
@@ -544,7 +787,7 @@
       document.getElementById("search").value = "";
       document.getElementById("type-filter").value = "";
       document.getElementById("relation-filter").value = "references_formula";
-      document.getElementById("max-nodes").value = "all";
+      document.getElementById("max-nodes").value = "220";
       positions.clear();
       layoutSignature = "";
       setView("network");
@@ -571,12 +814,17 @@
         <div class="muted">${esc(node.id)}</div>
         <label>节点名称</label>
         <input id="node-label" value="${esc(metadata.label || node.label || node.id)}">
+        <div class="preview-heading"><span>名称预览（LaTeX）</span></div>
+        <div class="math-preview">${renderRichLabel(metadata.label || node.label || node.id)}</div>
         <label>节点内容</label>
-        <textarea id="node-content">${esc(node.content || "")}</textarea>
+        <textarea id="node-content" oninput="updateNodeContentPreview()">${esc(node.content || "")}</textarea>
+        <div class="preview-heading"><span>内容预览（Markdown / LaTeX）</span><span class="muted">编辑时实时更新</span></div>
+        <div id="node-content-preview" class="math-preview"></div>
         <button class="primary" onclick="saveNode('${js(node.id)}')">保存节点</button>
         <label>关联关系</label>
         <div>${relations.map(r => relationRow(nodeId, r)).join("") || '<div class="muted">暂无关系</div>'}</div>
       `;
+      updateNodeContentPreview();
       renderSvg(visible.nodes, visible.relations);
     }
 
@@ -584,7 +832,7 @@
       const other = relation.source_id === nodeId ? relation.target_id : relation.source_id;
       const sourceMark = (relation.metadata && relation.metadata.relation_source) ? ` / ${relation.metadata.relation_source}` : "";
       return `<div class="relation-row">
-        <div><b>${esc(relation.relation_type)}${esc(sourceMark)}</b><br><span class="muted">${esc(labelOf(other))}</span></div>
+        <div><b>${esc(relation.relation_type)}${esc(sourceMark)}</b><br><span class="muted">${renderRichLabel(labelOf(other))}</span></div>
         <button onclick="showRelation('${js(relation.id)}')">编辑</button>
       </div>`;
     }
@@ -599,7 +847,9 @@
         <label>源节点</label><input id="rel-source" value="${esc(relation.source_id || "")}">
         <label>目标节点</label><input id="rel-target" value="${esc(relation.target_id || "")}">
         <label>关系类型</label><input id="rel-type" value="${esc(relation.relation_type || "related")}">
-        <label>关系说明</label><textarea id="rel-description">${esc(metadata.description || "")}</textarea>
+        <label>关系说明</label><textarea id="rel-description" oninput="updateRelationDescriptionPreview()">${esc(metadata.description || "")}</textarea>
+        <div class="preview-heading"><span>关系说明预览（Markdown / LaTeX）</span></div>
+        <div id="rel-description-preview" class="math-preview">${renderContentPreview(metadata.description || "")}</div>
         <button class="primary" onclick="saveRelation('${js(relation.id)}')">保存关系</button>
       `;
     }
@@ -636,7 +886,8 @@
       showRelation(relationId);
     }
 
-    window.addEventListener("resize", render);
+    window.addEventListener("resize", scheduleRender);
+    window.addEventListener("load", updateNodeContentPreview);
     loadGraph().catch(error => {
       document.getElementById("status").textContent = error.message;
     });

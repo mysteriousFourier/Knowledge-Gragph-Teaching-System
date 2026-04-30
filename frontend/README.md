@@ -11,6 +11,17 @@
 | 学生端 | `student.html` | 章节学习、练习题、问答 |
 | 图谱查看页 | `graph-viewer.html` | Cytoscape.js 图谱查看 |
 
+## 共享渲染
+
+| 文件 | 说明 |
+| --- | --- |
+| `latex-renderer.js` | 基于 KaTeX auto-render 的全局 LaTeX 渲染器 |
+| `latex-renderer.css` | 公式在液态玻璃界面和普通页面中的样式 |
+| `markdown-renderer.js` | 本地 Markdown 渲染器，用于课程内容、授课文案、问答和练习题 |
+| `markdown-renderer.css` | 与液态玻璃界面统一的 Markdown 排版样式 |
+
+支持 `$$...$$`、`\[...\]`、`\(...\)` 和 `$...$`。学生端和教师端动态生成的课程内容、回答和练习题会自动补渲染公式。
+
 ## 运行方式
 
 推荐使用根目录启动脚本：

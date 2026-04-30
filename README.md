@@ -9,6 +9,7 @@
 - **知识图谱约束生成**：后端会先构建 `LearningPlan`，再约束大模型生成，最后返回一致性检查报告。
 - **模型分流**：问答使用低延迟 `flash` 模型，授课文案和题库生成使用更适合深度生成的 `pro` 模型。
 - **题库缓存**：首次生成题库后写入 `.runtime/chapters.json`，后续学生端优先读取缓存，避免每次重写练习题。
+- **Markdown 与 LaTeX 渲染**：课程内容、授课文案、问答和练习题会先渲染 Markdown，再自动渲染公式。
 - **运行期配置**：端口、登录账号、DeepSeek API、模型名称均通过 `.env` 管理，避免把敏感信息写入源码。
 
 ## 技术栈
@@ -17,7 +18,7 @@
 - 后端：Python、FastAPI、Uvicorn
 - 数据与图谱：本地 JSON/SQLite/GraphML、向量检索、知识图谱服务
 - AI：DeepSeek Chat Completions API
-- 可视化：D3、vis-network、Cytoscape.js、KaTeX
+- 可视化与排版：D3、vis-network、Cytoscape.js、KaTeX
 
 ## 目录结构
 

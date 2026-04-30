@@ -20,6 +20,7 @@ let currentExerciseIndex = 0;
 let exerciseProgress = 0;
 let exerciseHistory = [];
 let currentAnswer = null;
+let currentExerciseChapterId = '';
 
 
 let qaHistory = [];
@@ -32,13 +33,50 @@ let playbackState = {
     currentUtterance: null,  // 褰撳墠璇煶瀵硅薄
     fullContent: '',
     showFullContent: false,
-    highlightedNodes: new Set() // 褰撳墠楂樹寒鐨勮妭鐐笽D闆嗗悎
+    highlightedNodes: new Set(), // 褰撳墠楂樹寒鐨勮妭鐐笽D闆嗗悎
+    lastRenderedLectureText: '',
+    lastRenderedAt: 0,
+    renderTimer: null
 };
 
 
 let graphData = null;
 let knowledgePoints = []; // 鏂囨涓殑鐭ヨ瘑鐐规槧灏?
 // ==================== API璋冪敤鍑芥暟 ====================
+
+function renderRichText(text) {
+    if (typeof window.renderMarkdown === 'function') {
+        return window.renderMarkdown(text || '');
+    }
+    return escapeHtml(text || '').replace(/\n/g, '<br>');
+}
+
+function renderRichInline(text) {
+    if (typeof window.renderMarkdownInline === 'function') {
+        return window.renderMarkdownInline(text || '');
+    }
+    return escapeHtml(text || '');
+}
+
+function setRichContent(element, text, options) {
+    if (!element) return;
+    const settings = options || {};
+    if (typeof window.setMarkdownContent === 'function') {
+        window.setMarkdownContent(element, text || '', settings);
+    } else {
+        element.classList.add(settings.inline ? 'markdown-inline' : 'markdown-body');
+        element.innerHTML = settings.inline ? renderRichInline(text || '') : renderRichText(text || '');
+    }
+    queueLatexRender(element);
+}
+
+function queueLatexRender(root) {
+    if (typeof window.scheduleLatexRender === 'function') {
+        window.scheduleLatexRender(root || document.body);
+    } else if (typeof window.renderLatexIn === 'function') {
+        window.renderLatexIn(root || document.body);
+    }
+}
 
 function normalizeBaseUrl(value, fallback) {
     return (value || fallback).replace(/\/+$/, '');
@@ -271,6 +309,10 @@ function switchMode(mode) {
     } else if (mode === 'practice') {
         practicePanel.classList.add('active');
         document.getElementById('btn-practice-mode').classList.add('active');
+        const selectedId = resolvePracticeChapterId();
+        if (selectedId && selectedId !== currentExerciseChapterId) {
+            loadExercises();
+        }
     }
 
     showToast(`已切换到${mode === 'learn' ? '学习' : '练习'}模式`, 'info');
@@ -415,6 +457,10 @@ function onChapterChange() {
     callAPI('/api/student/chapter', 'GET', { chapter_id: selectedId }).then(data => {
         if (data.success) {
             currentChapter = data;
+            const practiceSelect = document.getElementById('practice-chapter-select');
+            if (practiceSelect && selectedId) {
+                practiceSelect.value = selectedId;
+            }
             displayChapterContent(data.content);
             updateProgress(0);
             showToast(`已加载章节：${data.title}`, 'success');
@@ -481,7 +527,7 @@ function displayLearningPath(learningPath) {
         pathHtml += '<div class="path-items">';
         prereqs.unlearned.forEach(item => {
             const nodeName = item.node?.label || item.node_id;
-            pathHtml += `<span class="path-item path-item-warning">${nodeName}</span>`;
+            pathHtml += `<span class="path-item path-item-warning">${renderRichInline(nodeName)}</span>`;
         });
         pathHtml += '</div></div>';
     }
@@ -489,7 +535,7 @@ function displayLearningPath(learningPath) {
     // 褰撳墠绔犺妭
     pathHtml += '<div class="path-section">';
     pathHtml += '<div class="path-section-title">当前学习：</div>';
-    pathHtml += `<div class="path-items"><span class="path-item path-item-current">${currentChapter?.title || '当前章节'}</span></div>`;
+    pathHtml += `<div class="path-items"><span class="path-item path-item-current">${renderRichInline(currentChapter?.title || '当前章节')}</span></div>`;
     pathHtml += '</div>';
 
     
@@ -500,20 +546,26 @@ function displayLearningPath(learningPath) {
         pathHtml += '<div class="path-items">';
         followUp.recommended.forEach(item => {
             const nodeName = item.node?.label || item.node_id;
-            pathHtml += `<span class="path-item path-item-recommend">${nodeName}</span>`;
+            pathHtml += `<span class="path-item path-item-recommend">${renderRichInline(nodeName)}</span>`;
         });
         pathHtml += '</div></div>';
     }
 
     pathContainer.innerHTML = pathHtml;
+    queueLatexRender(pathContainer);
 }
 
 function displayChapterContent(content) {
     const courseContent = document.getElementById('course-content');
+    const lectureFloat = document.getElementById('lecture-note-float');
     if (courseContent) {
         const text = String(content || '').trim() || '暂无课程内容';
-        courseContent.textContent = text;
+        setRichContent(courseContent, text);
         courseContent.dataset.rawContent = text;
+        if (lectureFloat) {
+            setRichContent(lectureFloat, text);
+            lectureFloat.dataset.rawContent = text;
+        }
     }
 }
 
@@ -589,11 +641,18 @@ function playContent() {
     playbackState.currentPosition = 0;
     playbackState.isPlaying = true;
     playbackState.isPaused = false;
+    playbackState.lastRenderedLectureText = '';
+    playbackState.lastRenderedAt = 0;
+    if (playbackState.renderTimer) {
+        clearTimeout(playbackState.renderTimer);
+        playbackState.renderTimer = null;
+    }
 
     // 鏄剧ず鎺堣灞曠ず鍖哄煙
     showLectureDisplayContainer();
 
     parseKnowledgePointsInContent(content);
+    updateLectureDisplay(0);
 
     startSpeechSynthesis(content);
 
@@ -632,8 +691,25 @@ function markAsLearnedManual() {
 
 // ==================== 缁冧範妯″紡 ====================
 
+function resolvePracticeChapterId() {
+    const practiceSelect = document.getElementById('practice-chapter-select');
+    let selectedId = practiceSelect ? practiceSelect.value : '';
+
+    if (!selectedId) {
+        const learnSelect = document.getElementById('chapter-select');
+        selectedId = learnSelect ? learnSelect.value : '';
+        if (selectedId && practiceSelect) {
+            practiceSelect.value = selectedId;
+        }
+    }
+
+    return selectedId;
+}
+
 async function loadExercises() {
-    const selectedId = document.getElementById('practice-chapter-select').value;
+    const selectedId = resolvePracticeChapterId();
+    const exerciseContent = document.getElementById('exercise-content');
+    const toolbar = document.getElementById('exercise-toolbar');
 
     if (!selectedId) {
         showToast('请先选择练习章节', 'warning');
@@ -642,16 +718,31 @@ async function loadExercises() {
 
     currentAnswer = null;
     currentExerciseIndex = 0;
+    currentExerciseChapterId = selectedId;
+
+    if (exerciseContent) {
+        exerciseContent.innerHTML = '<p class="loading">正在加载练习题...</p>';
+    }
+    if (toolbar) {
+        toolbar.classList.add('hidden');
+    }
 
     try {
-        const chapterData = await callAPI('/api/education/get-chapter', 'GET', { chapter_id: selectedId });
-        if (chapterData.success && chapterData.chapter) {
+        let chapterData = null;
+        try {
+            chapterData = await callAPI('/api/education/get-chapter', 'GET', { chapter_id: selectedId });
+        } catch (chapterError) {
+            console.warn('章节题库接口不可用，切换到学生题库接口:', chapterError);
+        }
+
+        if (chapterData && chapterData.success && chapterData.chapter) {
             const chapter = chapterData.chapter;
-            const cachedBank = normalizeExerciseBank(chapter.exercise_bank || chapter.exercises);
+            const cachedBank = normalizeExerciseBank(chapter.exercise_bank || chapter.exercises || chapter);
 
             if (cachedBank.length > 0) {
                 exerciseBank = cachedBank;
                 currentExercise = exerciseBank[currentExerciseIndex];
+                if (!currentExercise) throw new Error('题库为空');
                 displayExercise(currentExercise);
                 showToast(`已加载题库（${exerciseBank.length} 题）`, 'info');
             } else {
@@ -664,8 +755,9 @@ async function loadExercises() {
                 });
 
                 if (exerciseData.success) {
-                    exerciseBank = normalizeExerciseBank(exerciseData.exercise_bank || exerciseData.exercise);
+                    exerciseBank = normalizeExerciseBank(exerciseData.exercise_bank || exerciseData.exercises || exerciseData.exercise || exerciseData);
                     currentExercise = exerciseBank[currentExerciseIndex] || exerciseData.exercise;
+                    if (!currentExercise) throw new Error('题库为空');
                     displayExercise(currentExercise);
                     showToast(exerciseData.cached ? '已从题库加载' : `题库已预创建（${exerciseBank.length || 1} 题）`, 'success');
                 } else {
@@ -675,8 +767,9 @@ async function loadExercises() {
         } else {
             const exerciseData = await callAPI('/api/student/exercises', 'GET', { chapter_id: selectedId });
             if (exerciseData.success) {
-                exerciseBank = normalizeExerciseBank(exerciseData.exercise_bank || exerciseData.exercise);
+                exerciseBank = normalizeExerciseBank(exerciseData.exercise_bank || exerciseData.exercises || exerciseData.exercise || exerciseData);
                 currentExercise = exerciseBank[currentExerciseIndex] || exerciseData.exercise;
+                if (!currentExercise) throw new Error('题库为空');
                 displayExercise(currentExercise);
                 showToast(exerciseData.cached ? '已从题库加载' : `题库已预创建（${exerciseBank.length || 1} 题）`, 'success');
             } else {
@@ -685,6 +778,11 @@ async function loadExercises() {
         }
     } catch (error) {
         console.error('加载练习题失败:', error);
+        currentExercise = null;
+        exerciseBank = [];
+        if (exerciseContent) {
+            exerciseContent.innerHTML = '<p class="placeholder">练习题加载失败，请刷新后重试。</p>';
+        }
         showToast('加载练习题失败', 'error');
     }
 }
@@ -694,8 +792,20 @@ function normalizeExerciseBank(payload) {
     if (Array.isArray(payload)) {
         return payload.filter(item => item && item.question);
     }
+    if (payload.exercise_bank) {
+        return normalizeExerciseBank(payload.exercise_bank);
+    }
     if (payload.exercises && Array.isArray(payload.exercises)) {
-        return payload.exercises.filter(item => item && item.question);
+        return normalizeExerciseBank(payload.exercises);
+    }
+    if (payload.questions && Array.isArray(payload.questions)) {
+        return normalizeExerciseBank(payload.questions);
+    }
+    if (payload.items && Array.isArray(payload.items)) {
+        return normalizeExerciseBank(payload.items);
+    }
+    if (payload.data) {
+        return normalizeExerciseBank(payload.data);
     }
     if (payload.question) {
         return [payload];
@@ -703,35 +813,70 @@ function normalizeExerciseBank(payload) {
     return [];
 }
 
+function getExerciseOptions(exercise) {
+    return Array.isArray(exercise && exercise.options) ? exercise.options : [];
+}
+
+function isChoiceExercise(exercise) {
+    return getExerciseOptions(exercise).length > 0;
+}
+
+function getOptionText(option) {
+    if (option && typeof option === 'object') {
+        return String(option.text || option.content || option.label || option.value || '').trim();
+    }
+    return String(option || '').trim();
+}
+
 function getOptionAnswer(option, index) {
-    const text = String(option || '').trim();
+    if (option && typeof option === 'object') {
+        const key = option.key || option.answer || option.id || option.label;
+        if (key) {
+            const normalized = String(key).trim();
+            if (/^[A-Z]$/i.test(normalized)) {
+                return normalized.toUpperCase();
+            }
+        }
+    }
+    const text = getOptionText(option);
     const match = text.match(/^([A-Z])[\s.、)）:：-]/i);
     return match ? match[1].toUpperCase() : String.fromCharCode(65 + index);
+}
+
+function stripOptionPrefix(option) {
+    return getOptionText(option).replace(/^[A-Z][\s.、)）:：-]+/i, '');
 }
 
 function displayExercise(exercise) {
     const exerciseContent = document.getElementById('exercise-content');
 
     if (exerciseContent && exercise) {
+        const options = getExerciseOptions(exercise);
+        const hasOptions = options.length > 0;
         let optionsHtml = '';
-        if (exercise.options && Array.isArray(exercise.options)) {
-            optionsHtml = exercise.options.map((opt, index) => {
+        if (hasOptions) {
+            optionsHtml = options.map((opt, index) => {
                 const answer = getOptionAnswer(opt, index);
                 return `<button type="button" class="exercise-option" data-answer="${escapeHtml(answer)}">
                     <span class="exercise-option-key">${escapeHtml(answer)}</span>
-                    <span class="exercise-option-text">${escapeHtml(String(opt).replace(/^[A-Z][\s.、)）:：-]+/i, ''))}</span>
+                    <span class="exercise-option-text markdown-inline">${renderRichInline(stripOptionPrefix(opt))}</span>
                 </button>`;
             }).join('');
         }
 
         exerciseContent.innerHTML = `
             <div class="exercise-meta">第 ${currentExerciseIndex + 1} / ${Math.max(1, exerciseBank.length || 1)} 题</div>
-            <h3>${escapeHtml(exercise.question)}</h3>
-            <div class="exercise-options">
-                ${optionsHtml}
-            </div>
-            <input type="hidden" id="exercise-answer-input" value="">
-            <div class="selected-answer-hint">请选择一个选项</div>
+            <div class="exercise-question markdown-body">${renderRichText(exercise.question || '题目为空')}</div>
+            ${hasOptions ? `
+                <div class="exercise-options">
+                    ${optionsHtml}
+                </div>
+                <input type="hidden" id="exercise-answer-input" value="">
+                <div class="selected-answer-hint">请选择一个选项</div>
+            ` : `
+                <textarea id="exercise-answer-input" class="exercise-answer-text" rows="4" placeholder="请输入答案"></textarea>
+                <div class="selected-answer-hint">请输入答案后提交</div>
+            `}
         `;
 
         exerciseContent.querySelectorAll('.exercise-option').forEach(button => {
@@ -742,7 +887,8 @@ function displayExercise(exercise) {
         if (toolbar) {
             toolbar.classList.remove('hidden');
         }
-    } else {
+        queueLatexRender(exerciseContent);
+    } else if (exerciseContent) {
         exerciseContent.innerHTML = '<p class="placeholder">请选择章节加载练习题</p>';
     }
 }
@@ -767,7 +913,7 @@ async function submitAnswer() {
     const selectedAnswer = currentAnswer || (answerInput ? answerInput.value.trim() : '');
 
     if (!selectedAnswer) {
-        showToast('请先点击选择一个选项', 'warning');
+        showToast(isChoiceExercise(currentExercise) ? '请先点击选择一个选项' : '请先输入答案', 'warning');
         return;
     }
 
@@ -823,14 +969,15 @@ async function checkAnswer(userAnswer) {
                     const answerContent = document.getElementById('exercise-content');
                     if (answerContent) {
                         answerContent.innerHTML = `
-                            <h3>${escapeHtml(currentExercise.question)}</h3>
+                            <div class="exercise-question markdown-body">${renderRichText(currentExercise.question || '')}</div>
                             <p class="exercise-answer-state ${isCorrect ? 'correct' : 'incorrect'}">
-                                你的答案：${escapeHtml(userAnswer)}
+                                你的答案：${renderRichInline(userAnswer)}
                             </p>
                             <p class="exercise-result-title"><strong>解析：</strong></p>
-                            <p class="exercise-result-text">${escapeHtml(result.explanation)}</p>
-                            ${result.correct_answer ? `<p class="exercise-answer-state correct"><strong>正确答案：${escapeHtml(result.correct_answer)}</strong></p>` : ''}
+                            <div class="exercise-result-text markdown-body">${renderRichText(result.explanation)}</div>
+                            ${result.correct_answer ? `<p class="exercise-answer-state correct"><strong>正确答案：${renderRichInline(result.correct_answer)}</strong></p>` : ''}
                         `;
+                        queueLatexRender(answerContent);
                     }
                 }
 
@@ -854,28 +1001,32 @@ function showAnswer() {
     const answerContent = document.getElementById('exercise-content');
 
     if (answerContent) {
-        const options = Array.isArray(currentExercise.options) ? currentExercise.options : [];
+        const options = getExerciseOptions(currentExercise);
+        const correctAnswer = currentExercise.correct_answer || currentExercise.answer || '暂无';
         answerContent.innerHTML = `
-            <h3>${escapeHtml(currentExercise.question)}</h3>
+            <div class="exercise-question markdown-body">${renderRichText(currentExercise.question || '')}</div>
             <p class="exercise-answer-state correct">
-                <strong>正确答案：${escapeHtml(currentExercise.correct_answer || currentExercise.answer || '暂无')}</strong>
+                <strong>正确答案：${renderRichInline(correctAnswer)}</strong>
             </p>
-            <div class="exercise-options readonly">
-                ${options.map((opt, index) => {
-                    const answer = getOptionAnswer(opt, index);
-                    return `<div class="exercise-option ${answer === (currentExercise.correct_answer || '').toUpperCase() ? 'selected' : ''}">
-                        <span class="exercise-option-key">${escapeHtml(answer)}</span>
-                        <span class="exercise-option-text">${escapeHtml(String(opt).replace(/^[A-Z][\s.、)）:：-]+/i, ''))}</span>
-                    </div>`;
-                }).join('')}
-            </div>
+            ${options.length > 0 ? `
+                <div class="exercise-options readonly">
+                    ${options.map((opt, index) => {
+                        const answer = getOptionAnswer(opt, index);
+                        return `<div class="exercise-option ${answer === String(correctAnswer).trim().toUpperCase() ? 'selected' : ''}">
+                            <span class="exercise-option-key">${escapeHtml(answer)}</span>
+                            <span class="exercise-option-text markdown-inline">${renderRichInline(stripOptionPrefix(opt))}</span>
+                        </div>`;
+                    }).join('')}
+                </div>
+            ` : ''}
             ${currentExercise.explanation ? `
                 <div class="exercise-explanation">
                     <strong>解析：</strong>
-                    <p>${escapeHtml(currentExercise.explanation)}</p>
+                    <div class="markdown-body">${renderRichText(currentExercise.explanation)}</div>
                 </div>
             ` : ''}
         `;
+        queueLatexRender(answerContent);
     }
 }
 
@@ -991,13 +1142,12 @@ function displayAnswer(answer, warning) {
     const warningHtml = warning
         ? `<div class="answer-warning">${escapeHtml(warning)}</div>`
         : '';
-    const paragraphs = String(answer || '').split(/\n{2,}/).map(part => {
-        const text = part.trim();
-        if (!text) return '';
-        return `<div class="answer-content">${escapeHtml(text).replace(/\n/g, '<br>')}</div>`;
-    }).join('');
+    const text = String(answer || '').trim();
 
-    answerDisplay.innerHTML = warningHtml + (paragraphs || '<p class="placeholder">暂无回答</p>');
+    answerDisplay.innerHTML = warningHtml + (text
+        ? `<div class="answer-content markdown-body">${renderRichText(text)}</div>`
+        : '<p class="placeholder">暂无回答</p>');
+    queueLatexRender(answerDisplay);
 }
 
 function addToHistory(question, answer) {
@@ -1020,13 +1170,14 @@ function displayHistory() {
         qaHistory.forEach((item, index) => {
             html += `
                 <div class="history-item">
-                    <div class="history-question">Q: ${item.question}</div>
-                    <div class="history-answer">A: ${item.answer.substring(0, 50)}...</div>
-                    <div class="history-time">${item.time}</div>
+                    <div class="history-question">Q: ${renderRichInline(item.question)}</div>
+                    <div class="history-answer">A: ${renderRichInline(String(item.answer || '').substring(0, 50))}...</div>
+                    <div class="history-time">${escapeHtml(item.time)}</div>
                 </div>
             `;
         });
         historyList.innerHTML = html;
+        queueLatexRender(historyList);
     }
 }
 
@@ -1501,8 +1652,7 @@ function startSpeechSynthesis(content) {
     utterance.onboundary = (event) => {
         if (event.name === 'word') {
             playbackState.currentPosition = event.charIndex;
-            updateLectureDisplay(event.charIndex);
-            updateGraphHighlights(event.charIndex);
+            scheduleLectureDisplayUpdate(event.charIndex);
         }
     };
 
@@ -1513,6 +1663,10 @@ function startSpeechSynthesis(content) {
         document.getElementById('btn-play-content').disabled = false;
         document.getElementById('btn-pause-content').disabled = true;
         document.getElementById('btn-play-content').textContent = '播放讲解';
+        if (playbackState.renderTimer) {
+            clearTimeout(playbackState.renderTimer);
+            playbackState.renderTimer = null;
+        }
         clearAllHighlights();
         showToast('讲解播放完成', 'success');
     };
@@ -1532,6 +1686,27 @@ function startSpeechSynthesis(content) {
 }
 
 // 鏇存柊鎺堣鏂囨鏄剧ず
+function scheduleLectureDisplayUpdate(position) {
+    const now = performance.now();
+    playbackState.currentPosition = position;
+
+    if (now - playbackState.lastRenderedAt >= 280) {
+        updateLectureDisplay(position);
+        updateGraphHighlights(position);
+        return;
+    }
+
+    if (playbackState.renderTimer) {
+        return;
+    }
+
+    playbackState.renderTimer = setTimeout(() => {
+        playbackState.renderTimer = null;
+        updateLectureDisplay(playbackState.currentPosition);
+        updateGraphHighlights(playbackState.currentPosition);
+    }, 280);
+}
+
 function updateLectureDisplay(currentPosition) {
     const displayDiv = document.getElementById('lecture-display-text');
     const content = playbackState.fullContent;
@@ -1558,77 +1733,22 @@ function renderFullContent() {
 
 function renderFullContentWithHighlights(content, currentPosition) {
     const displayDiv = document.getElementById('lecture-display-text');
-
-    let html = '';
-    let lastIndex = 0;
-
-    
-    const sortedPoints = [...knowledgePoints].sort((a, b) => a.positions[0] - b.positions[0]);
-
-    sortedPoints.forEach(point => {
-        
-        const relevantPosition = point.positions.find(pos => pos >= lastIndex);
-        if (relevantPosition === undefined) return;
-
-        html += escapeHtml(content.substring(lastIndex, relevantPosition));
-
-                const isActive = currentPosition >= relevantPosition &&
-                        currentPosition <= relevantPosition + point.keyword.length;
-
-        
-        const highlightClass = isActive ? 'knowledge-keyword active' : 'knowledge-keyword';
-        html += `<span class="${highlightClass}" data-node-id="${point.nodeId}">
-                  ${point.keyword}
-                </span>`;
-
-        lastIndex = relevantPosition + point.keyword.length;
-    });
-
-    
-    if (lastIndex < content.length) {
-        html += escapeHtml(content.substring(lastIndex));
-    }
-
-    displayDiv.innerHTML = html;
+    renderLectureText(displayDiv, content || '');
 }
 
 function renderPartialContentWithHighlights(partialText, currentPosition, contentOffset) {
     const displayDiv = document.getElementById('lecture-display-text');
+    renderLectureText(displayDiv, partialText || '');
+}
 
-    
-    const relativePosition = currentPosition - contentOffset;
-
-    let html = '';
-    let lastIndex = 0;
-
-    knowledgePoints.forEach(point => {
-        point.positions.forEach(pos => {
-            
-            if (pos >= contentOffset && pos + point.keyword.length <= contentOffset + partialText.length) {
-                const relativePos = pos - contentOffset;
-
-                html += escapeHtml(partialText.substring(lastIndex, relativePos));
-
-                                const isActive = currentPosition >= pos &&
-                                currentPosition <= pos + point.keyword.length;
-
-                
-                const highlightClass = isActive ? 'knowledge-keyword active' : 'knowledge-keyword';
-                html += `<span class="${highlightClass}" data-node-id="${point.nodeId}">
-                          ${point.keyword}
-                        </span>`;
-
-                lastIndex = relativePos + point.keyword.length;
-            }
-        });
-    });
-
-    
-    if (lastIndex < partialText.length) {
-        html += escapeHtml(partialText.substring(lastIndex));
+function renderLectureText(displayDiv, text) {
+    if (!displayDiv || playbackState.lastRenderedLectureText === text) {
+        playbackState.lastRenderedAt = performance.now();
+        return;
     }
-
-    displayDiv.innerHTML = html;
+    playbackState.lastRenderedLectureText = text;
+    playbackState.lastRenderedAt = performance.now();
+    setRichContent(displayDiv, text);
 }
 
 // 鏇存柊鐭ヨ瘑鍥捐氨楂樹寒

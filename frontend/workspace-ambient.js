@@ -19,8 +19,8 @@
     let height = 0;
     let ratio = 1;
     let fontSize = 13;
-    let cellW = 13;
-    let cellH = 18;
+    let cellW = 14;
+    let cellH = 20;
     let columns = 0;
     let rows = 0;
     let cells = [];
@@ -30,6 +30,9 @@
     let lastClickAt = 0;
     let lastFrame = 0;
     const startedAt = performance.now();
+    const prefersReducedMotion = window.matchMedia &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let pageVisible = document.visibilityState !== "hidden";
     const pointer = {
         x: 0,
         y: 0,
@@ -38,12 +41,12 @@
     };
 
     function resizeCanvas() {
-        ratio = Math.min(window.devicePixelRatio || 1, 2);
+        ratio = Math.min(window.devicePixelRatio || 1, prefersReducedMotion ? 1 : 1.5);
         width = window.innerWidth;
         height = window.innerHeight;
         fontSize = width < 700 ? 11 : 13;
-        cellW = width < 700 ? 11 : 13;
-        cellH = width < 700 ? 16 : 18;
+        cellW = width < 700 ? 13 : 15;
+        cellH = width < 700 ? 18 : 21;
         canvas.width = Math.floor(width * ratio);
         canvas.height = Math.floor(height * ratio);
         canvas.style.width = `${width}px`;
@@ -67,7 +70,16 @@
     }
 
     function draw(timestamp) {
-        if (timestamp - lastFrame < 48) {
+        if (!pageVisible) {
+            requestAnimationFrame(draw);
+            return;
+        }
+
+        const hasActiveWave = pulses.length > 0 ||
+            fieldCharge > 0.012 ||
+            (pointer.active && timestamp - pointer.lastMoveAt < 1200);
+        const frameInterval = prefersReducedMotion ? 140 : (hasActiveWave ? 52 : 84);
+        if (timestamp - lastFrame < frameInterval) {
             requestAnimationFrame(draw);
             return;
         }
@@ -93,7 +105,7 @@
         ctx.textBaseline = "top";
         ctx.textAlign = "left";
 
-        pulses = pulses.filter((pulse) => now - pulse.startedAt < 5200);
+        pulses = pulses.filter((pulse) => now - pulse.startedAt < 4200);
 
         for (const cell of cells) {
             const idleFlow = 0.5 + Math.sin(cell.x * 0.012 + cell.y * 0.017 - elapsed * 0.0016 + cell.phase) * 0.5;
@@ -123,7 +135,7 @@
 
             for (const pulse of pulses) {
                 const age = now - pulse.startedAt;
-                const progress = Math.min(1, age / 2850);
+                const progress = Math.min(1, age / 2450);
                 const radius = Math.min(maxRadius, 20 + progress * maxRadius);
                 const dx = cell.x - pulse.x;
                 const dy = cell.y - pulse.y;
@@ -131,7 +143,7 @@
                 const ringWidth = 18 + radius * 0.068;
                 const ring = Math.exp(-Math.pow(distance - radius, 2) / (2 * ringWidth * ringWidth));
                 const interior = distance < radius ? Math.max(0, 1 - distance / Math.max(radius, 1)) : 0;
-                const decay = Math.max(0, 1 - age / 5200);
+                const decay = Math.max(0, 1 - age / 4200);
                 const phase = distance * 0.135 - age * 0.015 + pulse.phase;
                 const wave = Math.sin(phase) * ring * decay * pulse.strength;
                 const energy = Math.abs(wave);
@@ -215,7 +227,7 @@
             shift: charShift,
             phase: Math.random() * Math.PI * 2
         });
-        pulses = pulses.slice(-8);
+        pulses = pulses.slice(-5);
     }
 
     window.addEventListener("resize", resizeCanvas, { passive: true });
@@ -223,6 +235,9 @@
     window.addEventListener("pointerdown", triggerPulse, { passive: true });
     window.addEventListener("pointerleave", () => {
         pointer.active = false;
+    });
+    document.addEventListener("visibilitychange", () => {
+        pageVisible = document.visibilityState !== "hidden";
     });
 
     resizeCanvas();

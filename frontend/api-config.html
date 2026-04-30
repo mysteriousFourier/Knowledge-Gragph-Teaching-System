@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <title>DeepSeek API 配置</title>
+    <link rel="stylesheet" href="https://unpkg.com/katex@0.16.9/dist/katex.min.css">
+    <link rel="stylesheet" href="latex-renderer.css?v=2">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -152,6 +154,9 @@
         </div>
     </div>
 
+    <script src="https://unpkg.com/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://unpkg.com/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="latex-renderer.js?v=3" charset="UTF-8"></script>
     <script>
         function saveApiKey() {
             const apiKey = document.getElementById('api-key').value.trim();

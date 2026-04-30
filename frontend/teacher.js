@@ -49,7 +49,10 @@ let teacherPlaybackState = {
     currentUtterance: null,  // 褰撳墠璇煶瀵硅薄
     fullContent: '',
     showFullContent: false,
-    highlightedNodes: new Set() // 褰撳墠楂樹寒鐨勮妭鐐笽D闆嗗悎
+    highlightedNodes: new Set(), // 褰撳墠楂樹寒鐨勮妭鐐笽D闆嗗悎
+    lastRenderedLectureText: '',
+    lastRenderedAt: 0,
+    renderTimer: null
 };
 
 let teacherKnowledgePoints = [];
@@ -71,6 +74,40 @@ const BACKEND_ADMIN_ROOT = normalizeBaseUrl(APP_CONFIG.backendAdminBaseUrl, 'htt
 const API_BASE_URL = `${EDUCATION_API_ROOT}/api/education`;
 const MAINTENANCE_API_URL = `${MAINTENANCE_API_ROOT}/api/maintenance`;
 const EMBEDDED_GRAPH_ENABLED = false;
+
+function renderRichText(text) {
+    if (typeof window.renderMarkdown === 'function') {
+        return window.renderMarkdown(text || '');
+    }
+    return escapeHtml(text || '').replace(/\n/g, '<br>');
+}
+
+function renderRichInline(text) {
+    if (typeof window.renderMarkdownInline === 'function') {
+        return window.renderMarkdownInline(text || '');
+    }
+    return escapeHtml(text || '');
+}
+
+function setRichContent(element, text, options) {
+    if (!element) return;
+    const settings = options || {};
+    if (typeof window.setMarkdownContent === 'function') {
+        window.setMarkdownContent(element, text || '', settings);
+    } else {
+        element.classList.add(settings.inline ? 'markdown-inline' : 'markdown-body');
+        element.innerHTML = settings.inline ? renderRichInline(text || '') : renderRichText(text || '');
+    }
+    queueLatexRender(element);
+}
+
+function queueLatexRender(root) {
+    if (typeof window.scheduleLatexRender === 'function') {
+        window.scheduleLatexRender(root || document.body);
+    } else if (typeof window.renderLatexIn === 'function') {
+        window.renderLatexIn(root || document.body);
+    }
+}
 
 function openBackendGraphAdmin() {
     window.open(`${BACKEND_ADMIN_ROOT}/admin`, '_blank', 'noopener');
@@ -1099,10 +1136,10 @@ function showVisNodeDetail(nodeData) {
         html += `<p><strong>Label:</strong> ${renderLatexContent(nodeData._full_label)}</p>`;
     }
     if (nodeData._content) {
-        const rendered = renderLatexContent(nodeData._content);
-        const short = nodeData._content.length > 800
-            ? rendered.substring(0, rendered.lastIndexOf(' ') + 300) + '...'
-            : rendered;
+        const shortText = nodeData._content.length > 800
+            ? nodeData._content.substring(0, 800) + '...'
+            : nodeData._content;
+        const short = renderRichText(shortText);
         html += `<div style="margin-top:8px;padding:8px;background:#f0f0f0;border-radius:4px;font-size:12px;line-height:1.6;max-height:400px;overflow-y:auto;">${short}</div>`;
     }
     if (nodeData._source) {
@@ -1111,6 +1148,7 @@ function showVisNodeDetail(nodeData) {
 
     contentEl.innerHTML = html;
     detailEl.classList.remove('hidden');
+    queueLatexRender(contentEl);
 }
 
 function normalizeGraphDataForVis(data) {
@@ -1648,6 +1686,9 @@ function simplifyLatex(s) {
 // Render text with LaTeX to HTML using KaTeX (for detail panel)
 function renderLatexContent(text) {
     if (!text) return '';
+    if (typeof window.renderMarkdownInline === 'function') {
+        return window.renderMarkdownInline(text);
+    }
     var escaped = '';
     for (var i = 0; i < text.length; i++) {
         var ch = text[i];
@@ -3779,31 +3820,19 @@ function generateMockAnswer(question) {
     return generateKnowledgeBasedAnswer(question);
 }
 
-function displayAnswer(answer) {
-    const answerDiv = document.getElementById('answer-display');
-
-        const formattedAnswer = formatAnswer(answer);
-    answerDiv.innerHTML = formattedAnswer;
-    answerDiv.classList.remove('hidden');
-}
-
 function formatAnswer(answer) {
-    
-    const paragraphs = answer.split('\n\n');
-    return paragraphs.map(p => {
-        if (p.trim().length === 0) return '';
-        return `<div class="answer-content">${p.trim()}</div>`;
-    }).join('');
+    const text = String(answer || '').trim();
+    if (!text) {
+        return '<p class="placeholder">暂无回答</p>';
+    }
+    return `<div class="answer-content markdown-body">${renderRichText(text)}</div>`;
 }
 
 function displayAnswer(answer) {
     const answerDiv = document.getElementById('answer-display');
-    answerDiv.innerHTML = `
-        <div class="answer-content">
-            <p>${answer}</p>
-        </div>
-    `;
+    answerDiv.innerHTML = formatAnswer(answer);
     answerDiv.classList.remove('hidden');
+    queueLatexRender(answerDiv);
 }
 
 function addToQaHistory(question, answer) {
@@ -3815,14 +3844,15 @@ function addToQaHistory(question, answer) {
     qaHistory.forEach((item, index) => {
         html += `
             <div class="history-item" onclick="showHistoryItem(${index})">
-                <div class="history-question">Q: ${item.question}</div>
-                <div class="history-answer">A: ${item.answer.substring(0, 50)}...</div>
-                <div class="history-time" style="font-size: 11px; color: #999;">${item.time}</div>
+                <div class="history-question">Q: ${renderRichInline(item.question)}</div>
+                <div class="history-answer">A: ${renderRichInline(String(item.answer || '').substring(0, 50))}...</div>
+                <div class="history-time" style="font-size: 11px; color: #999;">${escapeHtml(item.time)}</div>
             </div>
         `;
     });
 
     historyList.innerHTML = html;
+    queueLatexRender(historyList);
 }
 
 function showHistoryItem(index) {
@@ -4076,6 +4106,12 @@ function showTeacherLectureDisplay() {
 function loadTeacherLectureContent(content) {
     teacherPlaybackState.fullContent = content;
     teacherPlaybackState.currentPosition = 0;
+    teacherPlaybackState.lastRenderedLectureText = '';
+    teacherPlaybackState.lastRenderedAt = 0;
+    if (teacherPlaybackState.renderTimer) {
+        clearTimeout(teacherPlaybackState.renderTimer);
+        teacherPlaybackState.renderTimer = null;
+    }
 
     parseTeacherKnowledgePoints(content);
 
@@ -4147,6 +4183,13 @@ function playTeacherLecture() {
     teacherPlaybackState.isPlaying = true;
     teacherPlaybackState.isPaused = false;
     teacherPlaybackState.currentPosition = 0;
+    teacherPlaybackState.lastRenderedLectureText = '';
+    teacherPlaybackState.lastRenderedAt = 0;
+    if (teacherPlaybackState.renderTimer) {
+        clearTimeout(teacherPlaybackState.renderTimer);
+        teacherPlaybackState.renderTimer = null;
+    }
+    updateTeacherLectureDisplay(0);
 
     const utterance = new SpeechSynthesisUtterance(content);
     utterance.lang = 'zh-CN';
@@ -4157,8 +4200,7 @@ function playTeacherLecture() {
     utterance.onboundary = (event) => {
         if (event.name === 'word') {
             teacherPlaybackState.currentPosition = event.charIndex;
-            updateTeacherLectureDisplay(event.charIndex);
-            updateTeacherGraphHighlights(event.charIndex);
+            scheduleTeacherLectureDisplayUpdate(event.charIndex);
         }
     };
 
@@ -4169,6 +4211,10 @@ function playTeacherLecture() {
         document.getElementById('btn-teacher-play').disabled = false;
         document.getElementById('btn-teacher-pause').disabled = true;
         document.getElementById('btn-teacher-play').textContent = '播放';
+        if (teacherPlaybackState.renderTimer) {
+            clearTimeout(teacherPlaybackState.renderTimer);
+            teacherPlaybackState.renderTimer = null;
+        }
         clearTeacherHighlights();
         showToast('播放完成', 'success');
     };
@@ -4212,6 +4258,27 @@ function pauseTeacherLecture() {
     }
 }
 
+function scheduleTeacherLectureDisplayUpdate(position) {
+    const now = performance.now();
+    teacherPlaybackState.currentPosition = position;
+
+    if (now - teacherPlaybackState.lastRenderedAt >= 280) {
+        updateTeacherLectureDisplay(position);
+        updateTeacherGraphHighlights(position);
+        return;
+    }
+
+    if (teacherPlaybackState.renderTimer) {
+        return;
+    }
+
+    teacherPlaybackState.renderTimer = setTimeout(() => {
+        teacherPlaybackState.renderTimer = null;
+        updateTeacherLectureDisplay(teacherPlaybackState.currentPosition);
+        updateTeacherGraphHighlights(teacherPlaybackState.currentPosition);
+    }, 280);
+}
+
 function updateTeacherLectureDisplay(currentPosition) {
     const displayDiv = document.getElementById('teacher-lecture-display-text');
     const content = teacherPlaybackState.fullContent;
@@ -4235,78 +4302,23 @@ function updateTeacherLectureDisplay(currentPosition) {
 // 娓叉煋鏁欏笀绔叏閮ㄥ唴瀹癸紙甯﹂珮浜級
 function renderTeacherFullContentWithHighlights(content, currentPosition) {
     const displayDiv = document.getElementById('teacher-lecture-display-text');
-
-    let html = '';
-    let lastIndex = 0;
-
-    
-    const sortedPoints = [...teacherKnowledgePoints].sort((a, b) => a.positions[0] - b.positions[0]);
-
-    sortedPoints.forEach(point => {
-        
-        const relevantPosition = point.positions.find(pos => pos >= lastIndex);
-        if (relevantPosition === undefined) return;
-
-        html += escapeTeacherHtml(content.substring(lastIndex, relevantPosition));
-
-                const isActive = currentPosition >= relevantPosition &&
-                        currentPosition <= relevantPosition + point.keyword.length;
-
-        
-        const highlightClass = isActive ? 'knowledge-keyword active' : 'knowledge-keyword';
-        html += `<span class="${highlightClass}" data-node-id="${point.nodeId}">
-                  ${point.keyword}
-                </span>`;
-
-        lastIndex = relevantPosition + point.keyword.length;
-    });
-
-    
-    if (lastIndex < content.length) {
-        html += escapeTeacherHtml(content.substring(lastIndex));
-    }
-
-    displayDiv.innerHTML = html;
+    renderTeacherLectureText(displayDiv, content || '');
 }
 
 // 娓叉煋鏁欏笀绔儴鍒嗗唴瀹癸紙甯﹂珮浜級
 function renderTeacherPartialContentWithHighlights(partialText, currentPosition, contentOffset) {
     const displayDiv = document.getElementById('teacher-lecture-display-text');
+    renderTeacherLectureText(displayDiv, partialText || '');
+}
 
-    
-    const relativePosition = currentPosition - contentOffset;
-
-    let html = '';
-    let lastIndex = 0;
-
-    teacherKnowledgePoints.forEach(point => {
-        point.positions.forEach(pos => {
-            
-            if (pos >= contentOffset && pos + point.keyword.length <= contentOffset + partialText.length) {
-                const relativePos = pos - contentOffset;
-
-                html += escapeTeacherHtml(partialText.substring(lastIndex, relativePos));
-
-                                const isActive = currentPosition >= pos &&
-                                currentPosition <= pos + point.keyword.length;
-
-                
-                const highlightClass = isActive ? 'knowledge-keyword active' : 'knowledge-keyword';
-                html += `<span class="${highlightClass}" data-node-id="${point.nodeId}">
-                          ${point.keyword}
-                        </span>`;
-
-                lastIndex = relativePos + point.keyword.length;
-            }
-        });
-    });
-
-    
-    if (lastIndex < partialText.length) {
-        html += escapeTeacherHtml(partialText.substring(lastIndex));
+function renderTeacherLectureText(displayDiv, text) {
+    if (!displayDiv || teacherPlaybackState.lastRenderedLectureText === text) {
+        teacherPlaybackState.lastRenderedAt = performance.now();
+        return;
     }
-
-    displayDiv.innerHTML = html;
+    teacherPlaybackState.lastRenderedLectureText = text;
+    teacherPlaybackState.lastRenderedAt = performance.now();
+    setRichContent(displayDiv, text);
 }
 
 function updateTeacherGraphHighlights(currentPosition) {
@@ -4405,6 +4417,7 @@ function displayTeacherGraph(graphData) {
         });
         html += '</div>';
         graphContainer.innerHTML = html;
+        queueLatexRender(graphContainer);
     } else {
         graphContainer.innerHTML = `
             <div class="graph-placeholder">

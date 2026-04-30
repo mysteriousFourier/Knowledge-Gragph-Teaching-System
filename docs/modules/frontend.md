@@ -19,6 +19,8 @@
 | --- | --- |
 | `home.css`, `home.js` | 首页视觉和交互 |
 | `workspace-ambient.css`, `workspace-ambient.js` | 黑色字符波纹背景、呼吸动效、液态玻璃基础视觉 |
+| `latex-renderer.css`, `latex-renderer.js` | KaTeX LaTeX 公式渲染和公式样式 |
+| `markdown-renderer.css`, `markdown-renderer.js` | 课程内容、授课文案、问答和练习题的本地 Markdown 渲染 |
 | `styles.css`, `new-styles.css` | 教师端和通用页面样式 |
 | `student-styles.css` | 学生端布局和题目交互样式 |
 | `teacher.js` | 教师端业务交互、API 调用、图谱视图 |
@@ -89,6 +91,7 @@
 
 - 前端背景使用字符明暗变化表现波纹、扩散和呼吸效果。
 - 教师端和学生端内容区使用液态玻璃边框，避免纯黑纯白大块遮挡背景。
+- 可展示内容支持 Markdown 与 LaTeX 公式，公式格式包括 `$$...$$`、`\[...\]`、`\(...\)` 和 `$...$`。
 - 内容可读性优先于动效表现，表单、题目、文案和图谱区域必须保持足够对比度。
 - 新增面板时应复用现有玻璃层、按钮、状态标签和输入框样式，避免引入新的视觉体系。
 
