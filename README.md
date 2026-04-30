@@ -73,7 +73,7 @@ start.bat
 4. 停止服务：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\stop_unlesspaper.ps1
+powershell -ExecutionPolicy Bypass -File stop.ps1
 ```
 
 ## 页面入口
