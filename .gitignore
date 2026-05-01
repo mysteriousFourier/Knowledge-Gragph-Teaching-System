@@ -102,6 +102,8 @@ backend/vector_index_system/vector_index/
 *.sqlite
 *.sqlite3
 *.db
+!data/seed/
+!data/seed/knowledge_graph.db
 *.db-shm
 *.db-wal
 *.faiss

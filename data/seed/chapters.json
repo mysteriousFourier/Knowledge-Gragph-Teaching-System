@@ -1,0 +1,1867 @@
+{
+  "chapters": {
+    "chapter::chapter6": {
+      "id": "chapter::chapter6",
+      "title": "Chapter 6: Theorems of Natural Selection",
+      "content": "",
+      "graph_data": null,
+      "lecture_content": "## 自然选择的定理\n\n### 课堂导入：从“适者生存”到数学表达\n\n同学们，达尔文说“物竞天择，适者生存”。这句话我们从小听到大，但“适者”到底意味着什么？如果现在让你用一句话定义“适应性”，你会怎么说？\n\n（停顿，等待学生思考）\n\n有人可能会说“适合环境的就是适者”，有人会说“活下来、生得多的就是适者”。这些都对，但如果我们想要精确预测一个种群在自然选择下会怎么变化，这样模糊的描述就不够用了。今天我们要学的，不是达尔文本人提出的理论，而是20世纪的进化生物学家用数学语言重新表述的“自然选择的定理”。这些定理把“适应性”和“演化”变成了可计算、可预测的科学原理。它们就像物理学的牛顿定律，让我们能定量地理解进化过程。\n\n### 核心内容一：费希尔基本定理——变异是进化的燃料\n\n我们先来看第一个定理，是由统计学家和进化生物学家Ronald Fisher提出的，叫作**费希尔基本定理**（Fisher’s fundamental theorem of natural selection）。它的表述十分精炼：\n\n> 一个种群适应性的变化率，等于其适应性方差。\n\n这里有两个关键概念需要澄清。**适应性（fitness）**，在进化生物学里指的是个体生存和繁殖成功的相对能力，它不是一个绝对数值，而是相对于种群中其他个体的比较。比如，一只鸟下了5个蛋并全部养活，另一只只养活2只，那前者的适应性就比后者高。 **方差（variance）**，是统计学概念，这里指种群内个体间适应性的差异程度。\n\n为了让大家直观理解，我们做个思想实验。想象一个班级的数学考试成绩。如果全班每个人都正好考了80分，那么这个班的平均分下一次考试会不会提高？几乎不可能，因为没有任何人可以“被选择”——大家都是同样的表现。但如果这次考试有人60分，有人100分，差异很大，那么我们让成绩好的同学分享学习方法，差的同学努力追赶，下一次平均分就有可能提高。\n\n费希尔定理说的正是这个道理：**没有差异就没有进化**。适应性变异越大，自然选择的作用就越强，种群平均适应性的提升就越快。但这里有一个容易让学生困惑的地方：随着选择进行，有利基因型频率会上升甚至固定下来，种群的适应性方差反而会逐渐减小，选择的效率也会下降。换句话说，**选择本身会消耗它所依赖的变异**。费希尔定理描述的，正是在当前变异水平下，选择能够多快地改进适应性。\n\n（课堂提问）为什么即使环境中存在强烈的自然选择，一个种群也不会无限地变得越来越适应？因为有利基因固定后，方差减小，选择就缺乏继续提高适应性的原材料了。新的变异需要通过突变或重组重新产生。\n\n### 核心内容二：价格方程——将进化拆解为选择与传递\n\n第二个定理给了我们一个更普适的框架，叫做**价格方程**（Price equation）。它把任何性状的进化变化都分解为两部分：\n\n\\[\n\\Delta z = \\text{Cov}(w, z) + \\mathbb{E}(w\\Delta z)\n\\]\n\n这里的 \\(\\Delta z\\) 代表性状平均值在下一代与这一代之间的变化，\\(w\\) 是适应性，\\(z\\) 是性状值。右边第一项 \\(\\text{Cov}(w, z)\\) 是适应性 \\(w\\) 与性状 \\(z\\) 的**协方差**，代表**选择效应**：如果性状值与适应性存在统计相关，那么选择就会改变性状的分布。第二项 \\(\\mathbb{E}(w\\Delta z)\\) 是适应性的加权平均的性状变化量，代表**传递偏差**，也就是在遗传过程中由于突变、重组等原因，子代性状相对于亲代发生的改变。\n\n我们用鸟类喙的例子来理解。假设在一个干旱的年份，大喙的鸟因为能打开坚硬种子，存活率更高（适应性更高）。那么在第一项里，适应性 \\(w\\) 和喙大小 \\(z\\) 之间会有正的协方差：大喙个体留下的后代更多，仅此一项就会使下一代鸟的喙增大。但是，如果繁殖过程中有某种遗传机制导致大喙亲本的后代喙反而变小一些（比如环境影响或发育噪声），这就体现在第二项 \\(\\mathbb{E}(w\\Delta z)\\) 里。所以价格方程告诉我们：**进化变化 = 选择效应 + 传递偏差**。自然选择只是进化的一部分，不是全部。\n\n**关系链路**：费希尔定理其实是价格方程在特定条件下的特例——如果把性状 \\(z\\) 换成本身的适应性，并且假设传递偏差为零，那么价格方程就简化为 \\(\\Delta w = \\text{Var}(w)\\)，也就是费希尔基本定理的形式。这说明费希尔定理描述的是纯粹由选择驱动的适应性变化，而价格方程把选择以外的遗传变化也容纳进来，应用更广。\n\n### 核心内容三：汉密尔顿的亲属选择定理——当利他行为可以进化\n\n为什么工蜂愿意牺牲自己的繁殖机会来保护蜂后？按照个体选择的逻辑，这样的行为应该被淘汰才对，因为不繁殖的个体怎么传递自己的基因呢？W. D. Hamilton 给出了一个精确的答案，我们称为**汉密尔顿规则**（Hamilton’s rule）：\n\n> 当 \\(rB > C\\) 时，利他行为会进化。\n\n其中，\\(r\\) 是行动者与接受者之间的**亲缘关系系数**（例如亲子或全同胞之间 \\(r = 0.5\\)），\\(B\\) 是接受者因利他行为获得的**额外适应性收益**，\\(C\\) 是行动者自身付出的**适应性成本**。工蜂与蜂后的亲缘系数 \\(r\\) 较高（在膜翅目昆虫特殊遗传系统中，姐妹间的 \\(r\\) 可达0.75），即使工蜂自己不繁殖，它通过帮助蜂后产生更多姐妹，其基因依然可以传递下去。\n\n这个定理解释了为什么亲属之间的利他行为在自然界普遍存在。它也是价格方程的扩展应用，因为价格方程可以处理个体适应性依赖于群体中其他个体的情形。\n\n### 课堂互动：应用费希尔定理分析蝴蝶案例\n\n现在我们小组讨论一下这个场景：\n\n“一个岛屿上有两种颜色的蝴蝶：白色和黑色。白色蝴蝶容易被鸟类发现，黑色蝴蝶则更隐蔽。但黑色蝴蝶在交配季节不太受欢迎。”\n\n请每个小组围绕以下问题讨论5分钟：\n1. 哪种颜色适应性更高？为什么？\n2. 如果环境突然变暗（比如火山喷发后），适应性会如何变化？\n3. 按照费希尔定理，种群适应性会如何变化？\n\n（讨论后，请小组代表分享）\n\n可能的分析思路：在明亮环境下，白色蝴蝶被天敌发现的概率高，存活适应性低，而黑色蝴蝶隐蔽，存活适应性高，但交配劣势意味着性选择下的适应性较低。需要权衡两种选择压力。环境变暗后，白色蝴蝶的存活劣势可能减弱或逆转，适应性方差随之变化，费希尔定理预测适应性变化率会随之调整。如果黑白两色适应性差异扩大，方差增大，选择会更有效。\n\n### 常见易错点提醒\n\n1. **费希尔定理不等于“适应性只会增加”**。它说的是在当前基因库下，由于选择的作用，适应性会上升，但环境变化、突变或遗传漂变可能使适应性下降。\n2. **方差为零就不进化**。但现实中变异会由突变重新产生，所以长期进化不会停止。\n3. **价格方程中的协方差不是因果推断**。\\(\\text{Cov}(w,z)\\) 只衡量统计关联，不能直接说明是性状 \\(z\\) 导致了适应性的差异，可能存在混杂因素。\n4. **汉密尔顿规则中的 \\(r\\) 不是任意“关系好”**。它是严格的遗传亲缘系数，不是友好程度。\n\n### 总结与延伸\n\n今天我们学了三个核心定理：\n- **费希尔基本定理**：适应性变化率 = 适应性方差，强调变异是进化的燃料。\n- **价格方程**：\\(\\Delta z = \\text{Cov}(w,z) + \\mathbb{E}(w\\Delta z)\\)，将进化分解为选择效应与传递偏差。\n- **汉密尔顿规则**：\\(rB > C\\)，解释了利他行为在亲属间的进化条件。\n\n它们的逻辑链路是：从最纯粹的自然选择动力（费希尔），到包含遗传细节的一般分解（价格），再到对社会行为的应用（汉密尔顿），一步一步让我们能用数学语言描述和预测进化。\n\n**课后思考**：请用价格方程分析，为什么抗生素耐药性细菌会迅速进化？在你的回答中，明确标出协方差项和传递偏差项分别对应什么生物过程，并思考，如果医院停止使用某种抗生素，该种群的耐药性可能会如何变化？",
+      "exercises": {
+        "id": "ex_chapter_chapter6_1",
+        "question": "如果利他行为的成本 C 增大，汉密尔顿规则要求什么也相应增大？",
+        "options": [
+          "A. r 或 B 需要增大，才能继续满足 $rB > C$。",
+          "B. C 继续增大就会自动满足 $rB > C$。",
+          "C. r 和 B 都可以降低，只要行为更频繁。",
+          "D. 变量不需要变化，规则只比较亲缘关系。"
+        ],
+        "correct_answer": "A",
+        "explanation": "答案依据材料：“Hamilton's rule: altruism can be favored when relatedness-weighted benefit exceeds cost.”。",
+        "source_evidence": [
+          {
+            "index": 3,
+            "id": "block::chapter6_019::5",
+            "label": "chapter6 #5 proposition: The second is the regression...",
+            "type": "proposition",
+            "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+            "source": "chapter6_019.json"
+          }
+        ],
+        "learning_plan": {
+          "subject": {
+            "id": "chapter::chapter6",
+            "name": "Chapter 6: Theorems of Natural Selection",
+            "type": "proposition",
+            "match_score": 1.0
+          },
+          "learner_intent": "practice",
+          "learning_level": "beginner",
+          "task": "practice",
+          "allowed_concepts": [
+            {
+              "id": "block::chapter6_019::5",
+              "name": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "source_index": 3
+            }
+          ],
+          "slots": [
+            {
+              "type": "definition",
+              "coverage": "full",
+              "entities": [
+                {
+                  "id": "block::chapter6_019::5",
+                  "name": "chapter6 #5 proposition: The second is the regression..."
+                }
+              ]
+            }
+          ],
+          "learning_intent_graph": {
+            "nodes": [
+              "chapter6 #5 proposition: The second is the regression..."
+            ],
+            "edges": []
+          },
+          "evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "constraints": [
+            "Use evidence as preferred context, not as a hard refusal condition.",
+            "Do not invent course-specific facts, citations, or graph relations that are not present.",
+            "If evidence is incomplete, answer the supported part and mark uncertainty.",
+            "Keep English source text, formulas, variable names, and technical terms in English.",
+            "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+          ]
+        },
+        "approval_key": "sig_31459f9d2192892b",
+        "approved_at": "2026-05-02T00:03:27.892843"
+      },
+      "exercise_bank": [
+        {
+          "id": "ex_chapter_chapter6_1",
+          "question": "如果利他行为的成本 C 增大，汉密尔顿规则要求什么也相应增大？",
+          "options": [
+            "A. r 或 B 需要增大，才能继续满足 $rB > C$。",
+            "B. C 继续增大就会自动满足 $rB > C$。",
+            "C. r 和 B 都可以降低，只要行为更频繁。",
+            "D. 变量不需要变化，规则只比较亲缘关系。"
+          ],
+          "correct_answer": "A",
+          "explanation": "答案依据材料：“Hamilton's rule: altruism can be favored when relatedness-weighted benefit exceeds cost.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_31459f9d2192892b",
+          "approved_at": "2026-05-02T00:03:27.892843"
+        },
+        {
+          "id": "ex_chapter_chapter6_2",
+          "question": "如果种群中的适应性方差更大，费希尔基本定理意味着什么？",
+          "options": [
+            "A. 定理只描述随机漂变的速度。",
+            "B. 平均适应性上升的潜力更大。",
+            "C. 遗传变异变得无关紧要。",
+            "D. 适应性方差会阻止平均适应性变化。"
+          ],
+          "correct_answer": "B",
+          "explanation": "答案依据材料：“Fisher's theorem relates change in mean fitness to additive genetic variance in fitness.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_4dd504ec0b36abf6",
+          "approved_at": "2026-05-02T00:03:33.580422"
+        },
+        {
+          "id": "ex_chapter_chapter6_5",
+          "question": "Hamilton's rule $rB > C$ 成立时，利他行为为什么可能被选择保留？",
+          "options": [
+            "A. 亲缘收益按 $rB$ 加权后超过个体成本 $C$。",
+            "B. 只要成本 $C$ 存在，利他行为就一定被淘汰。",
+            "C. 亲缘关系 $r$ 与接受者收益 $B$ 都无关紧要。",
+            "D. 规则只描述随机漂变，不涉及选择条件。"
+          ],
+          "correct_answer": "A",
+          "explanation": "答案依据材料：“Hamilton's rule: altruism can be favored when relatedness-weighted benefit exceeds cost.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_3ce917b1fc8cd3d9",
+          "approved_at": "2026-05-02T00:03:47.012976"
+        },
+        {
+          "id": "ex_chapter_chapter6_3",
+          "question": "价格方程把性状的进化变化拆分为哪两类来源？",
+          "options": [
+            "A. 突变率项，以及样本数量修正项。",
+            "B. 随机漂变项，以及环境温度项。",
+            "C. 选择造成的协方差项，以及传递偏差项。",
+            "D. 亲缘系数项，以及群体大小项。"
+          ],
+          "correct_answer": "C",
+          "explanation": "答案依据材料：“The Price equation decomposes evolutionary change into selection and transmission components.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_1585ff9551592cbc",
+          "approved_at": "2026-05-02T00:03:57.077637"
+        },
+        {
+          "id": "ex_chapter_chapter6_4",
+          "question": "为什么没有变异时自然选择难以产生进化改变？",
+          "options": [
+            "A. 选择会直接创造新的遗传差异。",
+            "B. 所有个体会自动产生相同后代。",
+            "C. 适应性差异会被方差完全抵消。",
+            "D. 缺少可被选择区分的性状差异。"
+          ],
+          "correct_answer": "D",
+          "explanation": "答案依据材料：“Selection requires variation; variance summarizes differences among individuals.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_ddaed1b9a4571d28",
+          "approved_at": "2026-05-02T00:04:02.308541"
+        },
+        {
+          "id": "ex_chapter_chapter6_6",
+          "question": "Fisher's fundamental theorem 主要把平均适应性的变化同什么联系起来？",
+          "options": [
+            "A. 与所有个体完全相同的适应性联系起来。",
+            "B. 与适应性的 additive genetic variance 联系起来。",
+            "C. 与适应性的环境方差联系起来。",
+            "D. 与适应性的总遗传方差联系起来。"
+          ],
+          "correct_answer": "B",
+          "explanation": "答案依据材料：“Fisher's theorem relates change in mean fitness to additive genetic variance in fitness.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          }
+        },
+        {
+          "id": "ex_chapter_chapter6_7",
+          "question": "Price equation 对性状变化的分解通常强调哪两类来源？",
+          "options": [
+            "A. selection 会改变配偶或基因型组合的分布。",
+            "B. r 或 B 需要增大，才能继续满足 $rB > C$。",
+            "C. selection covariance 项和 transmission bias 项。",
+            "D. 亲缘收益按 $rB$ 加权后超过个体成本 $C$。"
+          ],
+          "correct_answer": "C",
+          "explanation": "答案依据材料：“The Price equation decomposes evolutionary change into selection and transmission components.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          }
+        },
+        {
+          "id": "ex_chapter_chapter6_8",
+          "question": "Robertson's theorem 中，选择响应通常由哪种关系刻画？",
+          "options": [
+            "A. trait 与章节标题之间的字符串相似度。",
+            "B. fitness 与页面格式之间的排版关系。",
+            "C. offspring count 与文件名之间的关系。",
+            "D. trait 与 fitness 之间的 covariance。"
+          ],
+          "correct_answer": "D",
+          "explanation": "答案依据材料：“Robertson's theorem expresses selection response with covariance between trait and fitness.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          }
+        },
+        {
+          "id": "ex_chapter_chapter6_9",
+          "question": "为什么 variance 是自然选择定理中的关键量？",
+          "options": [
+            "A. 它表示个体差异，选择需要可区分的变异。",
+            "B. 它把所有选择效应都变成随机噪声。",
+            "C. 它保证所有个体没有任何差异。",
+            "D. 它衡量选择强度，而不是个体差异"
+          ],
+          "correct_answer": "A",
+          "explanation": "答案依据材料：“Selection requires variation; variance summarizes differences among individuals.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          }
+        },
+        {
+          "id": "ex_chapter_chapter6_10",
+          "question": "parent-offspring regression 在选择前后为什么可能变化？",
+          "options": [
+            "A. offspring phenotype 与 parent phenotype 永远无关。",
+            "B. selection 会改变配偶或基因型组合的分布。",
+            "C. selection 不会改变任何群体分布。",
+            "D. parent-offspring regression 由公式推导出常数，与选择无关。"
+          ],
+          "correct_answer": "B",
+          "explanation": "答案依据材料：“Parent-offspring regression can change after selection because the population composition changes.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          }
+        }
+      ],
+      "approved_exercise_bank": [
+        {
+          "id": "ex_chapter_chapter6_1",
+          "question": "如果利他行为的成本 C 增大，汉密尔顿规则要求什么也相应增大？",
+          "options": [
+            "A. r 或 B 需要增大，才能继续满足 $rB > C$。",
+            "B. C 继续增大就会自动满足 $rB > C$。",
+            "C. r 和 B 都可以降低，只要行为更频繁。",
+            "D. 变量不需要变化，规则只比较亲缘关系。"
+          ],
+          "correct_answer": "A",
+          "explanation": "答案依据材料：“Hamilton's rule: altruism can be favored when relatedness-weighted benefit exceeds cost.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_31459f9d2192892b",
+          "approved_at": "2026-05-02T00:03:27.892843"
+        },
+        {
+          "id": "ex_chapter_chapter6_2",
+          "question": "如果种群中的适应性方差更大，费希尔基本定理意味着什么？",
+          "options": [
+            "A. 定理只描述随机漂变的速度。",
+            "B. 平均适应性上升的潜力更大。",
+            "C. 遗传变异变得无关紧要。",
+            "D. 适应性方差会阻止平均适应性变化。"
+          ],
+          "correct_answer": "B",
+          "explanation": "答案依据材料：“Fisher's theorem relates change in mean fitness to additive genetic variance in fitness.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_4dd504ec0b36abf6",
+          "approved_at": "2026-05-02T00:03:33.580422"
+        },
+        {
+          "id": "ex_chapter_chapter6_5",
+          "question": "Hamilton's rule $rB > C$ 成立时，利他行为为什么可能被选择保留？",
+          "options": [
+            "A. 亲缘收益按 $rB$ 加权后超过个体成本 $C$。",
+            "B. 只要成本 $C$ 存在，利他行为就一定被淘汰。",
+            "C. 亲缘关系 $r$ 与接受者收益 $B$ 都无关紧要。",
+            "D. 规则只描述随机漂变，不涉及选择条件。"
+          ],
+          "correct_answer": "A",
+          "explanation": "答案依据材料：“Hamilton's rule: altruism can be favored when relatedness-weighted benefit exceeds cost.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_3ce917b1fc8cd3d9",
+          "approved_at": "2026-05-02T00:03:47.012976"
+        },
+        {
+          "id": "ex_chapter_chapter6_3",
+          "question": "价格方程把性状的进化变化拆分为哪两类来源？",
+          "options": [
+            "A. 突变率项，以及样本数量修正项。",
+            "B. 随机漂变项，以及环境温度项。",
+            "C. 选择造成的协方差项，以及传递偏差项。",
+            "D. 亲缘系数项，以及群体大小项。"
+          ],
+          "correct_answer": "C",
+          "explanation": "答案依据材料：“The Price equation decomposes evolutionary change into selection and transmission components.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_1585ff9551592cbc",
+          "approved_at": "2026-05-02T00:03:57.077637"
+        },
+        {
+          "id": "ex_chapter_chapter6_4",
+          "question": "为什么没有变异时自然选择难以产生进化改变？",
+          "options": [
+            "A. 选择会直接创造新的遗传差异。",
+            "B. 所有个体会自动产生相同后代。",
+            "C. 适应性差异会被方差完全抵消。",
+            "D. 缺少可被选择区分的性状差异。"
+          ],
+          "correct_answer": "D",
+          "explanation": "答案依据材料：“Selection requires variation; variance summarizes differences among individuals.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_ddaed1b9a4571d28",
+          "approved_at": "2026-05-02T00:04:02.308541"
+        },
+        {
+          "id": "ex_chapter_chapter6_7",
+          "question": "Price equation 对性状变化的分解通常强调哪两类来源？",
+          "options": [
+            "A. selection 会改变配偶或基因型组合的分布。",
+            "B. r 或 B 需要增大，才能继续满足 $rB > C$。",
+            "C. selection covariance 项和 transmission bias 项。",
+            "D. 亲缘收益按 $rB$ 加权后超过个体成本 $C$。"
+          ],
+          "correct_answer": "C",
+          "explanation": "答案依据材料：“The Price equation decomposes evolutionary change into selection and transmission components.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_683e6155c288c45d",
+          "approved_at": "2026-05-02T00:27:47.907635"
+        },
+        {
+          "id": "ex_chapter_chapter6_10",
+          "question": "parent-offspring regression 在选择前后为什么可能变化？",
+          "options": [
+            "A. offspring phenotype 与 parent phenotype 永远无关。",
+            "B. selection 会改变配偶或基因型组合的分布。",
+            "C. selection 不会改变任何群体分布。",
+            "D. parent-offspring regression 由公式推导出常数，与选择无关。"
+          ],
+          "correct_answer": "B",
+          "explanation": "答案依据材料：“Parent-offspring regression can change after selection because the population composition changes.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_ad21de4ddf90cfce",
+          "approved_at": "2026-05-02T00:47:53.440973"
+        },
+        {
+          "id": "ex_chapter_chapter6_9",
+          "question": "为什么 variance 是自然选择定理中的关键量？",
+          "options": [
+            "A. 它表示个体差异，选择需要可区分的变异。",
+            "B. 它把所有选择效应都变成随机噪声。",
+            "C. 它保证所有个体没有任何差异。",
+            "D. 它衡量选择强度，而不是个体差异"
+          ],
+          "correct_answer": "A",
+          "explanation": "答案依据材料：“Selection requires variation; variance summarizes differences among individuals.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_7614a0358d8ab925",
+          "approved_at": "2026-05-02T00:47:57.166625"
+        },
+        {
+          "id": "ex_chapter_chapter6_8",
+          "question": "Robertson's theorem 中，选择响应通常由哪种关系刻画？",
+          "options": [
+            "A. trait 与章节标题之间的字符串相似度。",
+            "B. fitness 与页面格式之间的排版关系。",
+            "C. offspring count 与文件名之间的关系。",
+            "D. trait 与 fitness 之间的 covariance。"
+          ],
+          "correct_answer": "D",
+          "explanation": "答案依据材料：“Robertson's theorem expresses selection response with covariance between trait and fitness.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_50da989fe466c7ab",
+          "approved_at": "2026-05-02T00:48:00.714902"
+        },
+        {
+          "id": "ex_chapter_chapter6_6",
+          "question": "Fisher's fundamental theorem 主要把平均适应性的变化同什么联系起来？",
+          "options": [
+            "A. 与所有个体完全相同的适应性联系起来。",
+            "B. 与适应性的 additive genetic variance 联系起来。",
+            "C. 与适应性的环境方差联系起来。",
+            "D. 与适应性的总遗传方差联系起来。"
+          ],
+          "correct_answer": "B",
+          "explanation": "答案依据材料：“Fisher's theorem relates change in mean fitness to additive genetic variance in fitness.”。",
+          "source_evidence": [
+            {
+              "index": 3,
+              "id": "block::chapter6_019::5",
+              "label": "chapter6 #5 proposition: The second is the regression...",
+              "type": "proposition",
+              "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+              "source": "chapter6_019.json"
+            }
+          ],
+          "learning_plan": {
+            "subject": {
+              "id": "chapter::chapter6",
+              "name": "Chapter 6: Theorems of Natural Selection",
+              "type": "proposition",
+              "match_score": 1.0
+            },
+            "learner_intent": "practice",
+            "learning_level": "beginner",
+            "task": "practice",
+            "allowed_concepts": [
+              {
+                "id": "block::chapter6_019::5",
+                "name": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "source_index": 3
+              }
+            ],
+            "slots": [
+              {
+                "type": "definition",
+                "coverage": "full",
+                "entities": [
+                  {
+                    "id": "block::chapter6_019::5",
+                    "name": "chapter6 #5 proposition: The second is the regression..."
+                  }
+                ]
+              }
+            ],
+            "learning_intent_graph": {
+              "nodes": [
+                "chapter6 #5 proposition: The second is the regression..."
+              ],
+              "edges": []
+            },
+            "evidence": [
+              {
+                "index": 3,
+                "id": "block::chapter6_019::5",
+                "label": "chapter6 #5 proposition: The second is the regression...",
+                "type": "proposition",
+                "content": "The second is the regression of relative fitness $ w_{i} $ of a parent i on its phenotypic value $ z_{i} $",
+                "source": "chapter6_019.json"
+              }
+            ],
+            "constraints": [
+              "Use evidence as preferred context, not as a hard refusal condition.",
+              "Do not invent course-specific facts, citations, or graph relations that are not present.",
+              "If evidence is incomplete, answer the supported part and mark uncertainty.",
+              "Keep English source text, formulas, variable names, and technical terms in English.",
+              "Hide internal LearningPlan, pipeline, and consistency-check wording from users."
+            ]
+          },
+          "approval_key": "sig_aebc0ffc9d85bd91",
+          "approved_at": "2026-05-02T00:48:11.031601"
+        }
+      ],
+      "exercise_feedback": {
+        "sig_a51a6e0d1c3cbba9::option::A::9f93b64082": {
+          "rating": "down",
+          "scope": "option",
+          "exercise_id": "sig_a51a6e0d1c3cbba9",
+          "question": "材料中关于“自然选择的定理 ### 课堂导入”的核心说法是什么？",
+          "option_key": "A",
+          "option_text": "自然选择的定理 ### 课堂导入：从“适者生存”到数学表达 同学们，达尔文说“物竞天择，适者生存”。这句话我们从小听到大，但“适者”到底意味着什么？如果现在让你用一句话定义“适应性”，你会怎么说？ （停顿，等待学生思考） 有人可能会说“适合...",
+          "parent_feedback_key": "sig_a51a6e0d1c3cbba9",
+          "note": "",
+          "updated_at": "2026-05-01T21:47:02.534502"
+        },
+        "sig_f81e1ad466861447": {
+          "rating": "down",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_1",
+          "question": "What is The second?",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-01T22:35:42.212299"
+        },
+        "sig_b516df5a18d6c730": {
+          "rating": "down",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_1",
+          "question": "What is The second?",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-01T22:35:56.656435"
+        },
+        "sig_f818d1e68e15dec6": {
+          "rating": "down",
+          "scope": "exercise",
+          "exercise_id": "sig_f818d1e68e15dec6",
+          "question": "What is It?",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-01T22:43:35.287103"
+        },
+        "sig_4b52cc48226f588b": {
+          "rating": "down",
+          "scope": "exercise",
+          "exercise_id": "sig_4b52cc48226f588b",
+          "question": "What is the key point about Offspring residual $ e_{z} $?",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-01T22:44:00.277280"
+        },
+        "sig_31459f9d2192892b": {
+          "rating": "up",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_1",
+          "question": "如果利他行为的成本 C 增大，汉密尔顿规则要求什么也相应增大？",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-02T00:03:27.886901"
+        },
+        "sig_4dd504ec0b36abf6": {
+          "rating": "up",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_2",
+          "question": "如果种群中的适应性方差更大，费希尔基本定理意味着什么？",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-02T00:03:33.575064"
+        },
+        "sig_3ce917b1fc8cd3d9": {
+          "rating": "up",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_5",
+          "question": "Hamilton's rule $rB > C$ 成立时，利他行为为什么可能被选择保留？",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-02T00:03:47.007531"
+        },
+        "sig_1585ff9551592cbc": {
+          "rating": "up",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_3",
+          "question": "价格方程把性状的进化变化拆分为哪两类来源？",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-02T00:03:57.072460"
+        },
+        "sig_ddaed1b9a4571d28": {
+          "rating": "up",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_4",
+          "question": "为什么没有变异时自然选择难以产生进化改变？",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-02T00:04:02.303514"
+        },
+        "sig_683e6155c288c45d": {
+          "rating": "up",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_7",
+          "question": "Price equation 对性状变化的分解通常强调哪两类来源？",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-02T00:27:47.901459"
+        },
+        "sig_58cb692bc76fe32e::option::C::72cdce0440": {
+          "rating": "down",
+          "scope": "option",
+          "exercise_id": "ex_chapter_chapter6_6",
+          "question": "Fisher's fundamental theorem 主要把平均适应性的变化同什么联系起来？",
+          "option_key": "C",
+          "option_text": "只与样本数量或章节编号联系起来。",
+          "parent_feedback_key": "sig_58cb692bc76fe32e",
+          "note": "",
+          "updated_at": "2026-05-02T00:38:58.517631"
+        },
+        "sig_60d5e433e9df140a::option::D::8e16b85f28": {
+          "rating": "down",
+          "scope": "option",
+          "exercise_id": "ex_chapter_chapter6_6",
+          "question": "Fisher's fundamental theorem 主要把平均适应性的变化同什么联系起来？",
+          "option_key": "D",
+          "option_text": "与无关的符号替换联系起来。",
+          "parent_feedback_key": "sig_60d5e433e9df140a",
+          "note": "",
+          "updated_at": "2026-05-02T00:39:20.638389"
+        },
+        "sig_3132d82f2ac4a32f::option::D::521ffbb762": {
+          "rating": "down",
+          "scope": "option",
+          "exercise_id": "ex_chapter_chapter6_9",
+          "question": "为什么 variance 是自然选择定理中的关键量？",
+          "option_key": "D",
+          "option_text": "它只表示公式编号发生变化。",
+          "parent_feedback_key": "sig_3132d82f2ac4a32f",
+          "note": "",
+          "updated_at": "2026-05-02T00:39:52.799268"
+        },
+        "sig_ebd73412e2bfa737::option::D::37e71685d5": {
+          "rating": "down",
+          "scope": "option",
+          "exercise_id": "ex_chapter_chapter6_10",
+          "question": "parent-offspring regression 在选择前后为什么可能变化？",
+          "option_key": "D",
+          "option_text": "regression 只由章节标题决定。",
+          "parent_feedback_key": "sig_ebd73412e2bfa737",
+          "note": "",
+          "updated_at": "2026-05-02T00:40:06.818740"
+        },
+        "sig_1537221143339ba2::option::D::7bec83959b": {
+          "rating": "down",
+          "scope": "option",
+          "exercise_id": "ex_chapter_chapter6_6",
+          "question": "Fisher's fundamental theorem 主要把平均适应性的变化同什么联系起来？",
+          "option_key": "D",
+          "option_text": "与适应性的表型方差联系起来。",
+          "parent_feedback_key": "sig_1537221143339ba2",
+          "note": "",
+          "updated_at": "2026-05-02T00:47:09.080999"
+        },
+        "sig_ad21de4ddf90cfce": {
+          "rating": "up",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_10",
+          "question": "parent-offspring regression 在选择前后为什么可能变化？",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-02T00:47:53.434795"
+        },
+        "sig_7614a0358d8ab925": {
+          "rating": "up",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_9",
+          "question": "为什么 variance 是自然选择定理中的关键量？",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-02T00:47:57.161428"
+        },
+        "sig_50da989fe466c7ab": {
+          "rating": "up",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_8",
+          "question": "Robertson's theorem 中，选择响应通常由哪种关系刻画？",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-02T00:48:00.708383"
+        },
+        "sig_aebc0ffc9d85bd91": {
+          "rating": "up",
+          "scope": "exercise",
+          "exercise_id": "ex_chapter_chapter6_6",
+          "question": "Fisher's fundamental theorem 主要把平均适应性的变化同什么联系起来？",
+          "option_key": "",
+          "option_text": "",
+          "parent_feedback_key": "",
+          "note": "",
+          "updated_at": "2026-05-02T00:48:11.026241"
+        }
+      },
+      "created_at": "2026-05-01T21:46:49.312802",
+      "updated_at": "2026-05-02T00:48:11.031607"
+    }
+  }
+}
