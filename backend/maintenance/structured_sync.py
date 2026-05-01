@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -17,7 +18,7 @@ BACKEND_DIR = BASE_DIR.parent
 PROJECT_ROOT = BACKEND_DIR.parent
 VECTOR_SYSTEM_DIR = BACKEND_DIR / "vector_index_system"
 STRUCTURED_DIR = PROJECT_ROOT / "structured"
-DATA_DIR = BACKEND_DIR / "data"
+DATA_DIR = Path(os.getenv("APP_RUNTIME_DIR", str(BACKEND_DIR / "data")))
 MANIFEST_PATH = DATA_DIR / "structured_sync_manifest.json"
 TEACHER_PACKAGE_PATH = DATA_DIR / "teacher_memory_package.json"
 

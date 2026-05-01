@@ -1,10 +1,15 @@
 (function () {
+    document.documentElement.dataset.homeMotionVersion = "12";
+
     const canvas = document.getElementById("matrix-canvas");
     if (!canvas) {
         return;
     }
 
     const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) {
+        return;
+    }
     const glyphRamp = [
         [" ", ".", "`", "."],
         [".", ":", "·", "'"],
@@ -232,19 +237,106 @@
 })();
 
 (function () {
+    const targetSelectors = [
+        ".split-section > .section-copy",
+        ".split-section > .flow-map",
+        ".capability-section > .section-heading",
+        ".capability-card",
+        ".api-section > .section-copy",
+        ".terminal-panel",
+        ".entry-section > .section-heading",
+        ".entry-card"
+    ];
+    let elements = [];
+    let ticking = false;
+
+    function clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    function easeOutCubic(value) {
+        return 1 - Math.pow(1 - value, 3);
+    }
+
+    function updateScrollRise() {
+        ticking = false;
+
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 800;
+        const startLine = viewportHeight * 0.96;
+        const settleLine = viewportHeight * 0.48;
+        const travelSpan = Math.max(180, startLine - settleLine);
+
+        elements.forEach((element, index) => {
+            const rect = element.getBoundingClientRect();
+            const stagger = Math.min(72, (index % 4) * 18);
+            const rawProgress = (startLine - rect.top - stagger) / travelSpan;
+            const progress = easeOutCubic(clamp(rawProgress, 0, 1));
+            const baseOffset = element.classList.contains("capability-card") || element.classList.contains("entry-card")
+                ? 92
+                : 118;
+            const y = (1 - progress) * baseOffset;
+            const opacity = 0.02 + progress * 0.98;
+            const blur = (1 - progress) * 10;
+
+            element.style.setProperty("--scroll-rise-y", `${y.toFixed(2)}px`);
+            element.style.setProperty("--scroll-rise-opacity", opacity.toFixed(3));
+            element.style.setProperty("--scroll-rise-blur", `${blur.toFixed(2)}px`);
+        });
+    }
+
+    function requestUpdate() {
+        if (ticking) {
+            return;
+        }
+        ticking = true;
+        requestAnimationFrame(updateScrollRise);
+    }
+
+    function initScrollRise() {
+        const seen = new Set();
+        elements = [];
+
+        targetSelectors.forEach((selector) => {
+            document.querySelectorAll(selector).forEach((element) => {
+                if (!seen.has(element)) {
+                    seen.add(element);
+                    elements.push(element);
+                }
+            });
+        });
+
+        elements.forEach((element) => {
+            element.classList.add("scroll-rise");
+        });
+
+        document.documentElement.dataset.homeScrollRise = elements.length ? "js" : "empty";
+        window.addEventListener("scroll", requestUpdate, { passive: true });
+        window.addEventListener("resize", requestUpdate, { passive: true });
+        window.setTimeout(requestUpdate, 120);
+        requestUpdate();
+    }
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initScrollRise, { once: true });
+    } else {
+        initScrollRise();
+    }
+})();
+
+(function () {
     const config = window.__APP_CONFIG__ || {};
     const checks = [
         {
             elementId: "status-education",
-            url: `${normalizeBaseUrl(config.educationApiBaseUrl, "http://localhost:8001")}/api/health`
+            url: `${normalizeBaseUrl(config.educationApiBaseUrl, "http://127.0.0.1:8001")}/api/health`
         },
         {
             elementId: "status-maintenance",
-            url: `${normalizeBaseUrl(config.maintenanceApiBaseUrl, "http://localhost:8002")}/api/health`
+            url: `${normalizeBaseUrl(config.maintenanceApiBaseUrl, "http://127.0.0.1:8002")}/api/health`
         },
         {
             elementId: "status-admin",
-            url: `${normalizeBaseUrl(config.backendAdminBaseUrl, "http://localhost:8080")}/admin`
+            url: `${normalizeBaseUrl(config.backendAdminBaseUrl, "http://127.0.0.1:8080")}/admin`
         }
     ];
 

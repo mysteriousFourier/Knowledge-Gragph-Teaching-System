@@ -26,7 +26,13 @@ backend/vector_index_system/knowledge_graph/backend_admin.html
 通过前端服务器访问时可打开：
 
 ```text
-http://localhost:3000/backend/vector_index_system/knowledge_graph/backend_admin.html
+http://127.0.0.1:3000/backend/vector_index_system/knowledge_graph/backend_admin.html
+```
+
+在单端口 FastAPI 模式下也可以直接访问：
+
+```text
+http://127.0.0.1:3000/admin
 ```
 
 更多细节见 [知识图谱与向量后端模块文档](../../docs/modules/knowledge-graph-vector.md)。

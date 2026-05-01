@@ -4,13 +4,27 @@
 
 ## 启动
 
-推荐启动方式：
+本地多端口开发推荐：
 
 ```bat
 start.bat
 ```
 
 它会调用后端编排器，启动完整系统并打开主页。
+
+单端口 FastAPI / Render 本地验证推荐：
+
+```bat
+start_render_local.bat
+```
+
+指定端口：
+
+```bat
+start_render_local.bat 3100
+```
+
+该脚本会设置本地运行时目录，调用 `uvicorn render_app:app`，并自动打开 `http://127.0.0.1:<端口>/`。它不会启动 `8001`、`8002`、`8080` 等额外公开端口。
 
 ## 停止
 
@@ -42,3 +56,4 @@ powershell -ExecutionPolicy Bypass -File scripts\stop_unlesspaper.ps1
 - 不在脚本中写 API Key。
 - 删除或移动文件前要限制目标路径。
 - 新增脚本后更新本文件和根 README。
+- 启动脚本打印的地址应使用 `127.0.0.1`，避免与历史 `localhost` 默认值混用。

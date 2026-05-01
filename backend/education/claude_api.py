@@ -21,6 +21,7 @@ from kg_constraints import (
 
 DEFAULT_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
 DEFAULT_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
+_DEFAULT_TIMEOUT = object()
 
 QA_SYSTEM_PROMPT = """你是一个公式友好的教学问答助手。
 图谱和检索内容是参考上下文，不是拒答规则。用户问公式、定义、推导或概念时，先直接回答。
@@ -40,6 +41,22 @@ def get_deepseek_model(kind: str = "flash") -> str:
     return (os.getenv("DEEPSEEK_FLASH_MODEL") or DEFAULT_DEEPSEEK_FLASH_MODEL).strip() or DEFAULT_DEEPSEEK_FLASH_MODEL
 
 
+def _parse_read_timeout(value: str | None, default: float | None) -> float | None:
+    text = str(value or "").strip().lower()
+    if not text or text == "default":
+        return default
+    if text in {"0", "none", "off", "false"}:
+        return None
+    try:
+        return max(float(text), 1.0)
+    except ValueError:
+        return default
+
+
+def _generation_read_timeout() -> float | None:
+    return _parse_read_timeout(os.getenv("DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS"), None)
+
+
 class DeepSeekAPIClient:
     """DeepSeek chat-completions client for lecture, QA, and exercise generation."""
 
@@ -51,7 +68,12 @@ class DeepSeekAPIClient:
     async def generate_lecture(self, graph_data: Dict, chapter_data: Dict, style: str = "引导式教学") -> str:
         prompt = self._build_lecture_prompt(graph_data, chapter_data, style)
         lecture = expand_formula_references(
-            await self._call_deepseek(prompt, max_tokens=5200, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT),
+            await self._call_deepseek(
+                prompt,
+                max_tokens=5200,
+                system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
+                read_timeout_seconds=_generation_read_timeout(),
+            ),
             expand_labels=True,
         )
         if self._lecture_needs_completion(lecture):
@@ -71,7 +93,12 @@ class DeepSeekAPIClient:
 4. 保留知识图谱/章节证据约束，不要扩展未授权内容。
 """
             lecture = expand_formula_references(
-                await self._call_deepseek(repair_prompt, max_tokens=5200, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT),
+                await self._call_deepseek(
+                    repair_prompt,
+                    max_tokens=5200,
+                    system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
+                    read_timeout_seconds=_generation_read_timeout(),
+                ),
                 expand_labels=True,
             )
         return lecture
@@ -171,9 +198,16 @@ class DeepSeekAPIClient:
             f"Generate {max(1, count)} natural multiple-choice questions for students, similar to NotebookLM or ChatGPT study quizzes.",
             "Use the chapter content first. Use graph evidence only as supporting context; do not turn evidence constraints into question text.",
             "Each question must test one clear concept, formula, variable meaning, relation, or condition from the material.",
+            "Prefer conceptual understanding questions: ask why a condition matters, what a theorem implies, how two quantities relate, or what would change if an assumption changes.",
+            "Do not make the whole quiz definition recall. At least 60% of questions should test reasoning about implications, conditions, or relationships.",
             "Do not ask generic meta-questions such as 'Which statement is directly stated in the material?', 'What is this?', or 'Which option is correct?'.",
+            "Do not use repetitive stems such as 'Which option best explains ...' for every question; vary the wording naturally.",
             "Each question must have exactly four concise options and one correct answer. Options should answer the same type of thing the question asks.",
+            "Keep each option under 14 English words or 36 Chinese characters unless it is a formula.",
+            "Keep the correct option similar in length and style to the three distractors. Do not make the correct option a long source sentence while the distractors are short fragments.",
+            "For concept questions, options should usually be short answer phrases of comparable length, not full paragraphs.",
             "If a question asks for a formula, all four options must be formula-like expressions. If it asks for a definition or relation, do not use unrelated formulas as distractors.",
+            "Do not generate more than one formula-recognition question unless formulas are the explicit focus of the chapter.",
             "When equations are relevant, use the actual LaTeX formula from the source, not only an equation number or placeholder.",
             "Do not reuse the same four options across different questions.",
             "Keep English source wording, formulas, variables, and technical terms in English. Use Chinese only as light explanation when helpful.",
@@ -189,7 +223,12 @@ class DeepSeekAPIClient:
             learning_plan=learning_plan,
             requirements=requirements,
         )
-        response = await self._call_deepseek(prompt, max_tokens=2600, system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT)
+        response = await self._call_deepseek(
+            prompt,
+            max_tokens=4200,
+            system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
+            read_timeout_seconds=_generation_read_timeout(),
+        )
         try:
             payload = json.loads(_strip_json_fence(response))
             if isinstance(payload, list):
@@ -283,6 +322,7 @@ class DeepSeekAPIClient:
         prompt: str,
         max_tokens: int = 2000,
         system_prompt: Optional[str] = None,
+        read_timeout_seconds: object = _DEFAULT_TIMEOUT,
     ) -> str:
         if not self.api_key:
             raise ValueError("未配置 DeepSeek API 密钥，请设置 DEEPSEEK_API_KEY 环境变量")
@@ -301,7 +341,11 @@ class DeepSeekAPIClient:
             "temperature": 0.3,
         }
 
-        timeout = httpx.Timeout(connect=10.0, read=90.0, write=10.0, pool=10.0)
+        if read_timeout_seconds is _DEFAULT_TIMEOUT:
+            read_timeout_value = _parse_read_timeout(os.getenv("DEEPSEEK_READ_TIMEOUT_SECONDS"), 90.0)
+        else:
+            read_timeout_value = read_timeout_seconds
+        timeout = httpx.Timeout(connect=10.0, read=read_timeout_value, write=10.0, pool=10.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
             if response.status_code != 200:
@@ -335,4 +379,12 @@ def _strip_json_fence(text: str) -> str:
         clean = clean.removeprefix("```json").removeprefix("```").strip()
         if clean.endswith("```"):
             clean = clean[:-3].strip()
+    first_obj = clean.find("{")
+    last_obj = clean.rfind("}")
+    first_arr = clean.find("[")
+    last_arr = clean.rfind("]")
+    if first_obj >= 0 and last_obj > first_obj:
+        clean = clean[first_obj:last_obj + 1]
+    elif first_arr >= 0 and last_arr > first_arr:
+        clean = clean[first_arr:last_arr + 1]
     return clean

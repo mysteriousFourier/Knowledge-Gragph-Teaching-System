@@ -34,6 +34,7 @@ from app_config import load_root_env  # noqa: E402
 load_root_env()
 
 from graph_service import GraphService, PRESET_RELATION_TYPES  # noqa: E402
+from backend.maintenance.structured_sync import scan_structured_sources  # noqa: E402
 
 # Import after sys.path setup. These modules keep the existing teacher/student API
 # behavior, while this file only adapts how they are served on Render.
@@ -76,6 +77,38 @@ def _graph_db_path() -> str | None:
 
 def _graph() -> GraphService:
     return GraphService(db_path=_graph_db_path())
+
+
+def _env_flag(name: str, default: bool = True) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _ensure_structured_graph() -> None:
+    if not _env_flag("RENDER_AUTO_SYNC_STRUCTURED", True):
+        return
+
+    graph = _graph()
+    stats = graph.read_graph().get("stats", {})
+    node_count = int(stats.get("node_count") or 0)
+    min_nodes = int(os.getenv("RENDER_AUTO_SYNC_MIN_NODES", "20"))
+    if node_count >= min_nodes:
+        return
+
+    result = scan_structured_sources(force=True)
+    summary = result.get("package_summary") or {}
+    print(
+        "[render] structured graph sync completed: "
+        f"nodes={summary.get('node_count', 'unknown')}, "
+        f"edges={summary.get('edge_count', 'unknown')}"
+    )
+
+
+@app.on_event("startup")
+async def startup_sync_structured_graph() -> None:
+    _ensure_structured_graph()
 
 
 def _graph_nodes(limit: int = 5000) -> list[dict[str, Any]]:
@@ -138,6 +171,28 @@ async def health_check() -> dict[str, Any]:
         "service": "render-single-fastapi",
         "graph_db_path": _graph_db_path() or "default",
     }
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    return Response(status_code=204)
+
+
+def _frontend_file_response(path: Path, media_type: str | None = None) -> FileResponse:
+    return FileResponse(
+        path,
+        media_type=media_type,
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+async def frontend_home() -> FileResponse:
+    index_path = FRONTEND_DIR / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="Frontend home page is missing.")
+    return _frontend_file_response(index_path, "text/html; charset=utf-8")
 
 
 @app.get("/env-config.js", include_in_schema=False)

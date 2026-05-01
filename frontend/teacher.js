@@ -61,18 +61,43 @@ let lectureChapterListRequestToken = 0;
 let chapterListContentRequestToken = 0;
 let chapterCachePromise = null;
 let exerciseReviewChapterListRequestToken = 0;
+let exerciseReviewRequestToken = 0;
 let teacherExerciseReviewBank = [];
 
 // ==================== API閰嶇疆 ====================
+
+function normalizeChapterTitleText(value) {
+    return String(value || '').trim().replace(/^(chapter[_:]+)+/i, '').trim();
+}
+
+function canonicalChapterId(value, title) {
+    const candidates = [value, title];
+    for (let i = 0; i < candidates.length; i++) {
+        const raw = normalizeChapterTitleText(candidates[i]);
+        if (!raw) continue;
+        const numbered = raw.match(/\bchapter\s*0*(\d+)\b/i) || raw.match(/^chapter0*(\d+)$/i);
+        if (numbered) return 'chapter::chapter' + Number(numbered[1]);
+        const slug = raw.replace(/[^\w\u4e00-\u9fff]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase();
+        if (slug) return 'chapter::' + slug.substring(0, 80);
+    }
+    return '';
+}
+
+function normalizeChapterRecord(chapter, source) {
+    if (!chapter) return null;
+    const title = String(chapter.title || normalizeChapterTitleText(chapter.id) || '').trim();
+    const id = canonicalChapterId(chapter.id, title) || chapter.id;
+    return Object.assign({}, chapter, { id: id, title: title || id, source: source || chapter.source || '' });
+}
 
 function normalizeBaseUrl(value, fallback) {
     return (value || fallback).replace(/\/+$/, '');
 }
 
 const APP_CONFIG = window.__APP_CONFIG__ || {};
-const EDUCATION_API_ROOT = normalizeBaseUrl(APP_CONFIG.educationApiBaseUrl, 'http://localhost:8001');
-const MAINTENANCE_API_ROOT = normalizeBaseUrl(APP_CONFIG.maintenanceApiBaseUrl, 'http://localhost:8002');
-const BACKEND_ADMIN_ROOT = normalizeBaseUrl(APP_CONFIG.backendAdminBaseUrl, 'http://localhost:8080');
+const EDUCATION_API_ROOT = normalizeBaseUrl(APP_CONFIG.educationApiBaseUrl, 'http://127.0.0.1:8001');
+const MAINTENANCE_API_ROOT = normalizeBaseUrl(APP_CONFIG.maintenanceApiBaseUrl, 'http://127.0.0.1:8002');
+const BACKEND_ADMIN_ROOT = normalizeBaseUrl(APP_CONFIG.backendAdminBaseUrl, 'http://127.0.0.1:8080');
 const API_BASE_URL = `${EDUCATION_API_ROOT}/api/education`;
 const MAINTENANCE_API_URL = `${MAINTENANCE_API_ROOT}/api/maintenance`;
 const EMBEDDED_GRAPH_ENABLED = false;
@@ -733,14 +758,21 @@ function switchMode(mode) {
 
 function appendExerciseReviewChapterOption(select, chapter, source) {
     if (!select || !chapter || !chapter.id) return;
-    const title = chapter.title || chapter.id;
+    const normalizedChapter = normalizeChapterRecord(chapter, source);
+    const title = normalizedChapter.title || normalizedChapter.id;
     for (let i = 0; i < select.options.length; i++) {
-        if (select.options[i].value === chapter.id || select.options[i].textContent === title) {
+        const optionId = canonicalChapterId(select.options[i].value, select.options[i].textContent) || select.options[i].value;
+        if (optionId === normalizedChapter.id || select.options[i].textContent === title) {
+            if (source === 'api' || source === 'cache') {
+                select.options[i].value = normalizedChapter.id;
+                select.options[i].textContent = title;
+                select.options[i].dataset.source = source || '';
+            }
             return;
         }
     }
     const option = document.createElement('option');
-    option.value = chapter.id;
+    option.value = normalizedChapter.id;
     option.textContent = title;
     option.dataset.source = source || '';
     select.appendChild(option);
@@ -797,7 +829,67 @@ function updateExerciseReviewSummary(payload) {
     summary.textContent = `当前候选题 ${bank.length} 题，正式题库 ${approvedCount} 题，整题点赞 ${up}，整题点踩 ${down}，选项点赞 ${optionUp}，选项点踩 ${optionDown}。整题点赞会加入正式题库；整题点踩会从候选题库删除，但反馈会保留用于后续生成。`;
 }
 
+function setExerciseReviewBusy(isBusy, message) {
+    const summary = document.getElementById('exercise-review-summary');
+    const controls = document.querySelectorAll('.exercise-review-toolbar button, #exercise-review-chapter-select');
+    controls.forEach(function(control) {
+        control.disabled = !!isBusy;
+    });
+    if (summary && message) {
+        summary.textContent = message;
+    }
+}
+
+function exerciseReviewErrorMessage(error, fallback) {
+    if (!error) return fallback;
+    if (typeof error === 'string') return error;
+    return error.message || error.detail || error.error || fallback;
+}
+
+function teacherExerciseKey(exercise, index) {
+    if (!exercise) return `exercise_${index}`;
+    return String(
+        exercise.feedback_key ||
+        exercise.approval_key ||
+        exercise.id ||
+        `${index}:${exercise.question || ''}`
+    );
+}
+
+function findTeacherExerciseIndexByKey(exerciseKey) {
+    const key = String(exerciseKey || '');
+    return teacherExerciseReviewBank.findIndex(function(exercise, index) {
+        return teacherExerciseKey(exercise, index) === key;
+    });
+}
+
+function removeTeacherExerciseCard(exerciseKey, payload) {
+    const container = document.getElementById('teacher-exercise-bank');
+    teacherExerciseReviewBank = normalizeTeacherExerciseBank(payload);
+    updateExerciseReviewSummary(payload || {});
+    if (!container) return;
+    const cards = Array.from(container.querySelectorAll('.exercise-review-card'));
+    const target = cards.find(function(card) {
+        return card.dataset.exerciseKey === String(exerciseKey || '');
+    });
+    if (target) {
+        target.remove();
+    } else {
+        renderTeacherExerciseBank(payload);
+        return;
+    }
+    const remainingCards = Array.from(container.querySelectorAll('.exercise-review-card'));
+    remainingCards.forEach(function(card, index) {
+        const label = card.querySelector('.exercise-review-index');
+        if (label) label.textContent = `第 ${index + 1} 题`;
+    });
+    if (!remainingCards.length) {
+        container.innerHTML = '<p class="placeholder">当前章节还没有可用题目。</p>';
+    }
+}
+
 async function loadTeacherExerciseBank(refresh) {
+    const requestToken = ++exerciseReviewRequestToken;
     const select = document.getElementById('exercise-review-chapter-select');
     const container = document.getElementById('teacher-exercise-bank');
     const chapterId = select ? select.value : '';
@@ -809,20 +901,38 @@ async function loadTeacherExerciseBank(refresh) {
     if (container) {
         container.innerHTML = '<p class="loading">正在加载题库...</p>';
     }
+    setExerciseReviewBusy(true, refresh ? '正在生成并加载题库，请等待结果显示。' : '正在加载题库，请等待结果显示。');
     try {
         const endpoint = `/teacher/exercise-bank?chapter_id=${encodeURIComponent(chapterId)}${refresh ? '&refresh=true' : ''}`;
         const data = await callAPI(endpoint, 'GET');
+        if (requestToken !== exerciseReviewRequestToken) return;
         if (!data.success) throw new Error(data.error || data.detail || '加载题库失败');
-        renderTeacherExerciseBank(data);
-        showToast(data.cached ? '已加载题库' : '题库已更新', 'success');
+        const bank = normalizeTeacherExerciseBank(data);
+        if (!bank.length) {
+            throw new Error(data.warning || data.detail || '后端返回成功，但没有返回可显示的题目。');
+        }
+        const renderedCount = renderTeacherExerciseBank(data);
+        if (!renderedCount) {
+            throw new Error('题库返回后未能渲染，请检查题目格式。');
+        }
+        showToast(data.cached ? `已加载 ${renderedCount} 道题` : `题库已更新，共 ${renderedCount} 道题`, data.warning ? 'warning' : 'success');
     } catch (error) {
+        if (requestToken !== exerciseReviewRequestToken) return;
         console.error('加载教师题库失败:', error);
-        if (container) container.innerHTML = '<p class="placeholder">题库加载失败，请检查后端是否已重启。</p>';
+        const message = exerciseReviewErrorMessage(error, '题库加载失败，请检查后端是否已重启。');
+        if (container) container.innerHTML = `<p class="placeholder">${escapeHtml(message)}</p>`;
+        const summary = document.getElementById('exercise-review-summary');
+        if (summary) summary.textContent = `题库加载失败：${message}`;
         showToast('题库加载失败', 'error');
+    } finally {
+        if (requestToken === exerciseReviewRequestToken) {
+            setExerciseReviewBusy(false);
+        }
     }
 }
 
 async function regenerateTeacherExerciseBank() {
+    const requestToken = ++exerciseReviewRequestToken;
     const select = document.getElementById('exercise-review-chapter-select');
     const container = document.getElementById('teacher-exercise-bank');
     const chapterId = select ? select.value : '';
@@ -831,84 +941,175 @@ async function regenerateTeacherExerciseBank() {
         return;
     }
     if (container) container.innerHTML = '<p class="loading">正在继续生成题库...</p>';
+    setExerciseReviewBusy(true, '正在继续生成题库，请等待题目显示。');
     try {
         const data = await callAPI('/teacher/regenerate-exercises', 'POST', {
             chapter_id: chapterId,
             count: 5,
             force_regenerate: true
         });
+        if (requestToken !== exerciseReviewRequestToken) return;
         if (!data.success) throw new Error(data.error || data.detail || '继续生成失败');
-        renderTeacherExerciseBank(data);
-        showToast('已继续生成题库，点赞题目已保留，点踩题目已删除', 'success');
+        const bank = normalizeTeacherExerciseBank(data);
+        if (!bank.length) {
+            throw new Error(data.warning || data.detail || '后端返回成功，但没有生成可显示的题目。');
+        }
+        const renderedCount = renderTeacherExerciseBank(data);
+        if (!renderedCount) {
+            throw new Error('题库返回后未能渲染，请检查题目格式。');
+        }
+        if (data.added_count === 0) {
+            showToast(data.warning || `暂无新增题目，当前共 ${renderedCount} 道题`, 'warning');
+        } else if (Number.isFinite(Number(data.added_count))) {
+            showToast(`已新增 ${data.added_count} 道题，当前共 ${renderedCount} 道题`, data.warning ? 'warning' : 'success');
+        } else {
+            showToast(`已继续生成题库，共 ${renderedCount} 道题`, data.warning ? 'warning' : 'success');
+        }
     } catch (error) {
+        if (requestToken !== exerciseReviewRequestToken) return;
         console.error('继续生成教师题库失败:', error);
-        if (container) container.innerHTML = '<p class="placeholder">继续生成失败，请稍后再试。</p>';
+        const message = exerciseReviewErrorMessage(error, '继续生成失败，请稍后再试。');
+        if (container) container.innerHTML = `<p class="placeholder">${escapeHtml(message)}</p>`;
+        const summary = document.getElementById('exercise-review-summary');
+        if (summary) summary.textContent = `继续生成失败：${message}`;
         showToast('继续生成题库失败', 'error');
+    } finally {
+        if (requestToken === exerciseReviewRequestToken) {
+            setExerciseReviewBusy(false);
+        }
     }
 }
 
 function renderTeacherExerciseBank(payload) {
     const container = document.getElementById('teacher-exercise-bank');
-    if (!container) return;
+    if (!container) return 0;
     const bank = normalizeTeacherExerciseBank(payload);
     teacherExerciseReviewBank = bank;
     updateExerciseReviewSummary(payload || {});
 
     if (!bank.length) {
         container.innerHTML = '<p class="placeholder">当前章节还没有可用题目。</p>';
-        return;
+        return 0;
     }
 
-    container.innerHTML = bank.map(function(exercise, index) {
+    function setRichContent(element, value, inline) {
+        try {
+            element.innerHTML = inline ? renderRichInline(value || '') : renderRichText(value || '');
+        } catch (error) {
+            console.warn('题库富文本渲染失败，已降级为纯文本:', error);
+            element.textContent = String(value || '');
+        }
+    }
+
+    function makeVoteButton(label, active, danger, onClick, title) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `btn btn-small exercise-review-vote${active ? ' active' : ''}${danger ? ' danger' : ''}`;
+        button.textContent = label;
+        if (title) button.title = title;
+        button.onclick = onClick;
+        return button;
+    }
+
+    const fragment = document.createDocumentFragment();
+    bank.forEach(function(exercise, index) {
         const rating = String(exercise.teacher_rating || '').toLowerCase();
         const correctAnswer = String(exercise.correct_answer || exercise.answer || '').trim().toUpperCase();
         const options = Array.isArray(exercise.options) ? exercise.options : [];
-        const optionsHtml = options.map(function(option, optionIndex) {
+        const exerciseKey = teacherExerciseKey(exercise, index);
+
+        const article = document.createElement('article');
+        article.className = `exercise-review-card${rating ? ` rated-${rating}` : ''}`;
+        article.dataset.exerciseKey = exerciseKey;
+
+        const header = document.createElement('div');
+        header.className = 'exercise-review-card-header';
+        const indexLabel = document.createElement('span');
+        indexLabel.className = 'exercise-review-index';
+        indexLabel.textContent = `第 ${index + 1} 题`;
+        const ratingLabel = document.createElement('span');
+        ratingLabel.className = 'exercise-review-rating';
+        ratingLabel.textContent = rating === 'up' ? '已点赞' : (rating === 'down' ? '已点踩' : '未评价');
+        header.appendChild(indexLabel);
+        header.appendChild(ratingLabel);
+        article.appendChild(header);
+
+        const question = document.createElement('div');
+        question.className = 'exercise-review-question markdown-body';
+        setRichContent(question, exercise.question || '题目为空', false);
+        article.appendChild(question);
+
+        const optionList = document.createElement('ol');
+        optionList.className = 'exercise-review-options';
+        options.forEach(function(option, optionIndex) {
             const optionText = String(option || '');
             const optionKey = optionText.match(/^\s*([A-D])[\.\)]\s*/i);
             const answerKey = optionKey ? optionKey[1].toUpperCase() : String.fromCharCode(65 + optionIndex);
             const feedback = (exercise.option_feedback && exercise.option_feedback[answerKey]) || {};
             const optionRating = String(feedback.rating || '').toLowerCase();
-            const correctClass = correctAnswer && answerKey === correctAnswer ? ' correct' : '';
-            return `
-                <li class="exercise-review-option${correctClass} ${optionRating ? `rated-${optionRating}` : ''}">
-                    <div class="exercise-review-option-text markdown-inline latex-auto">${renderRichInline(optionText)}</div>
-                    <div class="exercise-review-option-actions">
-                        <button class="btn btn-small exercise-review-vote ${optionRating === 'up' ? 'active' : ''}" onclick="rateTeacherOption(${index}, '${answerKey}', 'up')">好选项</button>
-                        <button class="btn btn-small exercise-review-vote ${optionRating === 'down' ? 'active danger' : ''}" onclick="rateTeacherOption(${index}, '${answerKey}', 'down')">坏选项</button>
-                    </div>
-                </li>
-            `;
-        }).join('');
-        const ratingText = rating === 'up' ? '已点赞' : (rating === 'down' ? '已点踩' : '未评价');
-        return `
-            <article class="exercise-review-card ${rating ? `rated-${rating}` : ''}">
-                <div class="exercise-review-card-header">
-                    <span class="exercise-review-index">第 ${index + 1} 题</span>
-                    <span class="exercise-review-rating">${ratingText}</span>
-                </div>
-                <div class="exercise-review-question markdown-body">${renderRichText(exercise.question || '题目为空')}</div>
-                <ol class="exercise-review-options">${optionsHtml}</ol>
-                <div class="exercise-review-answer">正确答案：${escapeHtml(correctAnswer || '未标注')}</div>
-                ${exercise.explanation ? `<div class="exercise-review-explanation markdown-body">${renderRichText(exercise.explanation)}</div>` : ''}
-                <div class="exercise-review-actions">
-                    <button class="btn btn-small exercise-review-vote ${rating === 'up' ? 'active' : ''}" onclick="rateTeacherExercise(${index}, 'up')">点赞</button>
-                    <button class="btn btn-small exercise-review-vote ${rating === 'down' ? 'active danger' : ''}" onclick="rateTeacherExercise(${index}, 'down')">点踩</button>
-                </div>
-            </article>
-        `;
-    }).join('');
+            const li = document.createElement('li');
+            li.className = `exercise-review-option${correctAnswer && answerKey === correctAnswer ? ' correct' : ''}${optionRating ? ` rated-${optionRating}` : ''}`;
+
+            const optionContent = document.createElement('div');
+            optionContent.className = 'exercise-review-option-text markdown-inline latex-auto';
+            setRichContent(optionContent, optionText, true);
+            li.appendChild(optionContent);
+
+            const optionActions = document.createElement('div');
+            optionActions.className = 'exercise-review-option-actions';
+            optionActions.appendChild(makeVoteButton('好选项', optionRating === 'up', false, function() {
+                rateTeacherOptionByKey(exerciseKey, answerKey, 'up');
+            }, '只标记这个选项质量好；不会把整题加入正式题库。'));
+            optionActions.appendChild(makeVoteButton('坏选项', optionRating === 'down', optionRating === 'down', function() {
+                rateTeacherOptionByKey(exerciseKey, answerKey, 'down');
+            }, '只记录这个选项不好；不会把题干、正确答案或其它选项当作负面约束。'));
+            li.appendChild(optionActions);
+            optionList.appendChild(li);
+        });
+        article.appendChild(optionList);
+
+        const answer = document.createElement('div');
+        answer.className = 'exercise-review-answer';
+        answer.textContent = `正确答案：${correctAnswer || '未标注'}`;
+        article.appendChild(answer);
+
+        if (exercise.explanation) {
+            const explanation = document.createElement('div');
+            explanation.className = 'exercise-review-explanation markdown-body';
+            setRichContent(explanation, exercise.explanation, false);
+            article.appendChild(explanation);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'exercise-review-actions';
+        actions.appendChild(makeVoteButton('点赞', rating === 'up', false, function() {
+            rateTeacherExerciseByKey(exerciseKey, 'up');
+        }, '整题满意，加入正式题库。'));
+        actions.appendChild(makeVoteButton('点踩', rating === 'down', rating === 'down', function() {
+            rateTeacherExerciseByKey(exerciseKey, 'down');
+        }, '整题不满意，从候选题库删除，并保留反馈。'));
+        article.appendChild(actions);
+        fragment.appendChild(article);
+    });
+    container.replaceChildren(fragment);
     queueLatexRender(container);
     if (typeof window.renderLatexIn === 'function') {
         setTimeout(function() {
             window.renderLatexIn(container);
         }, 30);
     }
+    return bank.length;
 }
 
 async function rateTeacherExercise(index, rating) {
+    const exercise = teacherExerciseReviewBank[index];
+    return rateTeacherExerciseByKey(teacherExerciseKey(exercise, index), rating);
+}
+
+async function rateTeacherExerciseByKey(exerciseKey, rating) {
     const select = document.getElementById('exercise-review-chapter-select');
     const chapterId = select ? select.value : '';
+    const index = findTeacherExerciseIndexByKey(exerciseKey);
     const exercise = teacherExerciseReviewBank[index];
     if (!chapterId || !exercise) {
         showToast('题目状态已过期，请重新加载题库', 'warning');
@@ -927,6 +1128,11 @@ async function rateTeacherExercise(index, rating) {
             correct_answer: exercise.correct_answer || exercise.answer || ''
         });
         if (!data.success) throw new Error(data.error || data.detail || '保存反馈失败');
+        if (nextRating === 'down') {
+            removeTeacherExerciseCard(exerciseKey, data);
+            showToast('题目已点踩并从候选题库删除', 'success');
+            return;
+        }
         renderTeacherExerciseBank(data);
         showToast(nextRating === 'clear' ? '已取消评价' : '题目反馈已保存', 'success');
     } catch (error) {
@@ -936,8 +1142,14 @@ async function rateTeacherExercise(index, rating) {
 }
 
 async function rateTeacherOption(index, optionKey, rating) {
+    const exercise = teacherExerciseReviewBank[index];
+    return rateTeacherOptionByKey(teacherExerciseKey(exercise, index), optionKey, rating);
+}
+
+async function rateTeacherOptionByKey(exerciseKey, optionKey, rating) {
     const select = document.getElementById('exercise-review-chapter-select');
     const chapterId = select ? select.value : '';
+    const index = findTeacherExerciseIndexByKey(exerciseKey);
     const exercise = teacherExerciseReviewBank[index];
     if (!chapterId || !exercise) {
         showToast('题目状态已过期，请重新加载题库', 'warning');
@@ -953,8 +1165,10 @@ async function rateTeacherOption(index, optionKey, rating) {
         const currentKey = match ? match[1].toUpperCase() : String.fromCharCode(65 + optionIndex);
         return currentKey === key;
     });
+    const regenerateOptionNow = nextRating === 'down' && window.confirm('只重写这个选项？\n\n确定：保存坏选项反馈，并立即生成替换选项。\n取消：只保存坏选项反馈，不改当前题目。');
+    const endpoint = regenerateOptionNow ? '/teacher/regenerate-option' : '/teacher/exercise-feedback';
     try {
-        const data = await callAPI('/teacher/exercise-feedback', 'POST', {
+        const data = await callAPI(endpoint, 'POST', {
             chapter_id: chapterId,
             exercise_id: exercise.feedback_key || exercise.id || `exercise_${index + 1}`,
             feedback_key: exercise.feedback_key || '',
@@ -969,7 +1183,21 @@ async function rateTeacherOption(index, optionKey, rating) {
         });
         if (!data.success) throw new Error(data.error || data.detail || '保存选项反馈失败');
         renderTeacherExerciseBank(data);
-        showToast(nextRating === 'clear' ? '已取消选项评价' : '选项反馈已保存', 'success');
+        if (regenerateOptionNow) {
+            showToast(
+                data.replacement_source === 'deepseek'
+                    ? '已重写该选项，其它部分保持不变'
+                    : '已用本地规则重写该选项，其它部分保持不变',
+                data.replacement_source === 'deepseek' ? 'success' : 'warning'
+            );
+            return;
+        }
+        showToast(
+            nextRating === 'clear'
+                ? '已取消选项评价'
+                : '仅该选项反馈已保存；不会影响这道题的其它部分',
+            'success'
+        );
     } catch (error) {
         console.error('保存选项反馈失败:', error);
         showToast('保存选项反馈失败', 'error');
@@ -1146,7 +1374,7 @@ async function uploadAndImportGraphML(file, chapterTitle) {
         // Set current chapter
         var titleInput = document.getElementById('chapter-title');
         var cTitle = titleInput ? titleInput.value.trim() : file.name.replace(/\.[^/.]+$/, '');
-        if (cTitle) currentChapter = { id: 'chapter_' + cTitle, title: cTitle };
+        if (cTitle) currentChapter = { id: canonicalChapterId('', cTitle) || ('chapter_' + cTitle), title: cTitle };
 
         // Clear file input only
         document.getElementById('graphml-file-input').value = '';
@@ -2107,7 +2335,7 @@ function getLocalChapterEntries() {
     var entries = [];
     var seen = {};
     function pushEntry(title) {
-        var normalizedTitle = String(title || '').trim();
+        var normalizedTitle = normalizeChapterTitleText(title);
         if (!normalizedTitle || seen[normalizedTitle]) return;
         seen[normalizedTitle] = true;
         entries.push({
@@ -2246,7 +2474,7 @@ async function loadSavedChapter() {
             const stored = JSON.parse(localStorage.getItem(chapterId) || '{}');
             if (stored.title) {
                 currentChapter = {
-                    id: chapterId,
+                    id: canonicalChapterId(chapterId, stored.title) || chapterId,
                     title: stored.title,
                     content: stored.lecture || ''
                 };
@@ -2277,7 +2505,7 @@ async function loadSavedChapter() {
     try {
         const response = await callAPI(`/get-chapter?chapter_id=${chapterId}`, 'GET');
         if (response.success && response.chapter) {
-            const chapter = response.chapter;
+            const chapter = normalizeChapterRecord(response.chapter, 'api');
 
             currentChapter = {
                 id: chapter.id,
@@ -2315,22 +2543,23 @@ async function loadSavedChapter() {
                 return chapter.id === chapterId;
             });
             if (cachedChapter) {
+                const normalizedCachedChapter = normalizeChapterRecord(cachedChapter, 'cache');
                 currentChapter = {
-                    id: cachedChapter.id,
-                    title: cachedChapter.title,
-                    content: cachedChapter.content || ''
+                    id: normalizedCachedChapter.id,
+                    title: normalizedCachedChapter.title,
+                    content: normalizedCachedChapter.content || ''
                 };
                 const infoPanel = document.getElementById('selected-chapter-info');
-                document.getElementById('chapter-info-title').textContent = cachedChapter.title;
-                document.getElementById('chapter-info-time').textContent = cachedChapter.updated_at || cachedChapter.created_at || '未知';
-                document.getElementById('chapter-info-lecture-status').textContent = cachedChapter.lecture_content ? '已生成' : '未生成';
+                document.getElementById('chapter-info-title').textContent = normalizedCachedChapter.title;
+                document.getElementById('chapter-info-time').textContent = normalizedCachedChapter.updated_at || normalizedCachedChapter.created_at || '未知';
+                document.getElementById('chapter-info-lecture-status').textContent = normalizedCachedChapter.lecture_content ? '已生成' : '未生成';
                 infoPanel.style.display = 'block';
-                document.getElementById('lecture-note').value = cachedChapter.lecture_content || '';
+                document.getElementById('lecture-note').value = normalizedCachedChapter.lecture_content || '';
                 const floatNote = document.getElementById('lecture-note-float');
                 if (floatNote) {
-                    floatNote.value = cachedChapter.lecture_content || '';
+                    floatNote.value = normalizedCachedChapter.lecture_content || '';
                 }
-                showToast(`已从缓存加载章节 "${cachedChapter.title}"`, 'info');
+                showToast(`已从缓存加载章节 "${normalizedCachedChapter.title}"`, 'info');
                 await updateKnowledgeGraph();
                 return;
             }
@@ -2359,7 +2588,7 @@ async function loadChapterData(chapterId) {
     try {
         const response = await callAPI(`/get-chapter?chapter_id=${chapterId}`, 'GET');
         if (response.success && response.chapter) {
-            const chapter = response.chapter;
+            const chapter = normalizeChapterRecord(response.chapter, 'api');
             currentChapter = chapter;
 
             
@@ -2433,11 +2662,11 @@ async function saveLecture() {
         return;
     }
 
-    saveToLocal(chapterTitle, 'lecture', note);
+    const chapterId = canonicalChapterId((currentChapter && currentChapter.id) || '', chapterTitle) || ('chapter_' + chapterTitle);
+    saveToLocal(chapterTitle, 'lecture', note, chapterId);
     showToast('文稿已保存到: ' + chapterTitle, 'success');
     await refreshTeacherChapterSelectors('chapter_' + chapterTitle);
-
-    const chapterId = (currentChapter && currentChapter.id) ? currentChapter.id : 'chapter_' + chapterTitle;
+    currentChapter = { id: chapterId, title: chapterTitle, content: note };
 
     // 保存文稿只更新 lecture_content，不重导图谱，也不覆盖章节正文。
     callAPI('/save-lecture', 'POST', {
@@ -2475,9 +2704,11 @@ async function saveGraph() {
         edges: edges.map(function(e) { return { from: e.from, to: e.to, label: e.label || '' }; })
     };
 
-    saveToLocal(chapterTitle, 'graph', graphSaveData);
+    const chapterId = canonicalChapterId((currentChapter && currentChapter.id) || '', chapterTitle) || ('chapter_' + chapterTitle);
+    saveToLocal(chapterTitle, 'graph', graphSaveData, chapterId);
     showToast('图谱已保存到: ' + chapterTitle, 'success');
     await refreshTeacherChapterSelectors('chapter_' + chapterTitle);
+    currentChapter = { id: chapterId, title: chapterTitle, content: (currentChapter && currentChapter.content) || '' };
 
     // 鍚屾椂灏濊瘯淇濆瓨鍒板悗绔紙涓嶉樆濉烇級
     callAPI('/save-chapter', 'POST', {
@@ -2486,7 +2717,7 @@ async function saveGraph() {
     }).catch(function() {});
 }
 
-function saveToLocal(chapterTitle, type, data) {
+function saveToLocal(chapterTitle, type, data, preferredChapterId) {
     var key = 'chapter_' + chapterTitle;
     var stored = {};
     try { stored = JSON.parse(localStorage.getItem(key) || '{}'); } catch(e) {}
@@ -2501,7 +2732,7 @@ function saveToLocal(chapterTitle, type, data) {
     if (index.indexOf(chapterTitle) === -1) index.push(chapterTitle);
     localStorage.setItem('chapterIndex', JSON.stringify(index));
 
-    currentChapter = { id: key, title: chapterTitle };
+    currentChapter = { id: preferredChapterId || canonicalChapterId(key, chapterTitle) || key, title: chapterTitle };
 }
 
 async function refreshTeacherChapterSelectors(savedChapterId) {
@@ -3117,7 +3348,7 @@ function onLectureChapterChange() {
         try {
             var stored = JSON.parse(localStorage.getItem(val) || '{}');
             if (stored.title) {
-                currentChapter = { id: val, title: stored.title };
+                currentChapter = { id: canonicalChapterId(val, stored.title) || val, title: stored.title };
 
                 
                 if (stored.lecture) {

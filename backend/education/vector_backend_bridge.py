@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 import uuid
@@ -67,13 +68,39 @@ def _chapter_sort_value(chapter: Dict[str, Any]) -> float:
     return _timestamp_value(chapter.get("updated_at") or chapter.get("created_at"))
 
 
+def _strip_chapter_prefix(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^(?:chapter[_:]+)+", "", text, flags=re.I).strip()
+    return text
+
+
+def _chapter_slug(value: Any) -> str:
+    text = _strip_chapter_prefix(value)
+    match = re.search(r"\bchapter\s*0*([0-9]+)\b", text, flags=re.I)
+    if match:
+        return f"chapter{int(match.group(1))}"
+    match = re.fullmatch(r"chapter0*([0-9]+)", text, flags=re.I)
+    if match:
+        return f"chapter{int(match.group(1))}"
+    slug = re.sub(r"[^\w\u4e00-\u9fff]+", "_", text, flags=re.UNICODE).strip("_").lower()
+    return slug[:80]
+
+
+def canonical_chapter_id(chapter_id: Optional[str] = None, title: Optional[str] = None) -> str:
+    for candidate in (chapter_id, title):
+        slug = _chapter_slug(candidate)
+        if slug:
+            return f"chapter::{slug}"
+    return ""
+
+
 def _chapter_identity(chapter: Dict[str, Any]) -> str:
-    raw_id = str(chapter.get("id") or "").strip()
-    lowered_id = raw_id.lower()
-    for prefix in ("chapter::", "chapter_"):
-        if lowered_id.startswith(prefix):
-            return lowered_id[len(prefix) :]
-    return lowered_id or str(chapter.get("title") or "").strip().lower()
+    return canonical_chapter_id(
+        str(chapter.get("id") or ""),
+        str(chapter.get("title") or ""),
+    ).lower()
 
 
 def _text_len(value: Any) -> int:
@@ -498,6 +525,47 @@ class ChapterStore:
     def _save_progress(self, progress: Dict[str, Any]) -> None:
         self._save_json(self.progress_file, progress)
 
+    def _chapter_alias_keys(
+        self,
+        chapters: Dict[str, Dict[str, Any]],
+        chapter_id: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> List[str]:
+        target_id = canonical_chapter_id(chapter_id, title)
+        target_identity = _chapter_identity({"id": target_id or chapter_id or "", "title": title or ""})
+        aliases: List[str] = []
+        for key, chapter in chapters.items():
+            record = dict(chapter or {})
+            record.setdefault("id", key)
+            if key == chapter_id or key == target_id:
+                aliases.append(key)
+                continue
+            if target_identity and _chapter_identity(record) == target_identity:
+                aliases.append(key)
+                continue
+            if title and str(record.get("title") or "").strip() == str(title).strip():
+                aliases.append(key)
+        return aliases
+
+    def _best_chapter_record(self, chapters: Dict[str, Dict[str, Any]], aliases: List[str]) -> Dict[str, Any]:
+        records = [chapters[key] for key in aliases if isinstance(chapters.get(key), dict)]
+        if not records:
+            return {}
+        return dict(max(records, key=_chapter_detail_score))
+
+    def _store_chapter_record(
+        self,
+        chapters: Dict[str, Dict[str, Any]],
+        chapter_id: str,
+        record: Dict[str, Any],
+        aliases: Optional[List[str]] = None,
+    ) -> None:
+        for alias in aliases or []:
+            if alias != chapter_id:
+                chapters.pop(alias, None)
+        record["id"] = chapter_id
+        chapters[chapter_id] = record
+
     def _ensure_backend_chapter_node(self, chapter: Dict[str, Any]) -> None:
         call_backend_tool(
             "add_memory",
@@ -551,19 +619,9 @@ class ChapterStore:
         sync_backend: bool = True,
     ) -> Dict[str, Any]:
         chapters = self._load_chapters()
-        existing_id = None
-        if chapter_id and chapter_id in chapters:
-            existing_id = chapter_id
-        elif chapter_id:
-            existing_id = chapter_id
-        else:
-            for current_id, chapter in chapters.items():
-                if chapter.get("title") == title:
-                    existing_id = current_id
-                    break
-
-        resolved_id = existing_id or f"chapter_{uuid.uuid4().hex[:8]}"
-        record = dict(chapters.get(resolved_id) or {})
+        resolved_id = canonical_chapter_id(chapter_id, title) or chapter_id or f"chapter_{uuid.uuid4().hex[:8]}"
+        aliases = self._chapter_alias_keys(chapters, chapter_id or resolved_id, title)
+        record = self._best_chapter_record(chapters, aliases)
         record.update(
             {
                 "id": resolved_id,
@@ -579,7 +637,7 @@ class ChapterStore:
                 "updated_at": _now(),
             }
         )
-        chapters[resolved_id] = record
+        self._store_chapter_record(chapters, resolved_id, record, aliases)
         self._save_chapters(chapters)
         if sync_backend:
             self._ensure_backend_chapter_node(record)
@@ -594,12 +652,14 @@ class ChapterStore:
         lecture_content: str,
         graph_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        chapter = self.get_chapter(chapter_id) or {
-            "id": chapter_id,
-            "title": chapter_id,
+        resolved_id = canonical_chapter_id(chapter_id) or chapter_id
+        chapter = self.get_chapter(resolved_id) or self.get_chapter(chapter_id) or {
+            "id": resolved_id,
+            "title": _strip_chapter_prefix(chapter_id) or resolved_id,
             "content": "",
             "created_at": _now(),
         }
+        resolved_id = canonical_chapter_id(resolved_id, chapter.get("title")) or resolved_id
         chapter["lecture_content"] = lecture_content
         chapter["updated_at"] = _now()
         if graph_data is not None:
@@ -608,7 +668,7 @@ class ChapterStore:
             title=chapter["title"],
             content=chapter.get("content", ""),
             graph_data=chapter.get("graph_data"),
-            chapter_id=chapter_id,
+            chapter_id=resolved_id,
             sync_backend=False,
         )
         saved["lecture_content"] = lecture_content
@@ -617,7 +677,8 @@ class ChapterStore:
         saved["approved_exercise_bank"] = chapter.get("approved_exercise_bank", saved.get("approved_exercise_bank", []))
         saved["exercise_feedback"] = chapter.get("exercise_feedback", saved.get("exercise_feedback", {}))
         chapters = self._load_chapters()
-        chapters[chapter_id] = saved
+        aliases = self._chapter_alias_keys(chapters, chapter_id, saved.get("title"))
+        self._store_chapter_record(chapters, saved["id"], saved, aliases)
         self._save_chapters(chapters)
         self._ensure_backend_lecture_node(saved)
         return saved
@@ -628,12 +689,14 @@ class ChapterStore:
         chapter_id: str,
         exercises: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        chapter = self.get_chapter(chapter_id) or {
-            "id": chapter_id,
-            "title": chapter_id,
+        resolved_id = canonical_chapter_id(chapter_id) or chapter_id
+        chapter = self.get_chapter(resolved_id) or self.get_chapter(chapter_id) or {
+            "id": resolved_id,
+            "title": _strip_chapter_prefix(chapter_id) or resolved_id,
             "content": "",
             "created_at": _now(),
         }
+        resolved_id = canonical_chapter_id(resolved_id, chapter.get("title")) or resolved_id
         clean_bank = [item for item in exercises if isinstance(item, dict)]
         chapter["exercise_bank"] = clean_bank
         chapter["exercises"] = clean_bank[0] if clean_bank else None
@@ -645,7 +708,7 @@ class ChapterStore:
             title=chapter["title"],
             content=chapter.get("content", ""),
             graph_data=chapter.get("graph_data"),
-            chapter_id=chapter_id,
+            chapter_id=resolved_id,
             sync_backend=False,
         )
         saved["exercise_bank"] = clean_bank
@@ -653,7 +716,8 @@ class ChapterStore:
         saved["approved_exercise_bank"] = chapter.get("approved_exercise_bank", saved.get("approved_exercise_bank", []))
         saved["exercise_feedback"] = chapter.get("exercise_feedback", saved.get("exercise_feedback", {}))
         chapters = self._load_chapters()
-        chapters[chapter_id] = saved
+        aliases = self._chapter_alias_keys(chapters, chapter_id, saved.get("title"))
+        self._store_chapter_record(chapters, saved["id"], saved, aliases)
         self._save_chapters(chapters)
         return saved
 
@@ -666,12 +730,14 @@ class ChapterStore:
         approved: bool,
     ) -> Dict[str, Any]:
         chapters = self._load_chapters()
-        chapter = chapters.get(chapter_id) or self.get_chapter(chapter_id) or {
-            "id": chapter_id,
-            "title": chapter_id,
+        resolved_id = canonical_chapter_id(chapter_id) or chapter_id
+        chapter = chapters.get(resolved_id) or self.get_chapter(resolved_id) or self.get_chapter(chapter_id) or {
+            "id": resolved_id,
+            "title": _strip_chapter_prefix(chapter_id) or resolved_id,
             "content": "",
             "created_at": _now(),
         }
+        resolved_id = canonical_chapter_id(resolved_id, chapter.get("title")) or resolved_id
         approved_bank = chapter.get("approved_exercise_bank")
         if not isinstance(approved_bank, list):
             approved_bank = []
@@ -707,8 +773,9 @@ class ChapterStore:
 
         chapter["approved_exercise_bank"] = approved_bank
         chapter["updated_at"] = _now()
-        chapter["id"] = chapter_id
-        chapters[chapter_id] = chapter
+        chapter["id"] = resolved_id
+        aliases = self._chapter_alias_keys(chapters, chapter_id, chapter.get("title"))
+        self._store_chapter_record(chapters, resolved_id, chapter, aliases)
         self._save_chapters(chapters)
         return chapter
 
@@ -727,12 +794,14 @@ class ChapterStore:
         parent_feedback_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         chapters = self._load_chapters()
-        chapter = chapters.get(chapter_id) or self.get_chapter(chapter_id) or {
-            "id": chapter_id,
-            "title": chapter_id,
+        resolved_id = canonical_chapter_id(chapter_id) or chapter_id
+        chapter = chapters.get(resolved_id) or self.get_chapter(resolved_id) or self.get_chapter(chapter_id) or {
+            "id": resolved_id,
+            "title": _strip_chapter_prefix(chapter_id) or resolved_id,
             "content": "",
             "created_at": _now(),
         }
+        resolved_id = canonical_chapter_id(resolved_id, chapter.get("title")) or resolved_id
         feedback = chapter.get("exercise_feedback")
         if not isinstance(feedback, dict):
             feedback = {}
@@ -754,15 +823,25 @@ class ChapterStore:
             }
 
         chapter["exercise_feedback"] = feedback
-        chapter["id"] = chapter_id
+        chapter["id"] = resolved_id
         chapter["updated_at"] = _now()
-        chapters[chapter_id] = chapter
+        aliases = self._chapter_alias_keys(chapters, chapter_id, chapter.get("title"))
+        self._store_chapter_record(chapters, resolved_id, chapter, aliases)
         self._save_chapters(chapters)
         return chapter
 
     def list_chapters(self) -> List[Dict[str, Any]]:
         chapters = self._load_chapters()
-        merged_chapters = dict(chapters)
+        merged_chapters: Dict[str, Dict[str, Any]] = {}
+        for key, chapter in chapters.items():
+            if not isinstance(chapter, dict):
+                continue
+            record = dict(chapter)
+            resolved_id = canonical_chapter_id(record.get("id") or key, record.get("title")) or str(record.get("id") or key)
+            record["id"] = resolved_id
+            current = merged_chapters.get(resolved_id)
+            if current is None or _chapter_detail_score(record) > _chapter_detail_score(current):
+                merged_chapters[resolved_id] = record
         changed = False
         try:
             graph = build_frontend_graph()
@@ -771,7 +850,7 @@ class ChapterStore:
         for node in graph.get("nodes", []):
             if node.get("type") != "chapter":
                 continue
-            chapter_id = str(node.get("id"))
+            chapter_id = canonical_chapter_id(str(node.get("id")), _node_label(node)) or str(node.get("id"))
             if chapter_id in merged_chapters:
                 continue
             merged_chapters[chapter_id] = {
@@ -788,7 +867,7 @@ class ChapterStore:
                 "updated_at": node.get("updated_at") or _now(),
             }
             changed = True
-        if changed:
+        if changed or set(merged_chapters.keys()) != set(chapters.keys()):
             try:
                 self._save_chapters(merged_chapters)
             except OSError:
@@ -799,22 +878,30 @@ class ChapterStore:
 
     def get_chapter(self, chapter_id: str) -> Optional[Dict[str, Any]]:
         chapters = self._load_chapters()
-        chapter = chapters.get(chapter_id)
+        resolved_id = canonical_chapter_id(chapter_id) or chapter_id
+        chapter = chapters.get(resolved_id) or chapters.get(chapter_id)
         if chapter:
-            identity = _chapter_identity(chapter)
+            identity = _chapter_identity({**chapter, "id": chapter.get("id") or resolved_id})
             aliases = [
                 candidate
-                for candidate in chapters.values()
-                if _chapter_identity(candidate) == identity
+                for key, candidate in chapters.items()
+                if _chapter_identity({**candidate, "id": candidate.get("id") or key}) == identity
             ]
             if aliases:
-                return max(aliases, key=_chapter_detail_score)
-            return chapter
+                record = dict(max(aliases, key=_chapter_detail_score))
+                record["id"] = canonical_chapter_id(record.get("id") or resolved_id, record.get("title")) or resolved_id
+                return record
+            record = dict(chapter)
+            record["id"] = resolved_id
+            return record
 
-        node = call_backend_tool("get_node", {"node_id": chapter_id})
+        node = call_backend_tool("get_node", {"node_id": resolved_id})
+        if not (isinstance(node, dict) and node.get("id")) and resolved_id != chapter_id:
+            node = call_backend_tool("get_node", {"node_id": chapter_id})
         if isinstance(node, dict) and node.get("id"):
+            resolved_id = canonical_chapter_id(str(node.get("id") or resolved_id), _node_label(node)) or resolved_id
             return {
-                "id": chapter_id,
+                "id": resolved_id,
                 "title": _node_label(node),
                 "content": node.get("content") or "",
                 "graph_data": None,
@@ -829,6 +916,7 @@ class ChapterStore:
         return None
 
     def mark_learned(self, chapter_id: str, student_id: str = "student_001") -> Dict[str, Any]:
+        chapter_id = canonical_chapter_id(chapter_id) or chapter_id
         progress = self._load_progress()
         student_progress = progress.setdefault(student_id, {})
         learned = student_progress.setdefault("learned_chapters", {})

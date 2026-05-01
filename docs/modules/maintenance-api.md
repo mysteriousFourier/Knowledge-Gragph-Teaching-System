@@ -2,6 +2,8 @@
 
 维护 API 位于 `backend/maintenance/`，默认端口为 `8002`。它负责知识图谱数据的维护、同步和导出。
 
+在单端口 FastAPI 模式下，维护 API 由 `render_app.py` 挂到同一个 Web Service，前端通过同源 `/api/maintenance/...` 访问，不再需要浏览器跨端口请求 `8002`。
+
 ## 主要职责
 
 - 查询图谱节点。
@@ -38,6 +40,8 @@ Equation ...
 - `structured/table_library.json`。
 
 同步结果应保留原始知识文本和必要元数据。对于课程原文，优先保留英文。
+
+`render_app.py` 会在启动时检查图谱节点数量。若节点数量低于 `RENDER_AUTO_SYNC_MIN_NODES`，且 `RENDER_AUTO_SYNC_STRUCTURED` 未关闭，会自动调用结构化同步，避免新部署环境中图谱为空或只有单个节点。
 
 ## 数据安全
 

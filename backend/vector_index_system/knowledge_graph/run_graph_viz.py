@@ -37,7 +37,7 @@ class GraphVizRunner:
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(2)
-            result = sock.connect_ex(('localhost', port))
+            result = sock.connect_ex(('127.0.0.1', port))
             sock.close()
             return result != 0
         except:
@@ -88,7 +88,7 @@ class GraphVizRunner:
 
     def open_visualization(self):
         """打开可视化页面"""
-        viz_url = f"http://localhost:{self.port}/"
+        viz_url = f"http://127.0.0.1:{self.port}/"
         print(f"Opening browser: {viz_url}")
         webbrowser.open(viz_url)
 
@@ -109,7 +109,7 @@ class GraphVizRunner:
             self.open_visualization()
 
             print("\n=== 知识图谱可视化服务已启动 ===")
-            print("服务地址: http://localhost:" + str(self.port))
+            print("服务地址: http://127.0.0.1:" + str(self.port))
             print()
             print("操作选项:")
             print("1. 重新打开浏览器")

@@ -32,6 +32,17 @@ docs/                         维护者文档
 data/                         数据说明；生成数据不会提交
 ```
 
+## 推荐运行方式
+
+当前仓库保留两种运行方式：
+
+| 场景 | 命令 | 说明 |
+| --- | --- | --- |
+| 本地开发 | `start.bat` | 启动前端、教育 API、维护 API 和图谱后台等多个本地服务 |
+| Render 部署验证 | `start_render_local.bat` | 使用 `render_app.py` 启动单个 FastAPI Web Service，默认只暴露 `3000` |
+
+如果目标是部署到 Render 或演示给他人，建议优先验证单端口版本。
+
 ## 快速开始
 
 1. 复制配置文件：
@@ -62,15 +73,23 @@ CONDA_ROOT=
 CONDA_ENV_NAME=
 ```
 
-3. Windows 下启动：
+3. Windows 下启动本地开发模式：
 
 ```bat
 start.bat
 ```
 
-启动脚本会生成 `frontend/env-config.js`，启动前端、教育 API、维护 API，并自动打开 `http://localhost:3000/`。
+启动脚本会生成 `frontend/env-config.js`，启动前端、教育 API、维护 API，并自动打开 `http://127.0.0.1:3000/`。
 
-4. 停止服务：
+4. 验证单端口版本：
+
+```bat
+start_render_local.bat
+```
+
+该脚本会在 `http://127.0.0.1:3000/` 启动单个 FastAPI 服务，并自动打开主页。它与 Render 部署形态一致。
+
+5. 停止服务：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\stop_unlesspaper.ps1
@@ -78,10 +97,10 @@ powershell -ExecutionPolicy Bypass -File scripts\stop_unlesspaper.ps1
 
 ## 页面入口
 
-- 主页：`http://localhost:3000/`
-- 教师端：`http://localhost:3000/teacher.html`
-- 学生端：`http://localhost:3000/student.html`
-- 图谱后台：`http://localhost:3000/backend/vector_index_system/knowledge_graph/backend_admin.html`
+- 主页：`http://127.0.0.1:3000/`
+- 教师端：`http://127.0.0.1:3000/teacher.html`
+- 学生端：`http://127.0.0.1:3000/student.html`
+- 图谱后台：多端口开发模式可用 `http://127.0.0.1:3000/backend/vector_index_system/knowledge_graph/backend_admin.html`，单端口模式推荐 `http://127.0.0.1:3000/admin`
 
 ## Render 部署
 
@@ -93,7 +112,13 @@ Render 启动命令：
 uvicorn render_app:app --host 0.0.0.0 --port $PORT
 ```
 
-详细说明见 [Render 单服务部署文档](docs/modules/render-deployment.md)。
+详细说明见 [单端口 FastAPI 版本](docs/modules/single-port-fastapi.md) 和 [Render 单服务部署文档](docs/modules/render-deployment.md)。
+
+## 目录名称
+
+项目不依赖根目录必须叫 `unlessPaper`。代码使用相对路径和 `Path(__file__).resolve()` 推导仓库根目录。关闭服务后可以修改本地文件夹名，再从新目录重新运行启动脚本。
+
+需要额外检查 `.env` 中是否写过绝对路径，例如 `PYTHON_EXE`、`CONDA_ROOT`、`APP_RUNTIME_DIR`、`APP_DATA_DIR` 或 `GRAPH_DB_PATH`。
 
 ## 主要工作流
 

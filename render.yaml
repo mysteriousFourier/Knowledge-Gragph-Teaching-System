@@ -30,3 +30,9 @@ services:
         value: deepseek-v4-flash
       - key: DEEPSEEK_PRO_MODEL
         value: deepseek-v4-pro
+      - key: DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS
+        value: "0"
+      - key: RENDER_AUTO_SYNC_STRUCTURED
+        value: "1"
+      - key: RENDER_AUTO_SYNC_MIN_NODES
+        value: "20"

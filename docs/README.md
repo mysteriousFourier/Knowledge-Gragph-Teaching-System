@@ -6,6 +6,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
+| [单端口 FastAPI 版本](modules/single-port-fastapi.md) | 当前 Render 兼容版本的入口、路径、运行方式、持久化和验证清单 |
 | [运行时与配置](modules/runtime-and-configuration.md) | `.env`、端口、启动、停止、运行时生成文件 |
 | [后端编排器](modules/backend-orchestrator.md) | `backend/start_all.py`、服务生命周期、进程记录 |
 | [前端](modules/frontend.md) | 静态页面、Markdown/LaTeX、教师端和学生端交互 |
@@ -33,6 +34,7 @@
 ## 维护规则
 
 - 改动用户可见行为时，同步更新对应模块文档。
+- 改动单端口入口、Render 配置、端口、缓存策略或启动脚本时，同步更新 [单端口 FastAPI 版本](modules/single-port-fastapi.md)。
 - 新增配置项时，同步更新 `.env.example` 和运行时配置文档。
 - 新增外部服务、CDN、复制代码、数据集、论文或模型时，同步更新 `THIRD_PARTY.md`。
 - 不在公开文档中写入 API Key、个人路径、未公开论文文件或本地参考材料。

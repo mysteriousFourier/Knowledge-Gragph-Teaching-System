@@ -6,11 +6,38 @@
 
 | 页面 | 职责 |
 | --- | --- |
-| `index.html` | 项目入口 |
-| `login.html` | 登录 |
+| `index.html` | 项目入口，加载主页字符背景和滚动上浮动效 |
 | `teacher.html` | 教师工作区 |
 | `student.html` | 学生学习区 |
+| `graph.html` | 跳转到图谱后台 |
+| `graph-viewer.html` | 前端图谱查看页 |
 | `backend_admin.html` | 图谱后台页面 |
+
+## 主入口
+
+`index.html` 是公开入口页。它只依赖本地资源：
+
+```html
+<link rel="stylesheet" href="home.css?v=10">
+<script src="env-config.js?v=15"></script>
+<script src="home.js?v=12" defer></script>
+```
+
+主页不再加载远程 KaTeX CDN，避免外部网络阻塞 `home.js`，导致字符背景和滚动上浮动效不执行。主页动效由 `home.js` 和 `home.css` 负责：
+
+- 字符背景通过 `canvas#matrix-canvas` 渲染。
+- 鼠标移动产生局部波纹。
+- 点击产生字符切换和亮度扩散。
+- 页面向下滚动时，内容块按滚动位置上浮出现；回滚时退回。
+
+浏览器调试时可检查：
+
+```js
+document.documentElement.dataset.homeMotionVersion
+document.documentElement.dataset.homeScrollRise
+```
+
+当前正常值应分别是 `"12"` 和 `"js"`。
 
 ## 教师端
 
@@ -23,7 +50,7 @@
 - 知识图谱查看。
 - 侧边问答。
 
-题库反馈的设计原则是：点赞题目保留，点踩题目移除，选项反馈作为后续生成提示词的质量信号。
+题库反馈的设计原则是：点赞题目保留，点踩题目移除，选项反馈只约束对应选项。教师点击坏选项后，可确认只重写该选项，其它题干、正确答案和好选项保持不变。
 
 ## 学生端
 
@@ -69,6 +96,7 @@
 - 扩散范围有上限。
 - 长时间无交互后逐渐回到暗色。
 - 内容区使用半透明玻璃边框，避免纯黑纯白块破坏整体观感。
+- 主入口动效不依赖远程脚本；教师端和学生端动效不能影响主要内容的可读性。
 
 ## 缓存版本
 
@@ -79,3 +107,5 @@
 ```
 
 改动用户可见逻辑后应递增版本号，避免浏览器继续加载旧脚本。
+
+单端口 FastAPI 模式下，`/` 和 `/index.html` 会返回 no-store 响应；但脚本和样式仍建议递增版本号，方便用户和维护者确认实际加载的文件。

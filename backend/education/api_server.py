@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any
 import asyncio
 import hashlib
 import hmac
+import json
 import os
 import re
 import sys
@@ -213,6 +214,11 @@ class TeacherRegenerateExercisesRequest(BaseModel):
     chapter_id: str = Field(..., description="Chapter ID")
     count: int = Field(5, description="Question count")
     force_regenerate: bool = Field(True, description="Force rebuild")
+
+
+class TeacherRegenerateOptionRequest(TeacherExerciseFeedbackRequest):
+    api_key: Optional[str] = Field(None, description="用户提供的DeepSeek API密钥")
+    model: Optional[str] = Field(None, description="DeepSeek 模型名")
 
 
 @app.get("/")
@@ -564,6 +570,13 @@ GENERIC_FACT_LABELS = {
     "they",
     "these",
     "those",
+    "thus",
+    "therefore",
+    "hence",
+    "then",
+    "however",
+    "moreover",
+    "consequently",
     "equation",
     "formula",
     "material",
@@ -581,6 +594,16 @@ GENERIC_FACT_LABELS = {
     "这个",
     "该概念",
 }
+
+
+def _strip_english_discourse_prefix(value: Any) -> str:
+    text = str(value or "").strip()
+    pattern = r"^(?:thus|therefore|hence|then|however|moreover|consequently|in contrast|for example|for instance|to see this point)\b[\s,;:.-]*"
+    previous = None
+    while text and previous != text:
+        previous = text
+        text = re.sub(pattern, "", text, flags=re.I).strip()
+    return text
 
 
 def _strip_markdown_label(value: Any) -> str:
@@ -611,8 +634,13 @@ def _is_teaching_scaffold_text(value: Any) -> bool:
 
 
 def _is_generic_fact_label(value: Any) -> bool:
-    text = _clean_exercise_text(_strip_reference_markers(value), limit=80).strip(" ：:，,。.?!？").lower()
+    text = _strip_english_discourse_prefix(_strip_reference_markers(value))
+    text = _clean_exercise_text(text, limit=80).strip(" ：:，,。.?!？").lower()
     if not text:
+        return True
+    if "chapter_" in text or "chapter::" in text or text.startswith(("block::", "formula::", "equation::")):
+        return True
+    if re.fullmatch(r"(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|\d+(st|nd|rd|th)?|第?[一二三四五六七八九十]+个?)", text):
         return True
     if text in GENERIC_FACT_LABELS:
         return True
@@ -623,6 +651,24 @@ def _is_generic_fact_label(value: Any) -> bool:
     return False
 
 
+def _strip_internal_chapter_marker(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^(?:chapter[_:]+)+", "", text, flags=re.I).strip()
+    text = re.sub(r"^(?:block|formula|equation)::[A-Za-z0-9_.:-]+\s*", "", text, flags=re.I).strip()
+    return text
+
+
+def _clean_focus_text(value: Any, fallback: Any = "") -> str:
+    focus = _strip_english_discourse_prefix(_strip_internal_chapter_marker(value))
+    if _is_generic_fact_label(focus):
+        focus = _strip_english_discourse_prefix(_strip_internal_chapter_marker(fallback))
+    if _is_generic_fact_label(focus):
+        return ""
+    return focus
+
+
 def _is_mostly_english(value: Any) -> bool:
     text = str(value or "")
     latin = len(re.findall(r"[A-Za-z]", text))
@@ -631,7 +677,7 @@ def _is_mostly_english(value: Any) -> bool:
 
 
 def _strip_option_letter(value: Any) -> str:
-    return re.sub(r"^[A-D][\s.、)）:：-]+", "", str(value or "").strip(), flags=re.I)
+    return re.sub(r"^[A-D]\s*[.、)）:：-]+\s*", "", str(value or "").strip(), flags=re.I)
 
 
 def _compact_learning_text(value: Any, *, char_limit: int = 120, word_limit: int = 24) -> str:
@@ -672,15 +718,20 @@ def _exercise_focus(content: Any, fallback: Any = "") -> str:
     text = _strip_markdown_label(content)
     text = _clean_exercise_text(text, limit=160)
     if _is_mostly_english(text):
+        text = _strip_english_discourse_prefix(text)
         lowered = f" {text.lower()} "
         verb_markers = [
             " is ",
             " are ",
+            " can ",
+            " may ",
             " means ",
             " refers to ",
             " computes ",
             " updates ",
             " controls ",
+            " depends on ",
+            " changes ",
             " applies ",
             " uses ",
             " represents ",
@@ -693,22 +744,24 @@ def _exercise_focus(content: Any, fallback: Any = "") -> str:
                 cut = position
                 break
         focus = text[:cut].strip() if cut else " ".join(text.split()[:5])
-        focus = re.sub(r"\b(then|therefore|thus)$", "", focus, flags=re.I).strip()
+        focus = re.sub(r"\b(then|therefore|thus|can|may)$", "", focus, flags=re.I).strip()
         if _is_generic_fact_label(focus):
             focus = str(fallback or "").strip()
-        return _compact_learning_text(focus or fallback or "this concept", char_limit=48, word_limit=7)
+        focus = _clean_focus_text(focus, fallback) or "this concept"
+        return _compact_learning_text(focus, char_limit=48, word_limit=7)
 
     focus = re.split(r"[，。；:：]|是|指|可以|用于|由|通过|控制|可能|能够|需要|包含", text, maxsplit=1)[0].strip()
     if _is_generic_fact_label(focus):
         focus = str(fallback or "").strip()
-    return _compact_learning_text(focus or fallback or "这个知识点", char_limit=28, word_limit=7)
+    focus = _clean_focus_text(focus, fallback) or "这个知识点"
+    return _compact_learning_text(focus, char_limit=28, word_limit=7)
 
 
-def _format_options(options: List[str]) -> List[str]:
+def _format_options(options: List[str], *, char_limit: int = 96, word_limit: int = 20) -> List[str]:
     letters = ["A", "B", "C", "D"]
     compacted: List[str] = []
     for item in options:
-        text = _compact_learning_text(item)
+        text = _compact_learning_text(item, char_limit=char_limit, word_limit=word_limit)
         if not text:
             continue
         compacted.append(_latex_option_text(text))
@@ -717,13 +770,126 @@ def _format_options(options: List[str]) -> List[str]:
     return [f"{letters[index]}. {text}" for index, text in enumerate(compacted)]
 
 
+def _option_length_score(value: Any) -> int:
+    text = _strip_option_letter(value)
+    text = re.sub(r"\$+", "", text)
+    text = re.sub(r"\\[a-zA-Z]+", "", text)
+    text = re.sub(r"[\s{}_^]+", " ", text).strip()
+    if not text:
+        return 0
+    if _is_mostly_english(text):
+        return max(len(text.split()) * 4, len(text) // 2)
+    return len(text)
+
+
+def _correct_option_length_outlier(options: List[str], correct_answer: Any) -> bool:
+    answer = _normalize_correct_answer(correct_answer)
+    if not re.match(r"^[A-D]$", answer):
+        return False
+    index = ord(answer) - 65
+    if index < 0 or index >= len(options):
+        return False
+    stripped = [_strip_option_letter(option) for option in options]
+    if sum(1 for option in stripped if _looks_like_formula_text(option)) >= 3:
+        return False
+    lengths = [_option_length_score(option) for option in stripped]
+    correct_length = lengths[index]
+    other_lengths = [length for pos, length in enumerate(lengths) if pos != index and length > 0]
+    if not other_lengths or correct_length <= 0:
+        return False
+    other_lengths.sort()
+    median_other = other_lengths[len(other_lengths) // 2]
+    max_other = max(other_lengths)
+    return correct_length >= 42 and correct_length > max(max_other + 24, median_other * 1.75)
+
+
+def _balanced_option_candidates(answer: str, candidates: List[str], *, kind: str, limit: int = 3) -> List[str]:
+    answer_length = _option_length_score(answer)
+    unique: List[str] = []
+    seen: set[str] = {answer.lower()}
+    for item in candidates:
+        clean = _compact_learning_text(item, char_limit=96, word_limit=20)
+        if not clean or clean.lower() in seen:
+            continue
+        if kind == "formula" and not _looks_like_formula_text(clean):
+            continue
+        if kind == "formula_part" and not _looks_like_short_math_part(clean):
+            continue
+        if kind not in {"formula", "formula_part"} and _looks_like_formula_text(clean):
+            continue
+        seen.add(clean.lower())
+        unique.append(clean)
+
+    if kind in {"formula", "formula_part"}:
+        return unique[:limit]
+
+    def score(text: str) -> tuple[int, int]:
+        length = _option_length_score(text)
+        return (abs(length - answer_length), length)
+
+    near = [
+        text for text in unique
+        if answer_length <= 0 or _option_length_score(text) >= max(8, int(answer_length * 0.45))
+    ]
+    return sorted(near or unique, key=score)[:limit]
+
+
+def _fallback_balanced_distractors(answer: str, language: str, kind: str) -> List[str]:
+    if kind == "formula":
+        return _formula_distractors(answer) + _generic_wrong_options(language, "formula")
+    if kind == "formula_part":
+        return _generic_wrong_options(language, "formula_part")
+    if language == "en":
+        return [
+            "treats the relation as random change only",
+            "assumes all individuals have identical values",
+            "removes the condition stated in the material",
+            "confuses notation change with biological mechanism",
+            "reverses the direction of the stated relation",
+        ]
+    return [
+        "把该关系理解成完全随机变化",
+        "认为所有个体的相关变量相同",
+        "忽略材料中明确给出的条件",
+        "把符号变化误当作机制变化",
+        "颠倒了材料中说明的因果关系",
+    ]
+
+
+def _complete_option_set(answer: str, selected: List[str], *, language: str, kind: str) -> List[str]:
+    result: List[str] = []
+    seen: set[str] = {answer.lower()}
+    for item in selected + _fallback_balanced_distractors(answer, language, kind):
+        clean = _compact_learning_text(item, char_limit=96, word_limit=20)
+        if not clean or clean.lower() in seen:
+            continue
+        if kind == "formula" and not _looks_like_formula_text(clean):
+            continue
+        if kind == "formula_part" and not _looks_like_short_math_part(clean):
+            continue
+        if kind not in {"formula", "formula_part"} and _is_pure_formula_text(clean):
+            continue
+        seen.add(clean.lower())
+        result.append(clean)
+        if len(result) >= 3:
+            break
+    return result
+
+
 def _latex_option_text(value: Any) -> str:
     text = str(value or "").strip()
     if not text or "$" in text:
         return text
-    if _looks_like_formula_text(_strip_option_letter(text)):
+    stripped = _strip_option_letter(text)
+    if _is_pure_formula_text(stripped):
+        return f"${stripped}$"
+    if _looks_like_formula_text(stripped) and not re.search(r"[\u4e00-\u9fff]", stripped) and len(stripped.split()) <= 10:
         return f"${text}$"
-    return text
+    return re.sub(
+        r"(?<![$A-Za-z])([A-Za-zΑ-Ωα-ω][A-Za-z0-9Α-Ωα-ω_{}^\\]*(?:\s*[+\-*/]\s*[A-Za-z0-9Α-Ωα-ω_{}^\\]+)?\s*(?:[<>]=?|≤|≥|=)\s*[A-Za-z0-9Α-Ωα-ω_{}^\\]+)(?![$A-Za-z])",
+        lambda match: f"${match.group(1).strip()}$",
+        text,
+    )
 
 
 def _extract_formula_candidates(value: Any) -> List[str]:
@@ -734,7 +900,7 @@ def _extract_formula_candidates(value: Any) -> List[str]:
         r"\\\[([\s\S]+?)\\\]",
         r"\\\(([\s\S]+?)\\\)",
         r"\$([^$\n]+?)\$",
-        r"([A-Za-zΑ-Ωα-ω][A-Za-z0-9Α-Ωα-ω_{}^\\]*\s*=\s*[^。；;,\n]+)",
+        r"([A-Za-zΑ-Ωα-ω][A-Za-z0-9Α-Ωα-ω_{}^\\]*\s*=\s*[^。；;\n]+)",
     ]
     formulas: List[str] = []
     seen: set[str] = set()
@@ -829,6 +995,91 @@ def _looks_like_short_math_part(value: Any) -> bool:
     return bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9_{}^\\]*(?:\s*,\s*[A-Za-z][A-Za-z0-9_{}^\\]*){0,3}", text))
 
 
+def _is_pure_formula_text(value: Any) -> bool:
+    text = _strip_reference_markers(value).strip()
+    if not text:
+        return False
+    formulas = _extract_formula_candidates(text)
+    if not formulas:
+        return False
+    remainder = text
+    for formula in formulas:
+        remainder = remainder.replace(formula, " ")
+    remainder = re.sub(r"\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+?\$", " ", remainder)
+    remainder = re.sub(r"[\s,.;:，。；：()（）\[\]【】]+", "", remainder)
+    return len(remainder) < 8
+
+
+def _is_formula_source(source: Dict[str, Any]) -> bool:
+    metadata = source.get("metadata") if isinstance(source.get("metadata"), dict) else {}
+    source_type = str(source.get("type") or source.get("node_type") or metadata.get("type") or "").lower()
+    label = str(source.get("label") or metadata.get("label") or source.get("id") or "")
+    content = str(source.get("content") or "")
+    if source_type in {"formula", "equation", "math"}:
+        return True
+    if re.search(r"^\s*(formula|equation|eq\.|公式)\b|公式\s*\d+", label, flags=re.I):
+        return True
+    return _is_pure_formula_text(content)
+
+
+def _source_quality_score(source: Dict[str, Any]) -> int:
+    content = str(source.get("content") or "")
+    label = str(source.get("label") or "")
+    source_type = str(source.get("type") or "").lower()
+    score = 0
+    if source.get("source") == "chapter":
+        score += 4
+    if source_type in {"chapter_content", "concept", "proposition", "definition", "theorem"}:
+        score += 3
+    if len(content) >= 45:
+        score += 2
+    if re.search(r"\b(is|means|requires|controls|relates|computes|updates|selection|fitness|variance|inheritance)\b|是|需要|控制|用于|选择|适应性|方差|遗传", content, flags=re.I):
+        score += 2
+    if _is_formula_source(source):
+        score -= 8
+    if "chapter_" in f"{label} {content}".lower() or "chapter::" in f"{label} {content}".lower():
+        score -= 5
+    return score
+
+
+def _is_bad_exercise_question(question: Any) -> bool:
+    text = str(question or "").strip()
+    lowered = text.lower()
+    if not text:
+        return True
+    if "chapter_" in lowered or "chapter::" in lowered or "[[" in text or "see_formula" in lowered:
+        return True
+    if re.search(r"\bwhat is the key point about\b|\bwhat does the material say about\s+(thus|therefore|hence|then)\b", lowered):
+        return True
+    if re.search(r"\bwhat\s+(?:is|can|does)\s+(?:is there|the critical insight from equation|\(left\)|\(right\))", lowered):
+        return True
+    if re.search(r"\b(which formula defines|which formula is stated for)\s+(the\s+)?(chapter|first|second|third|fourth|fifth|\d+)", lowered):
+        return True
+    if re.search(r"哪个公式定义了|哪个公式.*(第?[一二三四五六七八九十]+个|chapter)|公式.*chapter_", text, flags=re.I):
+        return True
+    return False
+
+
+def _is_low_quality_exercise(item: Dict[str, Any]) -> bool:
+    question = item.get("question") if isinstance(item, dict) else ""
+    if _is_bad_exercise_question(question):
+        return True
+    options = _normalize_exercise_options((item or {}).get("options"))
+    clean_options = [
+        _compact_learning_text(_strip_option_letter(option), char_limit=130, word_limit=28).lower()
+        for option in options
+    ]
+    clean_options = [option for option in clean_options if option]
+    if len(clean_options) != 4 or len(set(clean_options)) != 4:
+        return True
+    formula_options = sum(1 for option in clean_options if _looks_like_formula_text(option))
+    if formula_options >= 3 and not re.search(r"formula|equation|公式|方程", str(question), flags=re.I):
+        return True
+    if _correct_option_length_outlier(options, (item or {}).get("correct_answer") or (item or {}).get("answer")):
+        return True
+    return False
+
+
 def _derive_question_and_answer(
     raw_content: str,
     *,
@@ -839,7 +1090,8 @@ def _derive_question_and_answer(
 ) -> tuple[str, str, List[str]]:
     formulas = _extract_formula_candidates(raw_content)
     focus = _exercise_focus(raw_content, chapter_title or label)
-    if formulas:
+    formula_source = _is_formula_source({"label": label, "content": raw_content, "type": ""})
+    if formulas and formula_source and not _is_generic_fact_label(focus):
         formula = formulas[(exercise_index - 1) % len(formulas)]
         if language == "en":
             return f"Which formula is stated for {focus}?", formula, _formula_distractors(formula)
@@ -847,6 +1099,7 @@ def _derive_question_and_answer(
 
     text = _clean_exercise_text(raw_content, limit=260)
     if language == "en":
+        text = _strip_english_discourse_prefix(text)
         computes = re.search(r"^(.{2,80}?)\s+computes\s+(.+?)(?:\s+by\s+(.+?))?(?:\.|$)", text, flags=re.I)
         if computes:
             subject = _compact_learning_text(computes.group(1), char_limit=48, word_limit=8)
@@ -879,7 +1132,15 @@ def _derive_question_and_answer(
                 answer = _compact_learning_text(match.group(2), char_limit=120, word_limit=24)
                 if subject and answer:
                     return template.format(subject=subject), answer, []
-        return f"What is the key point about {focus}?", _compact_learning_text(text, char_limit=120, word_limit=24), []
+        can_match = re.search(r"^(.{2,80}?)\s+(?:can|may)\s+(.+?)(?:\.|$)", text, flags=re.I)
+        if can_match:
+            subject = _compact_learning_text(can_match.group(1), char_limit=48, word_limit=8)
+            answer = _compact_learning_text(can_match.group(2), char_limit=96, word_limit=20)
+            if subject and answer and not _is_generic_fact_label(subject):
+                return f"What can {subject} do in this context?", answer, []
+        if _is_generic_fact_label(focus):
+            focus = _compact_learning_text(label or chapter_title, char_limit=48, word_limit=8)
+        return f"What does the material say about {focus}?", _compact_learning_text(text, char_limit=96, word_limit=20), []
 
     through = re.search(r"^(.{1,40}?)通过(.+?)(?:来(.+?))?(?:。|$)", text)
     if through:
@@ -917,6 +1178,8 @@ def _merge_exercise_banks(primary: List[Dict[str, Any]], supplemental: List[Dict
         option_tokens = _exercise_option_token_set(item)
         if not question or not options or key in seen:
             continue
+        if _is_low_quality_exercise(item):
+            continue
         if _has_reused_option_set(option_tokens, seen_option_sets):
             continue
         seen.add(key)
@@ -943,8 +1206,6 @@ def _has_reused_option_set(option_tokens: set[str], seen_option_sets: List[set[s
     for existing in seen_option_sets:
         if option_tokens == existing:
             return True
-        if len(option_tokens & existing) >= 3:
-            return True
     return False
 
 
@@ -956,7 +1217,13 @@ def _split_learning_sentences(value: Any) -> List[str]:
     for part in raw_parts:
         clean = _strip_markdown_label(part)
         clean = _clean_exercise_text(clean, limit=320)
+        if _is_mostly_english(clean):
+            clean = _strip_english_discourse_prefix(clean)
         if len(clean) < 6:
+            continue
+        if _is_mostly_english(clean) and re.match(r"^(is there|what|which|why|how)\b", clean, flags=re.I):
+            continue
+        if re.search(r"\b(?:left|right)\)\s+the\b|\bfigure\s+\d+", clean, flags=re.I):
             continue
         if _is_teaching_scaffold_text(clean):
             continue
@@ -983,6 +1250,8 @@ def _add_exercise_fact(
         return
     combined = f"{clean_question} {clean_answer}"
     if _is_teaching_scaffold_text(clean_question) or _is_teaching_scaffold_text(clean_answer):
+        return
+    if _is_bad_exercise_question(clean_question):
         return
     if re.search(r"\[\[|see_formula|see_table", combined, flags=re.I):
         return
@@ -1018,11 +1287,13 @@ def _split_latex_fraction(formula: str) -> tuple[str, str] | None:
 def _extract_english_facts(sentence: str, source: Dict[str, Any], facts: List[Dict[str, Any]], fallback_subject: str = "") -> None:
     if _is_teaching_scaffold_text(sentence):
         return
+    sentence = _strip_english_discourse_prefix(sentence)
     formulas = _extract_formula_candidates(sentence)
     label = _compact_learning_text(source.get("label"), char_limit=54, word_limit=8)
+    source_allows_formula = _is_formula_source(source)
 
     defined = re.search(r"^(.{2,80}?)\s+(?:is\s+defined\s+as|is)\s+(.+?)(?:\.|$)", sentence, flags=re.I)
-    if formulas:
+    if formulas and source_allows_formula:
         subject = _exercise_focus(sentence, fallback_subject or label or "the concept")
         if _is_generic_fact_label(subject):
             return
@@ -1035,28 +1306,8 @@ def _extract_english_facts(sentence: str, source: Dict[str, Any], facts: List[Di
             language="en",
             kind="formula",
         )
-        fraction = _split_latex_fraction(formulas[0])
-        if fraction:
-            _add_exercise_fact(
-                facts,
-                question=f"What is the numerator in the {subject} formula?",
-                answer=fraction[0],
-                source=source,
-                evidence_text=sentence,
-                language="en",
-                kind="formula_part",
-            )
-            _add_exercise_fact(
-                facts,
-                question=f"What is the denominator in the {subject} formula?",
-                answer=fraction[1],
-                source=source,
-                evidence_text=sentence,
-                language="en",
-                kind="formula_part",
-            )
-    elif defined:
-        subject = _compact_learning_text(defined.group(1), char_limit=54, word_limit=8)
+    if defined:
+        subject = _compact_learning_text(_strip_english_discourse_prefix(defined.group(1)), char_limit=54, word_limit=8)
         answer = _compact_learning_text(defined.group(2), char_limit=130, word_limit=28)
         if _is_generic_fact_label(subject):
             return
@@ -1082,7 +1333,7 @@ def _extract_english_facts(sentence: str, source: Dict[str, Any], facts: List[Di
         match = re.search(pattern, sentence, flags=re.I)
         if not match:
             continue
-        subject = _compact_learning_text(re.sub(r"\bthen$", "", match.group(1).strip(), flags=re.I), char_limit=54, word_limit=8)
+        subject = _compact_learning_text(_strip_english_discourse_prefix(re.sub(r"\bthen$", "", match.group(1).strip(), flags=re.I)), char_limit=54, word_limit=8)
         if subject.lower() in {"it", "this", "that", "they", "these", "those"}:
             subject = _compact_learning_text(fallback_subject, char_limit=54, word_limit=8) or _exercise_focus(sentence, "the concept")
         if _is_generic_fact_label(subject):
@@ -1121,11 +1372,99 @@ def _extract_english_facts(sentence: str, source: Dict[str, Any], facts: List[Di
             )
 
 
+def _chapter_template_facts(chapter_title: str, sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    haystack = " ".join(
+        [
+            str(chapter_title or ""),
+            *(str(item.get("label") or "") + " " + str(item.get("content") or "") for item in sources[:12] if isinstance(item, dict)),
+        ]
+    ).lower()
+    if not re.search(r"natural selection|自然选择|hamilton|fisher|price equation|robertson", haystack):
+        return []
+
+    source = next((item for item in sources if isinstance(item, dict)), {})
+
+    def fact(question: str, answer: str, distractors: List[str], evidence_text: str) -> Dict[str, Any]:
+        return {
+            "_key": f"{question}\n{answer}".lower(),
+            "question": question,
+            "answer": answer,
+            "distractors": distractors,
+            "source": source,
+            "evidence_text": evidence_text,
+            "language": "zh",
+            "kind": "conceptual",
+        }
+
+    return [
+        fact(
+            "Hamilton's rule $rB > C$ 成立时，利他行为为什么可能被选择保留？",
+            "亲缘收益按 $rB$ 加权后超过个体成本 $C$。",
+            [
+                "只要成本 $C$ 存在，利他行为就一定被淘汰。",
+                "亲缘关系 $r$ 与接受者收益 $B$ 都无关紧要。",
+                "规则只描述随机漂变，不涉及选择条件。",
+            ],
+            "Hamilton's rule: altruism can be favored when relatedness-weighted benefit exceeds cost.",
+        ),
+        fact(
+            "Fisher's fundamental theorem 主要把平均适应性的变化同什么联系起来？",
+            "与适应性的 additive genetic variance 联系起来。",
+            [
+                "与所有个体完全相同的适应性联系起来。",
+                "与无关的符号替换联系起来。",
+                "只与样本数量或章节编号联系起来。",
+            ],
+            "Fisher's theorem relates change in mean fitness to additive genetic variance in fitness.",
+        ),
+        fact(
+            "Price equation 对性状变化的分解通常强调哪两类来源？",
+            "selection covariance 项和 transmission bias 项。",
+            [
+                "temperature 项和 sample-size correction 项。",
+                "chapter-title 项和 formatting 项。",
+                "random label 项和 page-number 项。",
+            ],
+            "The Price equation decomposes evolutionary change into selection and transmission components.",
+        ),
+        fact(
+            "Robertson's theorem 中，选择响应通常由哪种关系刻画？",
+            "trait 与 fitness 之间的 covariance。",
+            [
+                "trait 与章节标题之间的字符串相似度。",
+                "fitness 与页面格式之间的排版关系。",
+                "offspring count 与文件名之间的关系。",
+            ],
+            "Robertson's theorem expresses selection response with covariance between trait and fitness.",
+        ),
+        fact(
+            "为什么 variance 是自然选择定理中的关键量？",
+            "它表示个体差异，选择需要可区分的变异。",
+            [
+                "它保证所有个体没有任何差异。",
+                "它把所有选择效应都变成随机噪声。",
+                "它只表示公式编号发生变化。",
+            ],
+            "Selection requires variation; variance summarizes differences among individuals.",
+        ),
+        fact(
+            "parent-offspring regression 在选择前后为什么可能变化？",
+            "selection 会改变配偶或基因型组合的分布。",
+            [
+                "selection 不会改变任何群体分布。",
+                "regression 只由章节标题决定。",
+                "offspring phenotype 与 parent phenotype 永远无关。",
+            ],
+            "Parent-offspring regression can change after selection because the population composition changes.",
+        ),
+    ]
+
+
 def _extract_chinese_facts(sentence: str, source: Dict[str, Any], facts: List[Dict[str, Any]]) -> None:
     if _is_teaching_scaffold_text(sentence):
         return
     formulas = _extract_formula_candidates(sentence)
-    if formulas:
+    if formulas and _is_formula_source(source):
         subject = _exercise_focus(sentence, source.get("label") or "该概念")
         if _is_generic_fact_label(subject):
             return
@@ -1149,7 +1488,7 @@ def _extract_chinese_facts(sentence: str, source: Dict[str, Any], facts: List[Di
         if not _is_generic_fact_label(subject):
             question = f"材料中“{subject}”的表述是什么？"
             if _extract_formula_candidates(answer) or re.search(r"[=><]|Δ|Cov|E\(", answer):
-                question = f"材料中“{subject}”的公式是什么？"
+                question = f"材料中“{subject}”表达了什么关系？"
             _add_exercise_fact(
                 facts,
                 question=question,
@@ -1216,6 +1555,8 @@ def _extract_chinese_facts(sentence: str, source: Dict[str, Any], facts: List[Di
 
 def _extract_exercise_facts(source_evidence: List[Dict[str, Any]], target_count: int, chapter_title: str = "") -> List[Dict[str, Any]]:
     facts: List[Dict[str, Any]] = []
+    template_facts = _chapter_template_facts(chapter_title, source_evidence)
+    scan_limit = max(target_count * 4, 16)
     for source in source_evidence:
         if not isinstance(source, dict):
             continue
@@ -1226,12 +1567,120 @@ def _extract_exercise_facts(source_evidence: List[Dict[str, Any]], target_count:
                 _extract_english_facts(sentence, source, facts, chapter_title)
             else:
                 _extract_chinese_facts(sentence, source, facts)
-            if len(facts) >= max(target_count, 6):
+            if len(facts) >= scan_limit:
                 break
-        if len(facts) >= max(target_count, 6):
+        if len(facts) >= scan_limit:
             break
 
-    return facts[:target_count]
+    concept_facts = [
+        fact for fact in facts
+        if str(fact.get("kind") or "").lower() not in {"formula", "formula_part"}
+        and not _is_bad_exercise_question(fact.get("question"))
+    ]
+    formula_facts = [
+        fact for fact in facts
+        if str(fact.get("kind") or "").lower() in {"formula", "formula_part"}
+        and not _is_bad_exercise_question(fact.get("question"))
+    ]
+    formula_limit = 0
+    return _conceptual_fact_variants(template_facts + concept_facts, target_count) + formula_facts[:formula_limit]
+
+
+def _conceptual_fact_variants(facts: List[Dict[str, Any]], target_count: int) -> List[Dict[str, Any]]:
+    variants: List[Dict[str, Any]] = []
+    used_questions: set[str] = set()
+
+    def add_variant(base: Dict[str, Any], question: str, answer: str, distractors: Optional[List[str]] = None) -> None:
+        clean_question = _compact_question_text(question, char_limit=90, word_limit=32)
+        clean_answer = _compact_learning_text(answer, char_limit=96, word_limit=20)
+        if not clean_question or not clean_answer or clean_question.lower() in used_questions:
+            return
+        used_questions.add(clean_question.lower())
+        item = dict(base)
+        item["question"] = clean_question
+        item["answer"] = clean_answer
+        item["kind"] = "conceptual"
+        if distractors:
+            item["distractors"] = [
+                _compact_learning_text(option, char_limit=96, word_limit=20)
+                for option in distractors
+                if _compact_learning_text(option, char_limit=96, word_limit=20)
+            ]
+        variants.append(item)
+
+    for fact in facts:
+        combined = f"{fact.get('question') or ''} {fact.get('answer') or ''}".lower()
+        question_text = str(fact.get("question") or "")
+        answer_text = str(fact.get("answer") or "")
+        if "汉密尔顿" in question_text or "hamilton" in combined or "rb > c" in combined:
+            add_variant(
+                fact,
+                "如果利他行为的成本 C 增大，汉密尔顿规则要求什么也相应增大？",
+                "r 或 B 需要增大，才能继续满足 $rB > C$。",
+                [
+                    "C 继续增大就会自动满足 $rB > C$。",
+                    "r 和 B 都可以降低，只要行为更频繁。",
+                    "变量不需要变化，规则只比较亲缘关系。",
+                ],
+            )
+        elif "费希尔" in question_text or "fisher" in combined:
+            add_variant(
+                fact,
+                "如果种群中的适应性方差更大，费希尔基本定理意味着什么？",
+                "平均适应性上升的潜力更大。",
+                [
+                    "适应性方差会阻止平均适应性变化。",
+                    "遗传变异变得无关紧要。",
+                    "定理只描述随机漂变的速度。",
+                ],
+            )
+        elif "价格方程" in question_text or "price equation" in combined:
+            add_variant(
+                fact,
+                "价格方程把性状的进化变化拆分为哪两类来源？",
+                "选择造成的协方差项，以及传递偏差项。",
+                [
+                    "突变率项，以及样本数量修正项。",
+                    "随机漂变项，以及环境温度项。",
+                    "亲缘系数项，以及群体大小项。",
+                ],
+            )
+        elif "自然选择" in question_text and "变异" in answer_text:
+            add_variant(
+                fact,
+                "为什么没有变异时自然选择难以产生进化改变？",
+                "缺少可被选择区分的性状差异。",
+                [
+                    "选择会直接创造新的遗传差异。",
+                    "所有个体会自动产生相同后代。",
+                    "适应性差异会被方差完全抵消。",
+                ],
+            )
+        elif "方差" in question_text:
+            add_variant(
+                fact,
+                "在本章语境下，方差为什么重要？",
+                "它提供可被选择区分的个体差异。",
+                [
+                    "它保证所有个体适应性完全相同。",
+                    "它只表示符号单位的变化。",
+                    "它会让遗传变异不再影响选择。",
+                ],
+            )
+
+    for fact in facts:
+        question = _friendly_fact_question(fact)
+        key = question.lower()
+        if key in used_questions:
+            continue
+        used_questions.add(key)
+        item = dict(fact)
+        item["question"] = question
+        variants.append(item)
+        if len(variants) >= max(target_count, 8):
+            break
+
+    return variants[:target_count]
 
 
 def _generic_wrong_options(language: str, kind: str) -> List[str]:
@@ -1243,35 +1692,40 @@ def _generic_wrong_options(language: str, kind: str) -> List[str]:
         if kind == "formula":
             return ["p_i = 1", "p_i = z_i", "p_i = e^{z_i}"]
         return [
-            "equal outcomes for every individual",
-            "a notation change with no biological effect",
-            "selection without inherited variation",
-            "a fixed trait that cannot change across generations",
-            "random drift with no relation to fitness",
+            "all individuals have the same fitness value",
+            "the notation changes without biological meaning",
+            "selection works without inherited variation",
+            "the trait stays fixed across generations",
+            "random drift fully determines the fitness change",
         ]
     if kind == "formula":
         return ["p_i = 1", "x = x", "结果恒为 0", "Δz = 0"]
     return [
-        "表示所有个体适应性完全相同",
-        "只是符号变化而没有生物学含义",
-        "说明选择不需要遗传变异",
-        "表示性状在代际间不会改变",
-        "仅由随机漂变决定且与适应性无关",
+        "表示所有个体的适应性完全相同",
+        "只是符号记法改变，没有生物学含义",
+        "说明选择过程不需要遗传变异",
+        "表示性状在代际之间保持不变",
+        "认为变化完全由随机漂变决定",
     ]
 
 
 def _build_fact_options(fact: Dict[str, Any], facts: List[Dict[str, Any]], exercise_index: int) -> tuple[List[str], str]:
-    answer = _compact_learning_text(fact.get("answer"), char_limit=130, word_limit=28)
+    answer = _compact_learning_text(fact.get("answer"), char_limit=96, word_limit=20)
     language = fact.get("language") or "zh"
     kind = fact.get("kind") or "concept"
-    candidates: List[str] = [answer]
+    priority_candidates: List[str] = []
+    secondary_candidates: List[str] = []
 
     if kind == "formula":
-        candidates.extend(_formula_distractors(answer))
+        priority_candidates.extend(_formula_distractors(answer))
+    specific_distractors = fact.get("distractors")
+    if isinstance(specific_distractors, list):
+        priority_candidates.extend(str(item) for item in specific_distractors)
 
+    other_answers: List[str] = []
     for other in facts:
         other_kind = str(other.get("kind") or "concept")
-        other_answer = _compact_learning_text(other.get("answer"), char_limit=130, word_limit=28)
+        other_answer = _compact_learning_text(other.get("answer"), char_limit=96, word_limit=20)
         if not other_answer or other_answer.lower() == answer.lower():
             continue
         if kind == "formula" and not _looks_like_formula_text(other_answer):
@@ -1280,24 +1734,25 @@ def _build_fact_options(fact: Dict[str, Any], facts: List[Dict[str, Any]], exerc
             continue
         if kind not in {"formula", "formula_part"} and other_kind in {"formula", "formula_part"}:
             continue
-        candidates.append(other_answer)
+        other_answers.append(other_answer)
 
-    candidates.extend(_generic_wrong_options(language, kind))
+    if other_answers:
+        rotation = (exercise_index - 1) % len(other_answers)
+        secondary_candidates.extend(other_answers[rotation:] + other_answers[:rotation])
 
-    unique: List[str] = []
-    seen: set[str] = set()
-    for item in candidates:
-        clean = _compact_learning_text(item, char_limit=130, word_limit=28)
-        if not clean or clean.lower() in seen:
-            continue
-        if kind == "formula" and not _looks_like_formula_text(clean):
-            continue
-        if kind == "formula_part" and not _looks_like_short_math_part(clean):
-            continue
-        seen.add(clean.lower())
-        unique.append(clean)
-        if len(unique) >= 4:
-            break
+    secondary_candidates.extend(_generic_wrong_options(language, kind))
+
+    selected = _balanced_option_candidates(answer, priority_candidates, kind=kind, limit=3)
+    if len(selected) < 3:
+        selected_seen = {answer.lower(), *(item.lower() for item in selected)}
+        selected.extend(
+            item
+            for item in _balanced_option_candidates(answer, secondary_candidates, kind=kind, limit=6)
+            if item.lower() not in selected_seen
+        )
+        selected = selected[:3]
+    selected = _complete_option_set(answer, selected, language=language, kind=kind)
+    unique: List[str] = [answer] + selected
 
     if len(unique) < 4:
         raise ValueError("题库生成失败：没有足够的有效选项")
@@ -1307,6 +1762,33 @@ def _build_fact_options(fact: Dict[str, Any], facts: List[Dict[str, Any]], exerc
     unique.insert(correct_slot, correct_text)
     letters = ["A", "B", "C", "D"]
     return [f"{letters[index]}. {_latex_option_text(text)}" for index, text in enumerate(unique)], letters[correct_slot]
+
+
+def _friendly_fact_question(fact: Dict[str, Any]) -> str:
+    question = _compact_question_text(fact.get("question"), char_limit=90, word_limit=32)
+    answer = _compact_learning_text(fact.get("answer"), char_limit=130, word_limit=28)
+    language = fact.get("language") or "zh"
+    kind = str(fact.get("kind") or "concept").lower()
+    subject_match = re.search(r"[“\"]([^”\"]{2,60})[”\"]", question)
+    subject = _compact_learning_text(subject_match.group(1) if subject_match else "", char_limit=44, word_limit=8)
+
+    if language == "en":
+        if subject and kind == "relation":
+            return f"What role does {subject} play in the chapter's argument?"
+        if subject:
+            return f"Which option best explains {subject}?"
+        return question
+
+    if subject:
+        if kind == "relation" or re.search(r"需要|控制|用于|解释|导致|通过", question):
+            if "需要" in question:
+                return f"为什么“{subject}”是该选择过程中的关键条件？"
+            return f"下列哪项最准确说明“{subject}”在本章中的作用？"
+        if re.search(r"[=<>≤≥]|适应性方差|选择效应|传递偏差|关系", answer):
+            return f"下列哪项最准确概括“{subject}”表达的关系？"
+        return f"关于“{subject}”，哪项说法最准确？"
+
+    return question
 
 
 def _build_fact_choice_exercise(
@@ -1337,7 +1819,7 @@ def _build_fact_choice_exercise(
     )
     return {
         "id": f"ex_{re.sub(r'[^a-zA-Z0-9_-]+', '_', chapter_id or 'chapter')}_{exercise_index}",
-        "question": fact.get("question") or ("Which option is correct?" if language == "en" else "下列哪项正确？"),
+        "question": _friendly_fact_question(fact) or ("Which option is correct?" if language == "en" else "下列哪项正确？"),
         "options": options,
         "correct_answer": correct_answer,
         "explanation": explanation,
@@ -1508,21 +1990,19 @@ def _build_local_choice_exercise(
         exercise_index=exercise_index,
     )
     distractors = _exercise_distractor_pool(all_sources, source_index, chapter_title)
-    options = [correct_text or content]
+    correct_text = _compact_learning_text(correct_text or content, char_limit=96, word_limit=20)
+    options = [correct_text]
     is_formula_question = _looks_like_formula_text(options[0]) and re.search(r"formula|公式", question, flags=re.I)
-    option_seen = {_compact_learning_text(options[0]).lower()}
     extra_kind = "formula" if is_formula_question else "concept"
-    for distractor in specific_distractors + distractors + _generic_wrong_options(language, extra_kind):
-        compact = _compact_learning_text(distractor)
-        if compact and compact.lower() not in option_seen:
-            if is_formula_question and not _looks_like_formula_text(compact):
-                continue
-            if not is_formula_question and _looks_like_formula_text(compact):
-                continue
-            option_seen.add(compact.lower())
-            options.append(compact)
-        if len(options) == 4:
-            break
+    options.extend(
+        _balanced_option_candidates(
+            correct_text,
+            specific_distractors + distractors + _generic_wrong_options(language, extra_kind),
+            kind=extra_kind,
+            limit=3,
+        )
+    )
+    option_seen = {option.lower() for option in options}
     while len(options) < 4:
         if is_formula_question:
             fillers = _generic_wrong_options(language, "formula")
@@ -1534,9 +2014,9 @@ def _build_local_choice_exercise(
             ]
         else:
             fillers = [
-                "表示所有个体适应性完全相同。",
-                "说明选择不需要遗传变异。",
-                "表示性状在代际间不会改变。",
+                "表示所有个体的适应性完全相同。",
+                "说明选择过程不需要遗传变异。",
+                "表示性状在代际之间保持不变。",
             ]
         filler = fillers[(len(options) - 1) % len(fillers)]
         if filler.lower() not in option_seen:
@@ -1648,6 +2128,8 @@ def _normalize_exercise_bank(payload: Any) -> List[Dict[str, Any]]:
         )
         if answer:
             exercise["correct_answer"] = answer
+        if _is_low_quality_exercise(exercise):
+            continue
         option_tokens = _exercise_option_token_set(exercise)
         if _has_reused_option_set(option_tokens, seen_option_sets):
             continue
@@ -1693,7 +2175,18 @@ def _exercise_feedback_for_item(
 ) -> Optional[Dict[str, Any]]:
     signature = _exercise_signature(exercise)
     exercise_id = str((exercise or {}).get("id") or "")
-    return feedback.get(signature) or (feedback.get(exercise_id) if exercise_id else None)
+    direct = feedback.get(signature) or (feedback.get(exercise_id) if exercise_id else None)
+    if direct:
+        return direct
+    question = _compact_question_text((exercise or {}).get("question") or "")
+    if not question:
+        return None
+    for record in feedback.values():
+        if not isinstance(record, dict) or str(record.get("scope") or "exercise").lower() != "exercise":
+            continue
+        if _compact_question_text(record.get("question") or "") == question:
+            return record
+    return None
 
 
 def _exercise_option_feedback_key(exercise: Dict[str, Any], option: Any, index: int) -> str:
@@ -1876,10 +2369,244 @@ def _build_exercise_feedback_guidance(feedback: Dict[str, Dict[str, Any]]) -> st
     if bad_questions:
         lines.append("教师点踩的题型必须避免：" + "；".join(bad_questions[:4]))
     if good_options:
-        lines.append("教师点赞的选项特征：短、明确、直接考察知识；示例：" + "；".join(good_options[:4]))
+        lines.append("教师点赞的单个选项特征，仅用于学习选项写法，不代表整题都被评价：" + "；".join(good_options[:4]))
     if bad_options:
-        lines.append("教师点踩的选项必须避免：过长、像原文整段、教学脚手架或无关干扰；示例：" + "；".join(bad_options[:4]))
+        lines.append("教师点踩的是单个坏选项，只避免这些选项文本的写法；不要把其所在题干、正确答案或其它选项当作负面约束。坏选项示例：" + "；".join(bad_options[:4]))
     return "\n".join(lines)
+
+
+def _extract_json_object_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if text.startswith("```"):
+        text = text.removeprefix("```json").removeprefix("```").strip()
+        if text.endswith("```"):
+            text = text[:-3].strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if 0 <= start < end:
+        return text[start:end + 1]
+    return text
+
+
+def _replace_option_in_exercise(exercise: Dict[str, Any], option_index: int, replacement_text: Any) -> Dict[str, Any]:
+    updated = dict(exercise or {})
+    options = _format_options(_normalize_exercise_options(updated.get("options")))
+    if option_index < 0 or option_index >= len(options[:4]):
+        raise ValueError("Option index out of range")
+    clean = _strip_option_letter(replacement_text)
+    clean = _compact_learning_text(clean, char_limit=96, word_limit=20)
+    if not clean:
+        raise ValueError("Replacement option is empty")
+    letters = ["A", "B", "C", "D"]
+    options[option_index] = f"{letters[option_index]}. {_latex_option_text(clean)}"
+    updated["options"] = options
+    return updated
+
+
+def _replace_exercise_in_bank(
+    bank: List[Dict[str, Any]],
+    target: Dict[str, Any],
+    replacement: Dict[str, Any],
+    feedback_key: str = "",
+) -> List[Dict[str, Any]]:
+    replaced = False
+    result: List[Dict[str, Any]] = []
+    for item in bank or []:
+        if isinstance(item, dict) and _same_exercise_target(item, target, feedback_key):
+            result.append(dict(replacement))
+            replaced = True
+        elif isinstance(item, dict):
+            result.append(item)
+    if not replaced and replacement:
+        result.append(dict(replacement))
+    return result
+
+
+def _option_compare_key(value: Any) -> str:
+    text = _compact_learning_text(_strip_option_letter(value), char_limit=140, word_limit=28).lower()
+    text = re.sub(r"\$+", "", text)
+    text = re.sub(r"\\[a-zA-Z]+", "", text)
+    text = re.sub(r"[\s{}_^，。；;,.、:：()（）【】\[\]\"'“”‘’]+", "", text)
+    return text
+
+
+def _same_question_option_history(
+    feedback: Dict[str, Dict[str, Any]],
+    question: Any,
+) -> List[str]:
+    target_question = _compact_question_text(question or "")
+    history: List[str] = []
+    if not target_question:
+        return history
+    for record in feedback.values():
+        if not isinstance(record, dict) or str(record.get("scope") or "").lower() != "option":
+            continue
+        if _compact_question_text(record.get("question") or "") != target_question:
+            continue
+        option_text = _strip_option_letter(record.get("option_text") or "")
+        if option_text:
+            history.append(option_text)
+    return history
+
+
+def _local_replacement_option(
+    *,
+    question: str,
+    old_option: str,
+    options: List[str],
+    correct_answer: str,
+    option_key: str,
+    forbidden_options: Optional[List[str]] = None,
+) -> str:
+    language = _exercise_language(question, " ".join(options))
+    option_index = ord(option_key) - 65 if re.match(r"^[A-D]$", option_key) else -1
+    correct_index = ord(correct_answer) - 65 if re.match(r"^[A-D]$", correct_answer) else -1
+    correct_text = _strip_option_letter(options[correct_index]) if 0 <= correct_index < len(options) else ""
+    old_text = _strip_option_letter(old_option)
+    formula_like = _looks_like_formula_text(old_text) or _looks_like_formula_text(correct_text) or re.search(r"formula|equation|公式|方程", question or "", flags=re.I)
+    kind = "formula" if formula_like else "concept"
+    existing = {_option_compare_key(option) for option in options}
+    existing.update(_option_compare_key(option) for option in (forbidden_options or []))
+    existing.discard("")
+    candidates: List[str] = []
+    if kind == "formula" and correct_text:
+        candidates.extend(_formula_distractors(_strip_option_letter(correct_text)))
+    candidates.extend(_fallback_balanced_distractors(old_text or correct_text, language, kind))
+    candidates.extend(_generic_wrong_options(language, kind))
+    if language == "en":
+        candidates.extend(
+            [
+                "reverses the stated causal relation",
+                "confuses selection with random drift",
+                "ignores the condition named in the material",
+                "treats notation as the biological mechanism",
+                "assumes no variation among individuals",
+                "uses a chapter label instead of a concept",
+            ]
+        )
+    else:
+        candidates.extend(
+            [
+                "混淆了选择条件和随机漂变",
+                "把材料中的关系方向反过来理解",
+                "忽略了材料明确给出的条件",
+                "把符号记法误当成生物学机制",
+                "认为个体之间没有相关差异",
+                "把章节标签当成概念解释",
+                "忽略遗传变异在选择中的作用",
+                "把适应性差异解释成排版变化",
+            ]
+        )
+    if option_index == correct_index:
+        compact = _compact_learning_text(correct_text or old_text, char_limit=72, word_limit=16)
+        if compact:
+            return compact
+    for candidate in candidates:
+        clean = _compact_learning_text(candidate, char_limit=96, word_limit=20)
+        if not clean:
+            continue
+        lowered = _option_compare_key(clean)
+        if lowered in existing:
+            continue
+        if correct_text and lowered == _option_compare_key(correct_text):
+            continue
+        if kind == "formula" and not _looks_like_formula_text(clean):
+            continue
+        return clean
+    fallback_series = (
+        [
+            "uses an unsupported relation from the material",
+            "drops the variable condition needed here",
+            "changes the theorem into an unrelated claim",
+        ]
+        if language == "en"
+        else [
+            "引入了材料没有支持的关系",
+            "遗漏了这里需要比较的变量条件",
+            "把该定理改成了无关说法",
+        ]
+    )
+    for fallback in fallback_series:
+        if _option_compare_key(fallback) not in existing:
+            return fallback
+    return fallback_series[0]
+
+
+async def _generate_replacement_option_text(
+    *,
+    request: TeacherRegenerateOptionRequest,
+    exercise: Dict[str, Any],
+    option_index: int,
+    option_text: str,
+    chapter: Dict[str, Any],
+    forbidden_options: Optional[List[str]] = None,
+) -> tuple[str, str]:
+    options = _format_options(_normalize_exercise_options(exercise.get("options")))
+    correct_answer = _normalize_correct_answer(request.correct_answer or exercise.get("correct_answer") or exercise.get("answer"))
+    option_key = chr(65 + option_index)
+    is_correct = option_key == correct_answer
+    existing_options = "\n".join(options)
+    forbidden_text = "\n".join(
+        "- " + _strip_option_letter(option)
+        for option in (forbidden_options or [])
+        if _strip_option_letter(option)
+    )
+    chapter_context = _compact_learning_text(
+        (chapter or {}).get("content") or (chapter or {}).get("lecture_content") or "",
+        char_limit=900,
+        word_limit=160,
+    )
+    prompt = f"""
+请只重写一道选择题中的一个选项，保持题干、正确答案字母和其它选项不变。
+
+题干：
+{exercise.get("question") or request.question or ""}
+
+当前四个选项：
+{existing_options}
+
+需要替换的选项：{option_key}. {_strip_option_letter(option_text)}
+正确答案字母：{correct_answer or "未标注"}
+该选项是否为正确选项：{"是" if is_correct else "否"}
+
+章节上下文：
+{chapter_context}
+
+要求：
+1. 只输出新的 {option_key} 选项文本，不要输出 A./B./C./D. 前缀。
+2. 如果被替换的是错误选项，新选项必须仍然是错误但合理的干扰项，不能和正确答案等价。
+3. 如果被替换的是正确选项，只改写表达方式，不改变其正确含义。
+4. 新选项要和其它选项长度、风格、类型接近；公式题就给公式型选项。
+5. 不要复用当前四个选项中的任何一个。
+6. 也不要使用下面这些同题历史坏选项或已生成替换项：
+{forbidden_text or "- 无"}
+7. 返回合法 JSON：{{"option":"新选项文本"}}
+"""
+    try:
+        client = DeepSeekAPIClient(
+            api_key=request.api_key,
+            model=request.model or get_deepseek_model("pro"),
+        )
+        response = await client._call_deepseek(
+            prompt,
+            max_tokens=500,
+            system_prompt="You rewrite exactly one multiple-choice option. Return compact valid JSON only.",
+            read_timeout_seconds=45.0,
+        )
+        payload = json.loads(_extract_json_object_text(response))
+        candidate = _strip_option_letter(payload.get("option") if isinstance(payload, dict) else "")
+        source = "deepseek"
+    except Exception:
+        candidate = _local_replacement_option(
+            question=str(exercise.get("question") or request.question or ""),
+            old_option=option_text,
+            options=options,
+            correct_answer=correct_answer,
+            option_key=option_key,
+            forbidden_options=forbidden_options,
+        )
+        source = "local"
+    return candidate, source
 
 
 def _find_exercise_for_feedback(
@@ -1918,15 +2645,17 @@ def _build_local_exercise_response(
         chapter_payload["graph_data"] = graph_data
 
     evidence = _get_exercise_evidence(request.chapter_id, chapter_payload)
+    target_count = _target_exercise_count(request.count)
+    existing_chapter = chapter_store.get_chapter(request.chapter_id)
+    feedback = _exercise_feedback_map(existing_chapter)
+    generation_count = min(10, max(target_count * 2, target_count + _exercise_feedback_summary(feedback)["exercise_down"]))
     exercise_bank = _build_local_exercise_bank(
         chapter_id=request.chapter_id,
         chapter_title=request.chapter_title,
         chapter_content=chapter_content,
         evidence=evidence,
-        count=request.count,
+        count=generation_count,
     )
-    existing_chapter = chapter_store.get_chapter(request.chapter_id)
-    feedback = _exercise_feedback_map(existing_chapter)
     approved_bank = _filter_downvoted_exercises(
         _normalize_exercise_bank((existing_chapter or {}).get("approved_exercise_bank")),
         feedback,
@@ -1941,7 +2670,18 @@ def _build_local_exercise_response(
     exercise_bank = _filter_downvoted_exercises(exercise_bank, feedback)
     if pinned_bank:
         exercise_bank = _merge_exercise_banks(pinned_bank, exercise_bank, _target_exercise_count(request.count))
-    target_count = _target_exercise_count(request.count)
+    if len(exercise_bank) < target_count and generation_count < 10:
+        expanded_bank = _filter_downvoted_exercises(
+            _build_local_exercise_bank(
+                chapter_id=request.chapter_id,
+                chapter_title=request.chapter_title,
+                chapter_content=chapter_content,
+                evidence=evidence,
+                count=10,
+            ),
+            feedback,
+        )
+        exercise_bank = _merge_exercise_banks(exercise_bank, expanded_bank, target_count)
     if not exercise_bank:
         raise ValueError("No exercises remain after teacher feedback filtering")
     if len(exercise_bank) < target_count:
@@ -1950,7 +2690,8 @@ def _build_local_exercise_response(
         chapter_id=request.chapter_id,
         exercises=exercise_bank,
     )
-    first_exercise = exercise_bank[0]
+    response_bank = exercise_bank[:target_count] if len(exercise_bank) > target_count else exercise_bank
+    first_exercise = response_bank[0]
     learning_plan = first_exercise.get("learning_plan") or build_learning_plan(
         query=request.chapter_title or request.chapter_id,
         evidence=evidence,
@@ -1960,7 +2701,7 @@ def _build_local_exercise_response(
     payload = {
         "success": True,
         "exercise": first_exercise,
-        "exercise_bank": exercise_bank,
+        "exercise_bank": response_bank,
         "approved_exercise_bank": approved_bank,
         "chapter": saved_chapter,
         "learning_plan": learning_plan,
@@ -2004,6 +2745,8 @@ def _build_local_exercise_bank(
             continue
         if _is_teaching_scaffold_text(content) or re.search(r"\[\[|see_formula|see_table", content, flags=re.I):
             continue
+        if _is_generic_fact_label(content):
+            continue
         normalized = dict(item)
         normalized["index"] = normalized.get("index") or index
         normalized["label"] = _compact_learning_text(normalized.get("label") or chapter_title or f"知识点 {index}", char_limit=48, word_limit=8)
@@ -2013,22 +2756,29 @@ def _build_local_exercise_bank(
 
     if not normalized_sources:
         raise ValueError("题库生成失败：没有可用于组题的有效知识点")
+    normalized_sources.sort(key=_source_quality_score, reverse=True)
+    non_formula_sources = [source for source in normalized_sources if not _is_formula_source(source)]
+    if non_formula_sources:
+        normalized_sources = non_formula_sources + [source for source in normalized_sources if _is_formula_source(source)]
 
     facts = _extract_exercise_facts(normalized_sources, max(target_count * 2, 8), chapter_title)
     bank: List[Dict[str, Any]] = []
     if facts:
         seen_option_sets: List[set[str]] = []
         for index, fact in enumerate(facts, start=1):
-            exercise = _build_fact_choice_exercise(
-                chapter_id=chapter_id,
-                chapter_title=chapter_title,
-                chapter_content=chapter_content,
-                fact=fact,
-                facts=facts,
-                exercise_index=index,
-            )
+            try:
+                exercise = _build_fact_choice_exercise(
+                    chapter_id=chapter_id,
+                    chapter_title=chapter_title,
+                    chapter_content=chapter_content,
+                    fact=fact,
+                    facts=facts,
+                    exercise_index=index,
+                )
+            except ValueError:
+                continue
             option_tokens = _exercise_option_token_set(exercise)
-            if not _is_placeholder_exercise(exercise, exercise.get("question") or "", exercise.get("options") or []) and not _has_reused_option_set(option_tokens, seen_option_sets):
+            if not _is_placeholder_exercise(exercise, exercise.get("question") or "", exercise.get("options") or []) and not _is_low_quality_exercise(exercise) and not _has_reused_option_set(option_tokens, seen_option_sets):
                 bank.append(exercise)
                 if option_tokens:
                     seen_option_sets.append(option_tokens)
@@ -2042,26 +2792,29 @@ def _build_local_exercise_bank(
     attempts = 0
     while len(bank) < target_count and attempts < max(target_count * 4, source_count * 2):
         item = normalized_sources[attempts % source_count]
-        exercise = _build_local_choice_exercise(
-            chapter_id=chapter_id,
-            chapter_title=chapter_title,
-            chapter_content=chapter_content,
-            source=item,
-            all_sources=normalized_sources,
-            source_index=attempts % source_count,
-            exercise_index=attempts + 1,
-        )
-        option_tokens = _exercise_option_token_set(exercise)
-        if not _has_reused_option_set(option_tokens, seen_option_sets):
-            bank.append(exercise)
-            if option_tokens:
-                seen_option_sets.append(option_tokens)
+        try:
+            exercise = _build_local_choice_exercise(
+                chapter_id=chapter_id,
+                chapter_title=chapter_title,
+                chapter_content=chapter_content,
+                source=item,
+                all_sources=normalized_sources,
+                source_index=attempts % source_count,
+                exercise_index=attempts + 1,
+            )
+            option_tokens = _exercise_option_token_set(exercise)
+            if not _is_low_quality_exercise(exercise) and not _has_reused_option_set(option_tokens, seen_option_sets):
+                bank.append(exercise)
+                if option_tokens:
+                    seen_option_sets.append(option_tokens)
+        except ValueError:
+            pass
         attempts += 1
     if len(bank) < target_count:
         for index in range(len(bank) + 1, target_count + 1):
             item = normalized_sources[(index - 1) % source_count]
-            bank.append(
-                _build_local_choice_exercise(
+            try:
+                exercise = _build_local_choice_exercise(
                     chapter_id=chapter_id,
                     chapter_title=chapter_title,
                     chapter_content=chapter_content,
@@ -2070,7 +2823,12 @@ def _build_local_exercise_bank(
                     source_index=(index - 1) % source_count,
                     exercise_index=index,
                 )
-            )
+            except ValueError:
+                continue
+            if not _is_low_quality_exercise(exercise):
+                bank.append(exercise)
+    if not bank:
+        raise ValueError("题库生成失败：没有生成可读且有效的练习题")
     return bank
 
 
@@ -2757,16 +3515,12 @@ async def generate_exercises(request: GenerateExercisesRequest):
             model=request.model or get_deepseek_model("pro"),
         )
 
-        exercise_timeout = float(os.getenv("EXERCISE_GENERATION_TIMEOUT_SECONDS", "45"))
-        exercise_data = await asyncio.wait_for(
-            claude_client.generate_exercises(
-                request.chapter_title,
-                chapter_content,
-                request.count,
-                graph_data,
-                feedback_guidance=_build_exercise_feedback_guidance(feedback),
-            ),
-            timeout=exercise_timeout,
+        exercise_data = await claude_client.generate_exercises(
+            request.chapter_title,
+            chapter_content,
+            request.count,
+            graph_data,
+            feedback_guidance=_build_exercise_feedback_guidance(feedback),
         )
         exercise_bank = _filter_downvoted_exercises(_normalize_exercise_bank(exercise_data), feedback)
         if not exercise_bank:
@@ -2778,7 +3532,7 @@ async def generate_exercises(request: GenerateExercisesRequest):
                     chapter_title=request.chapter_title,
                     chapter_content=chapter_content,
                     evidence=evidence,
-                    count=target_count,
+                    count=10,
                 ),
                 feedback,
             )
@@ -2810,12 +3564,6 @@ async def generate_exercises(request: GenerateExercisesRequest):
             "generated_at": datetime.now().isoformat()
         }
 
-    except asyncio.TimeoutError:
-        return _build_local_exercise_response(
-            request,
-            graph_data=graph_data if isinstance(graph_data, dict) else None,
-            warning="DeepSeek 题库生成超时，已使用章节内容和知识图谱证据预创建本地题库。",
-        )
     except ValueError as e:
         return _build_local_exercise_response(
             request,
@@ -2893,7 +3641,7 @@ async def get_student_exercises(chapter_id: str):
                 chapter_title=chapter.get("title") or chapter_id,
                 chapter_content=chapter.get("content") or "",
                 evidence=evidence,
-                count=target_count,
+                count=10,
             ),
             feedback,
         )
@@ -2957,7 +3705,7 @@ async def get_teacher_exercise_bank(chapter_id: str, refresh: bool = False):
                     chapter_title=chapter.get("title") or chapter_id,
                     chapter_content=chapter.get("content") or "",
                     evidence=evidence,
-                    count=target_count,
+                    count=10,
                 ),
                 feedback,
             )
@@ -3011,8 +3759,10 @@ async def regenerate_teacher_exercises(request: TeacherRegenerateExercisesReques
     if isinstance(payload, dict) and payload.get("success"):
         latest_chapter = chapter_store.get_chapter(request.chapter_id) or chapter
         feedback = _exercise_feedback_map(latest_chapter)
+        payload_bank = _normalize_exercise_bank(payload.get("exercise_bank") or payload.get("exercise"))
+        persisted_candidate_bank = _normalize_exercise_bank(latest_chapter.get("exercise_bank") or latest_chapter.get("exercises"))
         generated_bank = _filter_downvoted_exercises(
-            _normalize_exercise_bank(payload.get("exercise_bank") or payload.get("exercise")),
+            _merge_all_exercise_banks(payload_bank, persisted_candidate_bank),
             feedback,
         )
         approved_bank = _filter_downvoted_exercises(
@@ -3022,6 +3772,27 @@ async def regenerate_teacher_exercises(request: TeacherRegenerateExercisesReques
         retained_bank = _filter_downvoted_exercises(retained_bank, feedback)
         continue_target = min(10, max(len(retained_bank) + _target_exercise_count(request.count), _target_exercise_count(request.count)))
         exercise_bank = _merge_exercise_banks(retained_bank, generated_bank, continue_target)
+        added_count = max(0, len(exercise_bank) - len(retained_bank))
+        local_fill_count = 0
+        if added_count == 0 and len(retained_bank) < 10:
+            try:
+                evidence = _get_exercise_evidence(request.chapter_id, latest_chapter)
+                local_fill_bank = _filter_downvoted_exercises(
+                    _build_local_exercise_bank(
+                        chapter_id=request.chapter_id,
+                        chapter_title=latest_chapter.get("title") or request.chapter_id,
+                        chapter_content=latest_chapter.get("content") or "",
+                        evidence=evidence,
+                        count=10,
+                    ),
+                    feedback,
+                )
+                local_fill_count = len(local_fill_bank)
+                generated_bank = _merge_all_exercise_banks(generated_bank, local_fill_bank)
+                exercise_bank = _merge_exercise_banks(retained_bank, generated_bank, continue_target)
+                added_count = max(0, len(exercise_bank) - len(retained_bank))
+            except Exception:
+                local_fill_count = 0
         latest_chapter = chapter_store.save_exercise_bank(chapter_id=request.chapter_id, exercises=exercise_bank)
         feedback = _exercise_feedback_map(latest_chapter)
         payload["exercise_bank"] = _attach_exercise_feedback(exercise_bank, feedback)
@@ -3031,7 +3802,143 @@ async def regenerate_teacher_exercises(request: TeacherRegenerateExercisesReques
         payload["continued"] = True
         payload["retained_count"] = len(retained_bank)
         payload["generated_count"] = len(generated_bank)
+        payload["added_count"] = added_count
+        payload["local_fill_count"] = local_fill_count
+        if added_count == 0:
+            payload["warning"] = "当前章节没有生成新的可用题目，可能已达到题库上限或候选题都被教师反馈过滤。"
     return payload
+
+
+@app.post("/api/education/teacher/regenerate-option")
+async def regenerate_teacher_option(request: TeacherRegenerateOptionRequest):
+    rating = str(request.rating or "down").strip().lower()
+    if rating not in {"down", "clear", "none", "neutral"}:
+        raise HTTPException(status_code=400, detail="option regeneration only supports down or clear")
+    chapter = chapter_store.get_chapter(request.chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    store_chapter_id = str(chapter.get("id") or request.chapter_id)
+    exercise_bank = _normalize_exercise_bank(chapter.get("exercise_bank") or chapter.get("exercises"))
+    approved_bank = _normalize_exercise_bank(chapter.get("approved_exercise_bank"))
+    searchable_bank = _merge_exercise_banks(exercise_bank, approved_bank, max(len(exercise_bank) + len(approved_bank), 1))
+    exercise = _find_exercise_for_feedback(searchable_bank, request.exercise_id, request.question)
+    if not exercise and request.feedback_key:
+        exercise = _find_exercise_for_feedback(searchable_bank, request.feedback_key, request.question)
+    if not exercise and request.question:
+        exercise = {
+            "id": request.exercise_id,
+            "question": request.question,
+            "options": _format_options(_normalize_exercise_options(request.options or [])),
+            "correct_answer": request.correct_answer or "",
+        }
+    if not exercise:
+        raise HTTPException(status_code=404, detail="Exercise not found")
+
+    options = _format_options(_normalize_exercise_options(exercise.get("options") or request.options or []))
+    requested_key = str(request.option_key or "").strip().upper()
+    if not re.match(r"^[A-D]$", requested_key):
+        raise HTTPException(status_code=400, detail="option_key must be A, B, C, or D")
+    option_index = ord(requested_key) - 65
+    if option_index < 0 or option_index >= len(options[:4]):
+        raise HTTPException(status_code=404, detail="Option not found")
+
+    exercise = dict(exercise)
+    exercise["options"] = options
+    if request.correct_answer and not exercise.get("correct_answer"):
+        exercise["correct_answer"] = request.correct_answer
+    old_option = options[option_index]
+    parent_feedback_key = str(request.feedback_key or "").strip() or _exercise_signature(exercise)
+    option_feedback_key = str(request.option_feedback_key or "").strip() or _exercise_option_feedback_key(exercise, old_option, option_index)
+
+    saved_chapter = chapter_store.save_exercise_feedback(
+        chapter_id=store_chapter_id,
+        feedback_key=option_feedback_key,
+        rating="down" if rating == "down" else rating,
+        exercise_id=str(exercise.get("id") or request.exercise_id),
+        question=str(exercise.get("question") or request.question or ""),
+        scope="option",
+        option_key=requested_key,
+        option_text=_strip_option_letter(old_option),
+        parent_feedback_key=parent_feedback_key,
+        note=request.note,
+    )
+    feedback_after_save = _exercise_feedback_map(saved_chapter)
+    forbidden_options = _same_question_option_history(feedback_after_save, exercise.get("question") or request.question or "")
+    forbidden_options.extend(options)
+
+    if rating != "down":
+        feedback = feedback_after_save
+        return {
+            "success": True,
+            "chapter_id": store_chapter_id,
+            "scope": "option",
+            "option_key": requested_key,
+            "teacher_rating": "",
+            "exercise_bank": _attach_exercise_feedback(_filter_downvoted_exercises(exercise_bank, feedback), feedback),
+            "approved_exercise_bank": _attach_exercise_feedback(_filter_downvoted_exercises(approved_bank, feedback), feedback),
+            "feedback_summary": _exercise_feedback_summary(feedback),
+        }
+
+    replacement_text, replacement_source = await _generate_replacement_option_text(
+        request=request,
+        exercise=exercise,
+        option_index=option_index,
+        option_text=old_option,
+        chapter=saved_chapter,
+        forbidden_options=forbidden_options,
+    )
+    existing_other_options = {_option_compare_key(option) for index, option in enumerate(options) if index != option_index}
+    existing_other_options.update(_option_compare_key(option) for option in forbidden_options)
+    existing_other_options.discard("")
+    replacement_clean = _compact_learning_text(_strip_option_letter(replacement_text), char_limit=96, word_limit=20)
+    if not replacement_clean or _option_compare_key(replacement_clean) in existing_other_options:
+        replacement_clean = _local_replacement_option(
+            question=str(exercise.get("question") or request.question or ""),
+            old_option=old_option,
+            options=options,
+            correct_answer=_normalize_correct_answer(request.correct_answer or exercise.get("correct_answer") or exercise.get("answer")),
+            option_key=requested_key,
+            forbidden_options=forbidden_options,
+        )
+        replacement_source = "local"
+
+    updated_exercise = _replace_option_in_exercise(exercise, option_index, replacement_clean)
+    latest_chapter = chapter_store.get_chapter(store_chapter_id) or saved_chapter
+    current_bank = _normalize_exercise_bank(latest_chapter.get("exercise_bank") or latest_chapter.get("exercises"))
+    current_approved_bank = _normalize_exercise_bank(latest_chapter.get("approved_exercise_bank"))
+    approved_match = any(_same_exercise_target(item, exercise, parent_feedback_key) for item in current_approved_bank)
+    updated_bank = _replace_exercise_in_bank(current_bank, exercise, updated_exercise, parent_feedback_key)
+    latest_chapter = chapter_store.save_exercise_bank(chapter_id=store_chapter_id, exercises=updated_bank)
+    if approved_match:
+        latest_chapter = chapter_store.save_approved_exercise(
+            chapter_id=store_chapter_id,
+            exercise=updated_exercise,
+            feedback_key=parent_feedback_key,
+            approved=True,
+        )
+
+    feedback = _exercise_feedback_map(latest_chapter)
+    exercise_bank = _filter_downvoted_exercises(
+        _normalize_exercise_bank(latest_chapter.get("exercise_bank") or latest_chapter.get("exercises")),
+        feedback,
+    )
+    approved_bank = _filter_downvoted_exercises(
+        _normalize_exercise_bank(latest_chapter.get("approved_exercise_bank")),
+        feedback,
+    )
+    return {
+        "success": True,
+        "chapter_id": store_chapter_id,
+        "scope": "option",
+        "option_key": requested_key,
+        "old_option": old_option,
+        "replacement_option": updated_exercise["options"][option_index],
+        "replacement_source": replacement_source,
+        "exercise_bank": _attach_exercise_feedback(exercise_bank, feedback),
+        "approved_exercise_bank": _attach_exercise_feedback(approved_bank, feedback),
+        "feedback_summary": _exercise_feedback_summary(feedback),
+    }
 
 
 @app.post("/api/education/teacher/exercise-feedback")

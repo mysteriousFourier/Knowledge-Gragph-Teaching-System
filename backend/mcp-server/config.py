@@ -12,7 +12,7 @@ class Config:
     VECTOR_METADATA_PATH = os.path.join(os.path.dirname(__file__), "data", "vector_metadata.json")
 
     # 服务器配置
-    HOST = os.getenv("MCP_SERVER_HOST", "localhost")
+    HOST = os.getenv("MCP_SERVER_HOST", "127.0.0.1")
     PORT = int(os.getenv("MCP_SERVER_PORT", "8000"))
 
     # 向量模型配置

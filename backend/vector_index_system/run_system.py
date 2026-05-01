@@ -131,7 +131,7 @@ def main():
                     try:
                         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                         sock.settimeout(2)
-                        result = sock.connect_ex(('localhost', port))
+                        result = sock.connect_ex(('127.0.0.1', port))
                         sock.close()
                         print(f"端口 {port} 检查结果: {result} (0表示被占用，其他表示可用)")
                         return result != 0
@@ -177,7 +177,7 @@ def main():
                     process.terminate()
                 else:
                     print("服务器启动成功")
-                    viz_url = f"http://localhost:{port}"
+                    viz_url = f"http://127.0.0.1:{port}"
                     print(f"请在浏览器中访问 {viz_url}")
                     print("按Enter键停止服务...")
                     # 打开浏览器

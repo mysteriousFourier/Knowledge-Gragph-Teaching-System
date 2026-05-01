@@ -38,7 +38,7 @@
             return (value || fallback).replace(/\/+$/, '');
         }
         const config = window.__APP_CONFIG__ || {};
-        const target = `${normalizeBaseUrl(config.backendAdminBaseUrl, 'http://localhost:8080')}/admin`;
+        const target = `${normalizeBaseUrl(config.backendAdminBaseUrl, 'http://127.0.0.1:8080')}/admin`;
         document.getElementById('target-link').href = target;
         window.location.replace(target);
     </script>

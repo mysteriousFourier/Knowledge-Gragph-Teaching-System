@@ -13,6 +13,8 @@ mcp-server/                  MCP 兼容图谱工具服务
 vector_index_system/         图谱存储、搜索和后台管理页面
 ```
 
+根目录的 `render_app.py` 不在 `backend/` 内，但它会导入并复用这里的教育 API、维护 API 和图谱服务，把它们整合成单端口 FastAPI Web Service。
+
 ## 默认服务
 
 | 服务 | 默认端口 | 职责 |
@@ -30,6 +32,14 @@ vector_index_system/         图谱存储、搜索和后台管理页面
 ```bat
 start.bat
 ```
+
+部署验证或 Render 兼容运行：
+
+```bat
+start_render_local.bat
+```
+
+此模式只暴露一个端口，默认 `http://127.0.0.1:3000/`。详见 [单端口 FastAPI 版本](../docs/modules/single-port-fastapi.md)。
 
 停止服务：
 

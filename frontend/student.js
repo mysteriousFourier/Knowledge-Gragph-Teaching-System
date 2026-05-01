@@ -85,9 +85,9 @@ function normalizeBaseUrl(value, fallback) {
 }
 
 const APP_CONFIG = window.__APP_CONFIG__ || {};
-const EDUCATION_API_BASE_URL = normalizeBaseUrl(APP_CONFIG.educationApiBaseUrl, 'http://localhost:8001');
-const MAINTENANCE_API_BASE_URL = normalizeBaseUrl(APP_CONFIG.maintenanceApiBaseUrl, 'http://localhost:8002');
-const BACKEND_ADMIN_BASE_URL = normalizeBaseUrl(APP_CONFIG.backendAdminBaseUrl, 'http://localhost:8080');
+const EDUCATION_API_BASE_URL = normalizeBaseUrl(APP_CONFIG.educationApiBaseUrl, 'http://127.0.0.1:8001');
+const MAINTENANCE_API_BASE_URL = normalizeBaseUrl(APP_CONFIG.maintenanceApiBaseUrl, 'http://127.0.0.1:8002');
+const BACKEND_ADMIN_BASE_URL = normalizeBaseUrl(APP_CONFIG.backendAdminBaseUrl, 'http://127.0.0.1:8080');
 
 function openBackendGraphAdmin() {
     window.open(`${BACKEND_ADMIN_BASE_URL}/admin`, '_blank', 'noopener');
@@ -109,9 +109,13 @@ async function callAPI(endpoint, method, data) {
                 'Content-Type': 'application/json'
             }
         };
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000);
-        options.signal = controller.signal;
+        const longRunningRequest = String(endpoint || '').includes('/generate-exercises');
+        let timeoutId = null;
+        if (!longRunningRequest) {
+            const controller = new AbortController();
+            timeoutId = setTimeout(() => controller.abort(), 60000);
+            options.signal = controller.signal;
+        }
 
         if (method !== 'GET' && data) {
             options.body = JSON.stringify(data);
@@ -132,7 +136,7 @@ async function callAPI(endpoint, method, data) {
             const result = await response.json();
             return result;
         } finally {
-            clearTimeout(timeoutId);
+            if (timeoutId) clearTimeout(timeoutId);
         }
     } catch (error) {
         console.error('API 调用失败:', error);

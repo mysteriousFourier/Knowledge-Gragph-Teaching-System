@@ -35,7 +35,7 @@
         var tokens = [];
 
         function stash(match) {
-            var key = "@@MATH_" + tokens.length + "@@";
+            var key = "@@MATH" + tokens.length + "@@";
             tokens.push(match);
             return key;
         }
@@ -56,7 +56,7 @@
     }
 
     function restoreMath(html, tokens) {
-        return html.replace(/@@MATH_(\d+)@@/g, function (match, index) {
+        return html.replace(/@@MATH_?(\d+)@@/g, function (match, index) {
             return escapeHtml(tokens[Number(index)] || match);
         });
     }

@@ -48,7 +48,15 @@ backend/vector_index_system/knowledge_graph/backend_admin.html
 访问地址：
 
 ```text
-http://localhost:3000/backend/vector_index_system/knowledge_graph/backend_admin.html
+http://127.0.0.1:3000/backend/vector_index_system/knowledge_graph/backend_admin.html
 ```
+
+单端口 FastAPI 模式推荐使用：
+
+```text
+http://127.0.0.1:3000/admin
+```
+
+`render_app.py` 会把 `/admin` 映射到同一个后台页面，并提供兼容旧路径的访问方式。
 
 该页面也需要使用统一 Markdown 和 LaTeX 渲染链路，尤其是右侧详情面板。

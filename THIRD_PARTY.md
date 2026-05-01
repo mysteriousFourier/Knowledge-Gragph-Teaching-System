@@ -21,15 +21,20 @@ DEEPSEEK_PRO_MODEL=deepseek-v4-pro
 
 前端是纯静态 HTML、CSS 和 JavaScript。若页面通过 CDN 或本地文件使用下列库，应在对应页面或脚本中保留来源说明。
 
+当前主页 `index.html` 不再加载远程 CDN，以免入口动效被外部网络阻塞。教师端、学生端、图谱查看页和图谱后台仍可能按功能需要加载公式或图谱可视化库。
+
 | 名称 | 链接 | 用途 | 是否随仓库分发 | 检查要求 |
 | --- | --- | --- | --- | --- |
 | KaTeX | https://github.com/KaTeX/KaTeX | LaTeX 公式渲染 | 否，CDN 加载或本地引用 | 发布前确认版本许可证 |
-| Marked | https://github.com/markedjs/marked | Markdown 渲染 | 否，CDN 加载或本地引用 | 发布前确认版本许可证 |
 | vis-network | https://github.com/visjs/vis-network | 教师端知识图谱可视化 | 否，CDN 加载 | 发布前确认版本许可证 |
 | Cytoscape.js | https://github.com/cytoscape/cytoscape.js | 图谱查看页可视化 | 否，CDN 加载 | 发布前确认版本许可证 |
 | cytoscape-fcose | https://github.com/iVis-at-Bilkent/cytoscape.js-fcose | Cytoscape 布局插件 | 否，CDN 加载 | 发布前确认版本许可证 |
+| dagre | https://github.com/dagrejs/dagre | 图布局算法 | 否，CDN 加载 | 发布前确认版本许可证 |
 | cytoscape-dagre | https://github.com/cytoscape/cytoscape.js-dagre | Cytoscape 布局插件 | 否，CDN 加载 | 发布前确认版本许可证 |
-| D3.js | https://github.com/d3/d3 | 后端图谱管理页可视化 | 否，CDN 加载 | 发布前确认版本许可证 |
+
+Markdown 渲染当前由项目内置的 `frontend/markdown-renderer.js` 实现，不依赖 Marked。
+
+KaTeX 在部分页面配置了 unpkg、jsDelivr 或 cdnjs fallback；这些 fallback 只用于运行时加载，不随仓库分发。
 
 ## 参考仓库
 

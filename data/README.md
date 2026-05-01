@@ -14,6 +14,7 @@
 
 - 可公开的结构化课程数据放在 `structured/`。
 - 运行时数据放在 `.runtime/` 或后端本地数据目录。
+- 单端口部署的数据可通过 `APP_RUNTIME_DIR`、`APP_DATA_DIR`、`GRAPH_DB_PATH` 指向持久化磁盘。
 - 需要共享的数据应先确认来源、许可证和脱敏状态。
 
 更多细节见 [数据资产模块文档](../docs/modules/data-assets.md)。
