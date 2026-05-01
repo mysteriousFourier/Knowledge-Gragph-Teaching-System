@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import uuid
@@ -13,7 +14,19 @@ from time import time
 from typing import Any, Dict, Iterable, List, Optional
 
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parent / "knowledge_graph" / "knowledge_graph.db"
+def _default_db_path() -> Path:
+    explicit = os.getenv("GRAPH_DB_PATH") or os.getenv("KNOWLEDGE_GRAPH_DB_PATH")
+    if explicit:
+        return Path(explicit)
+
+    data_dir = os.getenv("APP_DATA_DIR")
+    if data_dir:
+        return Path(data_dir) / "knowledge_graph.db"
+
+    return Path(__file__).resolve().parent / "knowledge_graph" / "knowledge_graph.db"
+
+
+DEFAULT_DB_PATH = _default_db_path()
 
 PRESET_RELATION_TYPES = {
     "contains",
@@ -177,7 +190,7 @@ def _score_text(query: str, text: str) -> float:
 
 class GraphService:
     def __init__(self, db_path: str | Path | None = None):
-        self.db_path = Path(db_path) if db_path else DEFAULT_DB_PATH
+        self.db_path = Path(db_path) if db_path else _default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 

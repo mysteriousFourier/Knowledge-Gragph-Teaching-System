@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import uuid
@@ -16,7 +17,7 @@ BACKEND_DIR = BASE_DIR.parent
 PROJECT_ROOT = BACKEND_DIR.parent
 VECTOR_SYSTEM_DIR = BACKEND_DIR / "vector_index_system"
 MCP_SERVER_DIR = BACKEND_DIR / "mcp-server"
-RUNTIME_DIR = PROJECT_ROOT / ".runtime"
+RUNTIME_DIR = Path(os.getenv("APP_RUNTIME_DIR", str(PROJECT_ROOT / ".runtime")))
 LEGACY_CHAPTERS_FILE = BACKEND_DIR / "data" / "chapters.json"
 LEGACY_PROGRESS_FILE = BACKEND_DIR / "data" / "chapter_progress.json"
 CHAPTERS_FILE = RUNTIME_DIR / "chapters.json"

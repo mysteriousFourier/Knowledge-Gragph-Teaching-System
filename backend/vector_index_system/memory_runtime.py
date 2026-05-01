@@ -167,6 +167,12 @@ def discover_provider_specs(force_refresh: bool = False) -> Dict[str, ProviderSp
     aliases: Dict[str, str] = {}
     errors: Dict[str, str] = {}
 
+    if not MEMORY_SYSTEMS_DIR.exists():
+        _DISCOVERED_PROVIDER_SPECS = specs
+        _DISCOVERED_PROVIDER_ALIASES = aliases
+        _DISCOVERY_ERRORS = {"memory_systems": f"{MEMORY_SYSTEMS_DIR} does not exist"}
+        return specs
+
     for directory in sorted(MEMORY_SYSTEMS_DIR.iterdir(), key=lambda item: item.name.lower()):
         if not directory.is_dir():
             continue
@@ -218,6 +224,9 @@ def discover_provider_candidates() -> List[Dict[str, Any]]:
     specs = discover_provider_specs()
     errors = _DISCOVERY_ERRORS or {}
     candidates: List[Dict[str, Any]] = []
+
+    if not MEMORY_SYSTEMS_DIR.exists():
+        return candidates
 
     for directory in sorted(MEMORY_SYSTEMS_DIR.iterdir(), key=lambda item: item.name.lower()):
         if not directory.is_dir():

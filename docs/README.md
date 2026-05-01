@@ -15,6 +15,7 @@
 | [MCP 服务](modules/mcp-server.md) | MCP 兼容图谱工具桥接 |
 | [数据资产](modules/data-assets.md) | 结构化章节、公式库、运行时缓存、忽略规则 |
 | [脚本](modules/scripts.md) | 启动、停止和辅助脚本 |
+| [Render 单服务部署](modules/render-deployment.md) | Render Web Service 部署入口、环境变量、持久化 |
 
 ## 目录 README
 

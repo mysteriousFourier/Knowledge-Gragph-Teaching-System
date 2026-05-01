@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: knowledge-gragph-teaching-system
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn render_app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: APP_BIND_HOST
+        value: 0.0.0.0
+      - key: APP_RUNTIME_DIR
+        value: /opt/render/project/src/.runtime
+      - key: APP_DATA_DIR
+        value: /opt/render/project/src/.render-data
+      - key: AUTO_OPEN_BROWSER
+        value: "0"
+      - key: APP_STUDENT_USERNAME
+        value: student
+      - key: APP_STUDENT_PASSWORD
+        sync: false
+      - key: APP_TEACHER_USERNAME
+        value: teacher
+      - key: APP_TEACHER_PASSWORD
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_FLASH_MODEL
+        value: deepseek-v4-flash
+      - key: DEEPSEEK_PRO_MODEL
+        value: deepseek-v4-pro

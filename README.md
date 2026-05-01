@@ -83,6 +83,18 @@ powershell -ExecutionPolicy Bypass -File scripts\stop_unlesspaper.ps1
 - 学生端：`http://localhost:3000/student.html`
 - 图谱后台：`http://localhost:3000/backend/vector_index_system/knowledge_graph/backend_admin.html`
 
+## Render 部署
+
+Render 适配入口是 `render_app.py`。它把前端、教育 API、维护 API 和图谱后台整合成单个 FastAPI Web Service，可用根目录 `render.yaml` 部署。
+
+Render 启动命令：
+
+```text
+uvicorn render_app:app --host 0.0.0.0 --port $PORT
+```
+
+详细说明见 [Render 单服务部署文档](docs/modules/render-deployment.md)。
+
 ## 主要工作流
 
 教师端常用流程：
