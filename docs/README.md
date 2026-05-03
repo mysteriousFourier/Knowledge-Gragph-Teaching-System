@@ -1,6 +1,6 @@
 # 文档索引
 
-这里保存 Knowledge-Gragph-Teaching-System 的维护者文档。根目录 [README.md](../README.md) 面向首次使用者，本文档目录面向后续维护、二次开发和代码审查。
+这里保存 Knowledge-Graph-Teaching-System 的维护者文档。根目录 [README.md](../README.md) 面向首次使用者，本文档目录面向后续维护、二次开发和代码审查。
 
 ## 模块文档
 
