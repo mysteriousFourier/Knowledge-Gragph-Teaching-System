@@ -31,7 +31,7 @@ start_render_local.bat 3100
 推荐停止方式：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\stop_unlesspaper.ps1
+powershell -ExecutionPolicy Bypass -File scripts\stop.ps1
 ```
 
 停止脚本应：
