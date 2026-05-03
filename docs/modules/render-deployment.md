@@ -1,6 +1,6 @@
 # Render 单服务部署
 
-## 重要提示：render可能也需要信用卡注册，相比之下有更好的选择Oracle cloud。如只有借记卡且不考虑注册，可以使用Microsoft的Azure
+## 重要提示：render可能也需要信用卡注册，相比之下有更好的选择：Oracle cloud。如只有借记卡且不考虑注册，可以使用Microsoft的Azure
 
 本页是 Render 平台部署说明。若需要先理解当前单端口版本的运行边界、路径和本地验证流程，请先阅读 [单端口 FastAPI 版本](single-port-fastapi.md)。
 
