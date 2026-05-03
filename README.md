@@ -1,8 +1,6 @@
-# Knowledge-Gragph-Teaching-System
+# Knowledge-Graph-Teaching-System
 
-Knowledge-Gragph-Teaching-System 是一个本地运行的知识图谱教学系统，用于教师备课、学生学习、知识图谱维护、课堂问答和选择题练习。前端是纯静态 HTML、CSS、JavaScript，后端由多个 FastAPI 服务提供数据、生成和图谱接口。
-
-项目名按公开仓库名称保留为 `Knowledge-Gragph-Teaching-System`。
+Knowledge-Graph-Teaching-System 是一个本地运行的知识图谱教学系统，用于教师备课、学生学习、知识图谱维护、课堂问答和选择题练习。前端是纯静态 HTML、CSS、JavaScript，后端由多个 FastAPI 服务提供数据、生成和图谱接口。
 
 ## 功能概览
 
