@@ -72,7 +72,7 @@ http://127.0.0.1:3000/
 ## 停止服务
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\stop_unlesspaper.ps1
+powershell -ExecutionPolicy Bypass -File scripts\stop.ps1
 ```
 
 停止脚本会优先使用 `.runtime/processes.json`，同时检查默认端口，避免只关闭窗口而留下后端进程。
