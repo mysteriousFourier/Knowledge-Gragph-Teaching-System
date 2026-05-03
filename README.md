@@ -92,7 +92,7 @@ start_render_local.bat
 5. 停止服务：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\stop_unlesspaper.ps1
+powershell -ExecutionPolicy Bypass -File scripts\stop.ps1
 ```
 
 ## 页面入口
@@ -116,7 +116,7 @@ uvicorn render_app:app --host 0.0.0.0 --port $PORT
 
 ## 目录名称
 
-项目不依赖根目录必须叫 `unlessPaper`。代码使用相对路径和 `Path(__file__).resolve()` 推导仓库根目录。关闭服务后可以修改本地文件夹名，再从新目录重新运行启动脚本。
+代码使用相对路径和`Path(__file__).resolve()` 推导仓库根目录。关闭服务后可以修改本地文件夹名，再从新目录重新运行启动脚本。
 
 需要额外检查 `.env` 中是否写过绝对路径，例如 `PYTHON_EXE`、`CONDA_ROOT`、`APP_RUNTIME_DIR`、`APP_DATA_DIR` 或 `GRAPH_DB_PATH`。
 
