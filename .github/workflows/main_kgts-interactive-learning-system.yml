@@ -1,5 +1,8 @@
 name: Build and deploy Python app to Azure Web App - kgts-Interactive-learning-system
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches:
@@ -38,23 +41,33 @@ jobs:
           npm ci
           npm run build
 
-      - name: Prepare deployment artifact
+      - name: Prepare deployment package
         run: |
-          chmod +x startup.sh
-          rm -rf .venv antenv frontend/node_modules frontend/dist/.vite
-          find . -type d -name __pycache__ -prune -exec rm -rf {} +
-          find . -type d -name .pytest_cache -prune -exec rm -rf {} +
+          set -euo pipefail
+          rm -rf deploy kgts-app.zip
+          mkdir deploy
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.tmp' \
+            --exclude '.venv' \
+            --exclude 'antenv' \
+            --exclude '__pycache__' \
+            --exclude '.pytest_cache' \
+            --exclude 'frontend/node_modules' \
+            --exclude 'frontend/dist/.vite' \
+            ./ deploy/
+          chmod +x deploy/startup.sh
+          cd deploy
+          zip -r ../kgts-app.zip . -x "*/__pycache__/*" "*.pyc" "*.pyo"
+          cd ..
+          unzip -l kgts-app.zip | head -80
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: |
-            .
-            !.git/
-            !.tmp/
-            !frontend/node_modules/
-            !antenv/
+          path: kgts-app.zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -81,3 +94,4 @@ jobs:
         with:
           app-name: kgts-Interactive-learning-system
           slot-name: Production
+          package: kgts-app.zip
