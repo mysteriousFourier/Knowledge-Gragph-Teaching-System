@@ -20,9 +20,9 @@ function normalizeLatexDelimiters(content: string) {
         .split(/(`[^`\n]*`)/g)
         .map((segment) => {
           if (segment.startsWith("`")) return segment
-          return normalizeBrokenDisplayMath(wrapBareLatexEnvironments(segment))
-            .replace(/\\\[([\s\S]*?)\\\]/g, "\n\n$$\n$1\n$$\n\n")
-            .replace(/\\\(([\s\S]*?)\\\)/g, "$$$1$")
+          return wrapStandaloneBareMath(normalizeBrokenDisplayMath(wrapBareLatexEnvironments(segment)))
+            .replace(/\\\[([\s\S]*?)\\\]/g, (_match, formula) => `\n\n$$\n${String(formula).trim()}\n$$\n\n`)
+            .replace(/\\\(([\s\S]*?)\\\)/g, (_match, formula) => `$${String(formula).trim()}$`)
         })
         .join("")
     })
@@ -57,6 +57,19 @@ function isInsideMathBlock(text: string, offset: number) {
   const lastBracketStart = before.lastIndexOf("\\[")
   const lastBracketEnd = before.lastIndexOf("\\]")
   return dollarBlockCount % 2 === 1 || lastBracketStart > lastBracketEnd
+}
+
+function wrapStandaloneBareMath(segment: string) {
+  const trimmed = segment.trim()
+  if (!trimmed || trimmed.includes("$") || trimmed.includes("\\(") || trimmed.includes("\\[")) return segment
+  if (!/[\\](?:frac|sigma|mu|bar|overline|left|right|beta|delta|partial|begin|end|mid)|[_^]\s*\{?/.test(trimmed)) return segment
+  if (!trimmed.includes("=") && !trimmed.startsWith("\\") && !trimmed.includes("\\begin")) return segment
+  if (trimmed.length > 260 || /[。！？；]/.test(trimmed)) return segment
+
+  const start = segment.indexOf(trimmed)
+  const prefix = segment.slice(0, start)
+  const suffix = segment.slice(start + trimmed.length)
+  return `${prefix}\n\n$$\n${trimmed}\n$$\n\n${suffix}`
 }
 
 export function MarkdownRenderer({ content, className = "", inline = false }: MarkdownRendererProps) {

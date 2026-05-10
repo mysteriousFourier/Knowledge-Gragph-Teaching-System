@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Background, Controls, MiniMap, ReactFlow, ReactFlowProvider, type Edge, type Node, useReactFlow } from "@xyflow/react"
+import { Background, Controls, Handle, MiniMap, Position, ReactFlow, ReactFlowProvider, type Edge, type Node, type NodeProps, useReactFlow } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import {
   BookOpen,
@@ -17,7 +17,7 @@ import {
   Sparkles,
   Waypoints,
 } from "lucide-react"
-import { useGraphNodes, useGraphRelationships, useGraphStats } from "@/api/graph"
+import { useGraphNodes, useGraphRelations, useGraphRelationships, useGraphStats } from "@/api/graph"
 import { useUpdateNode } from "@/api/maintenance"
 import { EmptyState } from "@/components/common/EmptyState"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
@@ -31,6 +31,10 @@ export const Route = createFileRoute("/graph/")({
 })
 
 type GraphViewMode = "explore" | "chapterPath" | "prerequisites" | "formulaTheorem" | "overview"
+type FlowNodeData = {
+  label: string
+  color: string
+}
 
 interface RelationBuckets {
   incoming: GraphRelation[]
@@ -64,13 +68,19 @@ const layoutModes: Array<{ id: GraphLayoutMode; label: string }> = [
   { id: "grid", label: "网格备用" },
 ]
 
+const graphNodeTypes = {
+  knowledge: KnowledgeFlowNode,
+}
+
 const DEFAULT_TYPE = "all"
 const DEFAULT_RELATION = "all"
 const RECOMMENDED_LIMIT = 32
 const FOCUSED_LIMIT = 82
 const OVERVIEW_LIMIT = 360
-const LIMITED_NODE_FETCH_LIMIT = 1200
-const LIMITED_RELATION_FETCH_LIMIT = 3600
+const FOCUSED_EDGE_LIMIT = 220
+const OVERVIEW_EDGE_LIMIT = 1200
+const LIMITED_NODE_FETCH_LIMIT = 5000
+const LIMITED_RELATION_FETCH_LIMIT = 50000
 const ALL_NODE_FETCH_LIMIT = 10000
 const ALL_RELATION_FETCH_LIMIT = 50000
 
@@ -92,11 +102,15 @@ function GraphPage() {
   const showAllNodes = viewMode === "overview"
   const { data: nodesData, isLoading: nodesLoading } = useGraphNodes(showAllNodes ? ALL_NODE_FETCH_LIMIT : LIMITED_NODE_FETCH_LIMIT)
   const { data: relationshipsData, isLoading: relationshipsLoading } = useGraphRelationships(showAllNodes ? ALL_RELATION_FETCH_LIMIT : LIMITED_RELATION_FETCH_LIMIT)
+  const { data: selectedRelationsData } = useGraphRelations(selectedNodeId || "")
   const { data: statsData } = useGraphStats()
   const updateNode = useUpdateNode()
 
   const rawNodes = useMemo(() => nodesData?.nodes || [], [nodesData?.nodes])
-  const rawRelationships = useMemo(() => relationshipsData?.relationships || [], [relationshipsData?.relationships])
+  const rawRelationships = useMemo(
+    () => mergeRelations(relationshipsData?.relationships || [], selectedRelationsData?.relations || []),
+    [relationshipsData?.relationships, selectedRelationsData?.relations],
+  )
   const stats = statsData?.data
   const nodeById = useMemo(() => new Map(rawNodes.map((node) => [node.id, node])), [rawNodes])
   const degreeById = useMemo(() => buildDegreeMap(rawRelationships), [rawRelationships])
@@ -131,69 +145,112 @@ function GraphPage() {
     }
   }, [recommendedNodes, selectedNodeId])
 
+  const visibleRelationships = useMemo(() => {
+    const filteredRelations = rawRelationships.filter((relation) => {
+      if (relationType !== DEFAULT_RELATION && (relation.relation_type || "related") !== relationType) return false
+      return nodeById.has(relation.source_id) && nodeById.has(relation.target_id)
+    })
+
+    if (viewMode === "overview") {
+      const overviewNodes = getOverviewNodes(baseFilteredNodes, degreeById, filteredRelations, OVERVIEW_LIMIT)
+      const overviewNodeIds = new Set(overviewNodes.map((node) => node.id))
+      return filteredRelations
+        .filter((relation) => overviewNodeIds.has(relation.source_id) && overviewNodeIds.has(relation.target_id))
+        .sort((a, b) => getRelationPriority(b, selectedNodeId, degreeById) - getRelationPriority(a, selectedNodeId, degreeById))
+        .slice(0, OVERVIEW_EDGE_LIMIT)
+    }
+
+    if (!selectedNodeId) {
+      const recommendedIds = new Set(recommendedNodes.slice(0, RECOMMENDED_LIMIT).map((node) => node.id))
+      return filteredRelations
+        .filter((relation) => recommendedIds.has(relation.source_id) && recommendedIds.has(relation.target_id))
+        .sort((a, b) => getRelationPriority(b, selectedNodeId, degreeById) - getRelationPriority(a, selectedNodeId, degreeById))
+        .slice(0, FOCUSED_EDGE_LIMIT)
+    }
+
+    const candidateNodeIds = getCandidateNodeIds({
+      selectedNodeId,
+      viewMode,
+      expandedNodeIds,
+      selectedNeighborIds,
+      recommendedNodes,
+      baseFilteredNodes,
+      relationBuckets,
+      degreeById,
+    })
+    return filteredRelations
+      .filter((relation) => candidateNodeIds.has(relation.source_id) || candidateNodeIds.has(relation.target_id))
+      .sort((a, b) => getRelationPriority(b, selectedNodeId, degreeById) - getRelationPriority(a, selectedNodeId, degreeById))
+      .slice(0, FOCUSED_EDGE_LIMIT)
+  }, [
+    baseFilteredNodes,
+    degreeById,
+    expandedNodeIds,
+    nodeById,
+    rawRelationships,
+    recommendedNodes,
+    relationBuckets,
+    relationType,
+    selectedNeighborIds,
+    selectedNodeId,
+    viewMode,
+  ])
+
   const visibleNodes = useMemo(() => {
     if (viewMode === "overview") {
-      return baseFilteredNodes.slice(0, OVERVIEW_LIMIT)
+      const relationNodeIds = getRelationNodeIds(visibleRelationships)
+      return getOverviewNodes(baseFilteredNodes, degreeById, rawRelationships, OVERVIEW_LIMIT, relationNodeIds)
     }
 
     if (!selectedNodeId) {
       return recommendedNodes.slice(0, RECOMMENDED_LIMIT)
     }
 
-    const visibleIds = new Set<string>([selectedNodeId, ...expandedNodeIds])
-    if (viewMode === "explore") {
-      recommendedNodes.slice(0, 12).forEach((node) => visibleIds.add(node.id))
-      selectedNeighborIds.forEach((id) => visibleIds.add(id))
-    }
-    if (viewMode === "chapterPath") {
-      addTypedNodes(visibleIds, baseFilteredNodes, ["chapter"], degreeById, 40)
-      relationBuckets.incoming.concat(relationBuckets.outgoing).forEach((relation) => {
-        visibleIds.add(relation.source_id)
-        visibleIds.add(relation.target_id)
-      })
-    }
-    if (viewMode === "prerequisites") {
-      relationBuckets.incoming.concat(relationBuckets.related.slice(0, 16)).forEach((relation) => {
-        visibleIds.add(relation.source_id)
-        visibleIds.add(relation.target_id)
-      })
-    }
-    if (viewMode === "formulaTheorem") {
-      relationBuckets.formulas.concat(relationBuckets.examples).forEach((relation) => {
-        visibleIds.add(relation.source_id)
-        visibleIds.add(relation.target_id)
-      })
-      addTypedNodes(visibleIds, baseFilteredNodes, ["formula", "theorem", "example"], degreeById, 42)
-    }
-
-    selectedNeighborIds.forEach((id) => {
-      if (visibleIds.size < FOCUSED_LIMIT) visibleIds.add(id)
+    const visibleIds = getCandidateNodeIds({
+      selectedNodeId,
+      viewMode,
+      expandedNodeIds,
+      selectedNeighborIds,
+      recommendedNodes,
+      baseFilteredNodes,
+      relationBuckets,
+      degreeById,
+    })
+    visibleRelationships.forEach((relation) => {
+      visibleIds.add(relation.source_id)
+      visibleIds.add(relation.target_id)
     })
 
-    return baseFilteredNodes
-      .filter((node) => visibleIds.has(node.id) && filteredNodeIds.has(node.id))
-      .sort((a, b) => getNodeScore(b, degreeById) - getNodeScore(a, degreeById))
-      .slice(0, FOCUSED_LIMIT)
+    return getFocusedNodes({
+      rawNodes,
+      visibleIds,
+      visibleRelationships,
+      filteredNodeIds,
+      selectedNodeId,
+      selectedNeighborIds,
+      degreeById,
+      limit: FOCUSED_LIMIT,
+    })
   }, [
     baseFilteredNodes,
     degreeById,
     expandedNodeIds,
     filteredNodeIds,
+    rawNodes,
+    rawRelationships,
     recommendedNodes,
     relationBuckets,
     selectedNeighborIds,
     selectedNodeId,
+    visibleRelationships,
     viewMode,
   ])
 
   const visibleNodeIds = useMemo(() => new Set(visibleNodes.map((node) => node.id)), [visibleNodes])
-  const visibleRelationships = useMemo(
+  const renderRelationships = useMemo(
     () =>
-      rawRelationships.filter((relation) => {
-        if (relationType !== DEFAULT_RELATION && (relation.relation_type || "related") !== relationType) return false
-        return visibleNodeIds.has(relation.source_id) && visibleNodeIds.has(relation.target_id)
-      }),
-    [rawRelationships, relationType, visibleNodeIds],
+      visibleRelationships.filter((relation) => visibleNodeIds.has(relation.source_id) && visibleNodeIds.has(relation.target_id)),
+    [visibleNodeIds, visibleRelationships],
   )
 
   const highlightedIds = useMemo(() => {
@@ -206,8 +263,8 @@ function GraphPage() {
     [highlightedIds, selectedNodeId, visibleNodes],
   )
   const flowEdges = useMemo<Edge[]>(
-    () => createFlowEdges(visibleRelationships, selectedNodeId),
-    [selectedNodeId, visibleRelationships],
+    () => createFlowEdges(renderRelationships, selectedNodeId),
+    [renderRelationships, selectedNodeId],
   )
 
   useEffect(() => {
@@ -304,7 +361,7 @@ function GraphPage() {
         <StatCard label="总节点" value={stats?.total_nodes ?? rawNodes.length} />
         <StatCard label="总关系" value={stats?.total_relationships ?? rawRelationships.length} />
         <StatCard label="当前节点" value={visibleNodes.length} />
-        <StatCard label="当前关系" value={visibleRelationships.length} />
+        <StatCard label="当前关系" value={renderRelationships.length} />
       </div>
 
       <div className="rounded-lg border bg-card">
@@ -347,7 +404,7 @@ function GraphPage() {
               图谱可视化
             </h2>
             <span className="text-xs text-muted-foreground">
-              {layoutStatus || `${visibleNodes.length} nodes / ${visibleRelationships.length} edges`}
+              {layoutStatus || `${visibleNodes.length} nodes / ${renderRelationships.length} edges`}
             </span>
           </div>
           <ReactFlowProvider>
@@ -380,6 +437,7 @@ function GraphPage() {
               onStart={() => startFromNode(selectedNode.id)}
               incoming={relationBuckets.incoming}
               outgoing={relationBuckets.outgoing}
+              related={relationBuckets.related}
               formulas={relationBuckets.formulas}
               examples={relationBuckets.examples}
               nodeById={nodeById}
@@ -426,6 +484,7 @@ function GraphCanvas({
         <ReactFlow
           nodes={nodes}
           edges={edges}
+          nodeTypes={graphNodeTypes}
           fitView
           minZoom={0.08}
           maxZoom={1.8}
@@ -441,6 +500,16 @@ function GraphCanvas({
         </ReactFlow>
       )}
     </div>
+  )
+}
+
+function KnowledgeFlowNode({ data, isConnectable }: NodeProps<Node<FlowNodeData, "knowledge">>) {
+  return (
+    <>
+      <Handle className="kg-flow-handle" type="target" position={Position.Left} isConnectable={isConnectable} />
+      <span className="kg-flow-label">{data.label}</span>
+      <Handle className="kg-flow-handle" type="source" position={Position.Right} isConnectable={isConnectable} />
+    </>
   )
 }
 
@@ -465,7 +534,10 @@ function createFlowNode(node: GraphNode, highlightedIds: Set<string>, selectedNo
   const isHighlighted = highlightedIds.size === 0 || highlightedIds.has(node.id)
   return {
     id: node.id,
+    type: "knowledge",
     position: { x: 0, y: 0 },
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
     data: {
       label: truncateLabel(node.label || node.id),
       color,
@@ -498,6 +570,8 @@ function createFlowEdges(relations: GraphRelation[], selectedNodeId: string | nu
       animated: isFocused,
       style: {
         stroke: isFocused ? "#2563eb" : "#94a3b8",
+        strokeDasharray: isFocused ? undefined : "5 8",
+        strokeLinecap: "round",
         strokeWidth: isFocused ? 2.4 : 1.1,
         opacity: selectedNodeId ? (isFocused ? 1 : 0.24) : 0.64,
       },
@@ -505,6 +579,18 @@ function createFlowEdges(relations: GraphRelation[], selectedNodeId: string | nu
       labelBgStyle: { fill: "#ffffff", fillOpacity: 0.92 },
     }
   })
+}
+
+function mergeRelations(primary: GraphRelation[], secondary: GraphRelation[]) {
+  const relations: GraphRelation[] = []
+  const seen = new Set<string>()
+  primary.concat(secondary).forEach((relation) => {
+    const key = relation.id || `${relation.source_id}:${relation.relation_type}:${relation.target_id}`
+    if (seen.has(key)) return
+    seen.add(key)
+    relations.push(relation)
+  })
+  return relations
 }
 
 function NodeDetails({
@@ -516,6 +602,7 @@ function NodeDetails({
   onStart,
   incoming,
   outgoing,
+  related,
   formulas,
   examples,
   nodeById,
@@ -528,6 +615,7 @@ function NodeDetails({
   onStart: () => void
   incoming: GraphRelation[]
   outgoing: GraphRelation[]
+  related: GraphRelation[]
   formulas: GraphRelation[]
   examples: GraphRelation[]
   nodeById: Map<string, GraphNode>
@@ -568,6 +656,17 @@ function NodeDetails({
           <RelationList title="前置知识" nodes={prerequisites.slice(0, 5)} empty="暂无明确前置节点" />
           <RelationList title="下一步节点" nodes={nextNodes.slice(0, 5)} empty="暂无明确后续节点" />
           <RelationList title="相关公式/定理/例题" nodes={relationsToNodes(formulas.concat(examples), nodeById, node.id).slice(0, 6)} empty="暂无相关公式或例题" />
+        </div>
+      </section>
+
+      <section className="rounded-lg border bg-background p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">关系明细</h3>
+          <span className="text-xs text-muted-foreground">{related.length} 条</span>
+        </div>
+        <div className="space-y-3">
+          <RelationDetailList title="指向当前节点" selectedNodeId={node.id} relations={incoming.slice(0, 12)} nodeById={nodeById} empty="暂无入边" />
+          <RelationDetailList title="从当前节点指出" selectedNodeId={node.id} relations={outgoing.slice(0, 12)} nodeById={nodeById} empty="暂无出边" />
         </div>
       </section>
 
@@ -630,6 +729,46 @@ function RelationList({ title, nodes, empty }: { title: string; nodes: GraphNode
         </div>
       ) : (
         <div className="mt-1 text-xs">{empty}</div>
+      )}
+    </div>
+  )
+}
+
+function RelationDetailList({
+  title,
+  selectedNodeId,
+  relations,
+  nodeById,
+  empty,
+}: {
+  title: string
+  selectedNodeId: string
+  relations: GraphRelation[]
+  nodeById: Map<string, GraphNode>
+  empty: string
+}) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-muted-foreground">{title}</div>
+      {relations.length ? (
+        <div className="mt-1 space-y-1.5">
+          {relations.map((relation, index) => {
+            const otherId = relation.source_id === selectedNodeId ? relation.target_id : relation.source_id
+            const otherNode = nodeById.get(otherId)
+            const description = relation.description || String(relation.metadata?.description || "")
+            return (
+              <div key={relation.id || `${relation.source_id}-${relation.target_id}-${index}`} className="rounded-md border bg-muted/30 p-2 text-xs">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">{relation.relation_type || "related"}</span>
+                  <span className="text-foreground">{truncateLabel(otherNode?.label || otherId, 36)}</span>
+                </div>
+                {description && <div className="mt-1 text-muted-foreground">{truncateLabel(description, 90)}</div>}
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="mt-1 text-xs text-muted-foreground">{empty}</div>
       )}
     </div>
   )
@@ -714,6 +853,162 @@ function getRecommendedStarts(nodes: GraphNode[], degreeById: Map<string, number
     .slice(0, RECOMMENDED_LIMIT)
 }
 
+function getCandidateNodeIds({
+  selectedNodeId,
+  viewMode,
+  expandedNodeIds,
+  selectedNeighborIds,
+  recommendedNodes,
+  baseFilteredNodes,
+  relationBuckets,
+  degreeById,
+}: {
+  selectedNodeId: string
+  viewMode: GraphViewMode
+  expandedNodeIds: Set<string>
+  selectedNeighborIds: Set<string>
+  recommendedNodes: GraphNode[]
+  baseFilteredNodes: GraphNode[]
+  relationBuckets: RelationBuckets
+  degreeById: Map<string, number>
+}) {
+  const visibleIds = new Set<string>([selectedNodeId, ...expandedNodeIds])
+  if (viewMode === "explore") {
+    recommendedNodes.slice(0, 12).forEach((node) => visibleIds.add(node.id))
+    selectedNeighborIds.forEach((id) => visibleIds.add(id))
+  }
+  if (viewMode === "chapterPath") {
+    addTypedNodes(visibleIds, baseFilteredNodes, ["chapter"], degreeById, 40)
+    relationBuckets.incoming.concat(relationBuckets.outgoing).forEach((relation) => {
+      visibleIds.add(relation.source_id)
+      visibleIds.add(relation.target_id)
+    })
+  }
+  if (viewMode === "prerequisites") {
+    relationBuckets.incoming.concat(relationBuckets.related.slice(0, 24)).forEach((relation) => {
+      visibleIds.add(relation.source_id)
+      visibleIds.add(relation.target_id)
+    })
+  }
+  if (viewMode === "formulaTheorem") {
+    relationBuckets.formulas.concat(relationBuckets.examples).forEach((relation) => {
+      visibleIds.add(relation.source_id)
+      visibleIds.add(relation.target_id)
+    })
+    addTypedNodes(visibleIds, baseFilteredNodes, ["formula", "theorem", "example"], degreeById, 42)
+  }
+
+  selectedNeighborIds.forEach((id) => {
+    if (visibleIds.size < FOCUSED_LIMIT) visibleIds.add(id)
+  })
+  return visibleIds
+}
+
+function getOverviewNodes(
+  nodes: GraphNode[],
+  degreeById: Map<string, number>,
+  relations: GraphRelation[],
+  limit: number,
+  requiredIds: Set<string> = new Set(),
+) {
+  const connectedIds = getRelationNodeIds(relations)
+  return [...nodes]
+    .sort((a, b) => {
+      const requiredDelta = Number(requiredIds.has(b.id)) - Number(requiredIds.has(a.id))
+      if (requiredDelta) return requiredDelta
+      const connectedDelta = Number(connectedIds.has(b.id)) - Number(connectedIds.has(a.id))
+      if (connectedDelta) return connectedDelta
+      return getNodeScore(b, degreeById) - getNodeScore(a, degreeById)
+    })
+    .slice(0, limit)
+}
+
+function getFocusedNodes({
+  rawNodes,
+  visibleIds,
+  visibleRelationships,
+  filteredNodeIds,
+  selectedNodeId,
+  selectedNeighborIds,
+  degreeById,
+  limit,
+}: {
+  rawNodes: GraphNode[]
+  visibleIds: Set<string>
+  visibleRelationships: GraphRelation[]
+  filteredNodeIds: Set<string>
+  selectedNodeId: string
+  selectedNeighborIds: Set<string>
+  degreeById: Map<string, number>
+  limit: number
+}) {
+  const nodeById = new Map(rawNodes.map((node) => [node.id, node]))
+  const selectedNode = nodeById.get(selectedNodeId)
+  const nodes: GraphNode[] = []
+  const seen = new Set<string>()
+  const addNode = (nodeId: string) => {
+    if (seen.has(nodeId)) return
+    const node = nodeById.get(nodeId)
+    if (!node) return
+    if (!filteredNodeIds.has(node.id) && node.id !== selectedNodeId && !selectedNeighborIds.has(node.id)) return
+    seen.add(node.id)
+    nodes.push(node)
+  }
+
+  if (selectedNode) addNode(selectedNode.id)
+  visibleRelationships.forEach((relation) => {
+    addNode(relation.source_id)
+    addNode(relation.target_id)
+  })
+
+  if (nodes.length < limit) {
+    rawNodes
+      .filter((node) => visibleIds.has(node.id) && !seen.has(node.id))
+      .sort((a, b) => getVisibleNodePriority(b, selectedNodeId, selectedNeighborIds, degreeById) - getVisibleNodePriority(a, selectedNodeId, selectedNeighborIds, degreeById))
+      .forEach((node) => {
+        if (nodes.length < limit) addNode(node.id)
+      })
+  }
+
+  return nodes
+    .sort((a, b) => getVisibleNodePriority(b, selectedNodeId, selectedNeighborIds, degreeById) - getVisibleNodePriority(a, selectedNodeId, selectedNeighborIds, degreeById))
+    .slice(0, limit)
+}
+
+function getRelationNodeIds(relations: GraphRelation[]) {
+  const ids = new Set<string>()
+  relations.forEach((relation) => {
+    if (relation.source_id) ids.add(relation.source_id)
+    if (relation.target_id) ids.add(relation.target_id)
+  })
+  return ids
+}
+
+function getRelationPriority(relation: GraphRelation, selectedNodeId: string | null, degreeById: Map<string, number>) {
+  const touchesSelected = selectedNodeId && (relation.source_id === selectedNodeId || relation.target_id === selectedNodeId)
+  const typeWeight: Record<string, number> = {
+    contains: 9000,
+    precedes: 7600,
+    references_formula: 7000,
+    references_table: 6800,
+    defines: 6200,
+    derives: 5600,
+    explains: 5000,
+    depends_on: 4600,
+    example_of: 4200,
+    supports: 3600,
+    contrasts_with: 3200,
+    causes: 2800,
+    related: 1800,
+  }
+  return (
+    (touchesSelected ? 1_000_000 : 0) +
+    (typeWeight[relation.relation_type || "related"] || 2400) +
+    (degreeById.get(relation.source_id) || 0) * 8 +
+    (degreeById.get(relation.target_id) || 0) * 8
+  )
+}
+
 function getNodeScore(node: GraphNode, degreeById: Map<string, number>) {
   const typeWeight: Record<string, number> = {
     chapter: 1000,
@@ -721,8 +1016,18 @@ function getNodeScore(node: GraphNode, degreeById: Map<string, number>) {
     theorem: 420,
     formula: 390,
     example: 180,
+    proposition: 320,
+    derivation: 300,
+    discussion: 260,
+    table: 240,
   }
   return (typeWeight[node.type || "concept"] || 260) + (degreeById.get(node.id) || 0) * 18
+}
+
+function getVisibleNodePriority(node: GraphNode, selectedNodeId: string | null, selectedNeighborIds: Set<string>, degreeById: Map<string, number>) {
+  if (selectedNodeId && node.id === selectedNodeId) return 1_000_000
+  if (selectedNeighborIds.has(node.id)) return 500_000 + getNodeScore(node, degreeById)
+  return getNodeScore(node, degreeById)
 }
 
 function buildDegreeMap(relations: GraphRelation[]) {

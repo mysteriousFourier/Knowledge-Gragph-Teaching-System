@@ -598,6 +598,27 @@
     background-size: 28px 28px;
   }
 
+  .react-flow svg {
+    max-width: none;
+    overflow: visible;
+  }
+
+  .kg-flow-label {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .kg-flow-handle {
+    width: 8px;
+    height: 8px;
+    min-width: 8px;
+    min-height: 8px;
+    border: 0;
+    background: transparent;
+    opacity: 0;
+  }
+
   .prose,
   .prose :where(p, li, blockquote, td, th):not(:where([class~="not-prose"] *)) {
     overflow-wrap: anywhere;

@@ -261,11 +261,69 @@ def _normalize_node(node: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _as_relation_endpoint(value: Any) -> str:
+    if isinstance(value, dict):
+        for key in ("id", "node_id", "nodeId", "value", "label"):
+            if value.get(key):
+                return str(value.get(key)).strip()
+        return ""
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _first_relation_value(*values: Any) -> str:
+    for value in values:
+        endpoint = _as_relation_endpoint(value)
+        if endpoint:
+            return endpoint
+    return ""
+
+
 def _normalize_relation(relation: Dict[str, Any]) -> Dict[str, Any]:
-    source_id = relation.get("source_id") or relation.get("source") or relation.get("from")
-    target_id = relation.get("target_id") or relation.get("target") or relation.get("to")
-    relation_type = relation.get("relation_type") or relation.get("type") or relation.get("label") or "related"
-    metadata = dict(relation.get("metadata") or relation.get("properties") or {})
+    raw_metadata = relation.get("metadata") or relation.get("properties") or {}
+    if isinstance(raw_metadata, str):
+        try:
+            raw_metadata = json.loads(raw_metadata)
+        except json.JSONDecodeError:
+            raw_metadata = {}
+    metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+    source_id = _first_relation_value(
+        relation.get("source_id"),
+        relation.get("source"),
+        relation.get("source_node"),
+        relation.get("sourceId"),
+        relation.get("sourceNode"),
+        relation.get("from"),
+        metadata.get("source_id"),
+        metadata.get("source"),
+        metadata.get("source_node"),
+        metadata.get("sourceId"),
+        metadata.get("sourceNode"),
+        metadata.get("from"),
+    )
+    target_id = _first_relation_value(
+        relation.get("target_id"),
+        relation.get("target"),
+        relation.get("target_node"),
+        relation.get("targetId"),
+        relation.get("targetNode"),
+        relation.get("to"),
+        metadata.get("target_id"),
+        metadata.get("target"),
+        metadata.get("target_node"),
+        metadata.get("targetId"),
+        metadata.get("targetNode"),
+        metadata.get("to"),
+    )
+    relation_type = _first_relation_value(
+        relation.get("relation_type"),
+        relation.get("type"),
+        relation.get("label"),
+        metadata.get("relation_type"),
+        metadata.get("type"),
+        metadata.get("label"),
+    ) or "related"
     description = expand_formula_references(relation.get("description") or metadata.get("description") or "")
     if metadata.get("description"):
         metadata["description"] = expand_formula_references(metadata.get("description"))
@@ -292,14 +350,19 @@ def normalize_frontend_relation(relation: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_frontend_graph(raw_graph: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     graph = raw_graph or call_backend_tool("read_graph")
+    if not isinstance(graph, dict):
+        graph = {}
     nodes = [_normalize_node(node) for node in graph.get("nodes", [])]
     lecture_node_ids = {str(node.get("id")) for node in nodes if _is_generated_lecture_node(node)}
     nodes = [node for node in nodes if str(node.get("id")) not in lecture_node_ids]
+    raw_relations = graph.get("relations") or graph.get("edges") or []
     relations = [
-        _normalize_relation(relation)
-        for relation in graph.get("relations", [])
-        if str(relation.get("source_id") or relation.get("source") or "") not in lecture_node_ids
-        and str(relation.get("target_id") or relation.get("target") or "") not in lecture_node_ids
+        normalized
+        for relation in raw_relations
+        if isinstance(relation, dict)
+        for normalized in [_normalize_relation(relation)]
+        if str(normalized.get("source_id") or "") not in lecture_node_ids
+        and str(normalized.get("target_id") or "") not in lecture_node_ids
     ]
     return {
         **graph,

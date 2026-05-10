@@ -290,9 +290,9 @@ function ExerciseCard({
             </div>
           )}
           {(exercise.answer || exercise.correct_answer) && (
-            <div className="text-sm">
+            <div className="flex items-start gap-1 text-sm">
               <span className="font-medium">答案:</span>{" "}
-              <span className="text-muted-foreground">{exercise.answer || exercise.correct_answer}</span>
+              <RichTextContent content={exercise.answer || exercise.correct_answer || ""} inline className="min-w-0 flex-1 text-muted-foreground" />
             </div>
           )}
         </div>

@@ -284,8 +284,9 @@ function ExerciseCard({ exercise, index }: { exercise: unknown; index: number })
 
   return (
     <div className="space-y-3 p-4">
-      <div className="font-medium">
-        {index + 1}. {question}
+      <div className="flex items-start gap-2 font-medium">
+        <span className="shrink-0">{index + 1}.</span>
+        <RichTextContent content={question} inline className="min-w-0 flex-1" />
       </div>
       {!!options.length && (
         <div className="grid gap-2 sm:grid-cols-2">
@@ -301,7 +302,12 @@ function ExerciseCard({ exercise, index }: { exercise: unknown; index: number })
           ))}
         </div>
       )}
-      {answer && <div className="text-sm text-primary">答案：{answer}</div>}
+      {answer && (
+        <div className="flex items-start gap-1 text-sm text-primary">
+          <span className="shrink-0">答案：</span>
+          <RichTextContent content={answer} inline className="min-w-0 flex-1" />
+        </div>
+      )}
       {explanation && <RichTextContent content={explanation} className="text-sm" />}
     </div>
   )

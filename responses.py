@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from datetime import datetime
 from typing import Any, Dict, Optional
 from fastapi import HTTPException
@@ -35,10 +36,42 @@ def normalize_frontend_node(node: Dict[str, Any]) -> Dict[str, Any]:
 def normalize_frontend_relation(relation: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(relation, dict):
         return relation
-    metadata = relation.get("metadata") or {}
-    source_id = relation.get("source_id") or relation.get("source_node")
-    target_id = relation.get("target_id") or relation.get("target_node")
-    relation_type = relation.get("relation_type") or relation.get("type") or "related"
+    metadata = relation.get("metadata") or relation.get("properties") or {}
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    source_id = (
+        relation.get("source_id")
+        or relation.get("source")
+        or relation.get("source_node")
+        or relation.get("sourceId")
+        or relation.get("sourceNode")
+        or relation.get("from")
+        or metadata.get("source_id")
+        or metadata.get("source")
+        or metadata.get("source_node")
+        or metadata.get("sourceId")
+        or metadata.get("sourceNode")
+        or metadata.get("from")
+    )
+    target_id = (
+        relation.get("target_id")
+        or relation.get("target")
+        or relation.get("target_node")
+        or relation.get("targetId")
+        or relation.get("targetNode")
+        or relation.get("to")
+        or metadata.get("target_id")
+        or metadata.get("target")
+        or metadata.get("target_node")
+        or metadata.get("targetId")
+        or metadata.get("targetNode")
+        or metadata.get("to")
+    )
+    relation_type = relation.get("relation_type") or relation.get("type") or relation.get("label") or metadata.get("relation_type") or metadata.get("type") or metadata.get("label") or "related"
     return {
         "id": relation.get("id"),
         "source_id": source_id,

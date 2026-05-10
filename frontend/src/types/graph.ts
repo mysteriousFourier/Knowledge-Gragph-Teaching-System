@@ -15,6 +15,19 @@ export interface GraphRelation {
   id: string
   source_id: string
   target_id: string
+  strength?: number
+  source?: string
+  target?: string
+  source_node?: string
+  target_node?: string
+  sourceId?: string
+  targetId?: string
+  sourceNode?: string
+  targetNode?: string
+  from?: string
+  to?: string
+  type?: string
+  label?: string
   relation_type: string
   similarity: number
   description: string
@@ -28,6 +41,7 @@ export interface GraphRelation {
 export interface GraphData {
   nodes: GraphNode[]
   relations: GraphRelation[]
+  edges?: GraphRelation[]
   stats?: {
     node_count: number
     relation_count: number

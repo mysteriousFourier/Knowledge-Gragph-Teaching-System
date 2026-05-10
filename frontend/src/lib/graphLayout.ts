@@ -21,10 +21,11 @@ export async function layoutGraphNodes(
   options: LayoutOptions,
 ): Promise<Node[]> {
   if (nodes.length === 0) return []
+  const validEdges = getRenderableEdges(nodes, edges)
 
   if (options.mode === "elk") {
     try {
-      return await layoutWithElk(nodes, edges, options)
+      return await layoutWithElk(nodes, validEdges, options)
     } catch (error) {
       console.warn("ELK layout failed, falling back to Dagre.", error)
     }
@@ -32,7 +33,7 @@ export async function layoutGraphNodes(
 
   if (options.mode === "elk" || options.mode === "dagre") {
     try {
-      return layoutWithDagre(nodes, edges, options)
+      return layoutWithDagre(nodes, validEdges, options)
     } catch (error) {
       console.warn("Dagre layout failed, falling back to grid.", error)
     }
@@ -122,6 +123,11 @@ function layoutWithGrid(nodes: Node[], options: LayoutOptions): Node[] {
       y: Math.floor(index / columns) * yGap,
     },
   }))
+}
+
+function getRenderableEdges(nodes: Node[], edges: Edge[]) {
+  const nodeIds = new Set(nodes.map((node) => node.id))
+  return edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
 }
 
 function getNodeDimension(value: unknown, fallback: number): number {
