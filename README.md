@@ -134,6 +134,35 @@ python backend/start_all.py
 
 该模式会分别启动前端静态服务、教育 API、维护 API 和图谱后台页，但日常开发与部署优先使用根目录单端口模式。
 
+## Azure App Service 部署
+
+当前 `main` 分支包含 GitHub Actions 工作流：
+
+```text
+.github/workflows/azure-main-kgts-interactive-learning-system.yml
+```
+
+该工作流会先构建 React 前端，再把单端口 Python 应用部署到 Azure App Service。
+
+Azure App Service 的 Startup Command 建议设置为：
+
+```bash
+bash startup.sh
+```
+
+如果 Portal 不接受脚本，也可以设置为：
+
+```bash
+python -m uvicorn render_app:app --host 0.0.0.0 --port $PORT
+```
+
+Azure 冷启动健康探测时间有限，默认会跳过结构化图谱重建和图谱清理这类启动维护任务，避免出现 `ContainerTimeout`。相关环境变量：
+
+- `APP_RUN_STARTUP_MAINTENANCE=0`
+- `RENDER_AUTO_SYNC_STRUCTURED=0`
+- `APP_BOOTSTRAP_SEED_DATA=1`
+- `DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS=0`
+
 ## 文档索引
 
 - [前端说明](frontend/README.md)

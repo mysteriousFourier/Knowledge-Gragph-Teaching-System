@@ -101,6 +101,20 @@ def _env_flag(name: str, default: bool = True) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _is_azure_app_service() -> bool:
+    return bool(
+        os.getenv("WEBSITE_SITE_NAME")
+        or os.getenv("WEBSITE_INSTANCE_ID")
+        or os.getenv("APPSETTING_WEBSITE_SITE_NAME")
+    )
+
+
+def _run_startup_maintenance() -> bool:
+    """Keep cloud cold starts fast enough for platform health probes."""
+    default = not _is_azure_app_service()
+    return _env_flag("APP_RUN_STARTUP_MAINTENANCE", default)
+
+
 def _runtime_chapters_file() -> Path:
     return Path(os.getenv("APP_RUNTIME_DIR", str(ROOT_DIR / ".runtime"))) / "chapters.json"
 
@@ -223,6 +237,9 @@ def _ensure_seed_graph() -> None:
 def _ensure_seed_runtime() -> None:
     _ensure_seed_chapters()
     _ensure_seed_graph()
+    if not _run_startup_maintenance():
+        print("[render] startup maintenance skipped")
+        return
     try:
         result = delete_generated_lecture_nodes()
         if result.get("deleted_count"):
@@ -247,6 +264,8 @@ def _ensure_seed_runtime() -> None:
 
 
 def _ensure_structured_graph() -> None:
+    if not _run_startup_maintenance():
+        return
     if not _env_flag("RENDER_AUTO_SYNC_STRUCTURED", True):
         return
 
