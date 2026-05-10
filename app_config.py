@@ -1,0 +1,30 @@
+"""Backward-compatibility re-export of project configuration."""
+from __future__ import annotations
+
+from config import (  # noqa: F401
+    DEFAULT_APP_BIND_HOST,
+    DEFAULT_APP_HOST,
+    DEFAULT_APP_SCHEME,
+    DEFAULT_BACKEND_ADMIN_PORT,
+    DEFAULT_EDUCATION_API_PORT,
+    DEFAULT_FRONTEND_PORT,
+    DEFAULT_LOOPBACK_HOST,
+    DEFAULT_MAINTENANCE_API_PORT,
+    DEFAULT_STUDENT_ID,
+    DEFAULT_STUDENT_PASSWORD,
+    DEFAULT_STUDENT_USERNAME,
+    DEFAULT_TEACHER_ID,
+    DEFAULT_TEACHER_PASSWORD,
+    DEFAULT_TEACHER_USERNAME,
+    EduConfig,
+    build_frontend_runtime_config,
+    build_service_base_url,
+    get_auth_config,
+    get_bind_host,
+    get_env,
+    get_env_int,
+    get_loopback_host,
+    load_root_env,
+    write_frontend_json_cache,
+    write_frontend_runtime_config,
+)

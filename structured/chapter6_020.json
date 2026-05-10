@@ -1,0 +1,87 @@
+{
+  "id": "chapter6_020",
+  "metadata": {
+    "chapter": "chapter6",
+    "section": "Chapter 6: Theorems of Natural Selection",
+    "subsections": [
+      "Parent-Offspring Regressions Before and After Selection"
+    ],
+    "source_file": "chapter6原文.json",
+    "source_title": "Evolution and Selection of Quantitative Traits",
+    "formula_references": [
+      "6.32",
+      "6.33f",
+      "6.34",
+      "6.35",
+      "6.36a",
+      "6.36b",
+      "6.37",
+      "6.8"
+    ],
+    "table_references": [
+      "6.3"
+    ]
+  },
+  "blocks": [
+    {
+      "type": "proposition",
+      "content": "The second feature leading to Heywood's decomposition concerns the reference population for the parent-offspring regression. A subtle but important point to stress about Equation [[SEE_FORMULA:6.32]] is that $ \\beta_{\\overline{z}|z} $ is the slope of the regression of offspring mean on parental phenotypes following selection. This slope may be different from the regression based upon unselected parents. In particular, when considering a single parent-offspring (as opposed to a midparent-offspring) regression, selection can change the mean of the offspring by changing the distribution of genotypes for the other parent with which the parent mates."
+    },
+    {
+      "type": "derivation",
+      "content": "To see this point, suppose a single locus determines the trait of interest, and the selected parent chosen has genotype Aa. If the frequency of A before selection was 1/4, then the expected offspring frequencies when this parent is randomly mated to an unselected random parent (and hence a 1/4 chance of an A and a 3/4 chance of an a) are (1/8) AA, (1/2) Aa, and (3/8) aa, and these frequencies determine the trait value in the offspring from this parent. Now suppose that selection changes the frequency of A to 0.35. The resulting offspring frequencies when our Aa parent is now crossed to a random parent from the selected population become 0.175 AA, 0.5 Aa, and 0.325 AA, resulting in a different mean offspring value for this parent versus that when crossed to an unselected parent. When the allele-frequency change is very small (as would occur with weak selection on each underlying locus), these two regressions are very similar. However, when a gene of large effect is under selection, the regression using selected versus unselected parents can be different (Example 6.3)."
+    },
+    {
+      "type": "proposition",
+      "content": "Thus, the single-parent-offspring regression can change between selected and unselected populations, as the mate is not specified. This is not the case when we take the unit to be the midparent, because, given the genotypes of both parents, their distribution of offspring is fully determined, independent of the frequency of other genotypes in the population. The same is true for parents that asexually reproduce or that self."
+    },
+    {
+      "type": "proposition",
+      "content": "Thus, when considering single parents, Equation [[SEE_FORMULA:6.32]] needs to be modified to account for the possibility that the mean offspring from this parent is influenced by the distribution of other parents after selection. To do so, let $ \\overline{{{z}}}_{i} $ and $ \\overline{{{z}}}_{i}^{\\circ} $ denote the offspring mean from parent i when mated to parents from selected and unselected populations, respectively. Given that Equation [[SEE_FORMULA:6.32]] is expressed in terms of $ \\overline{{{z}}}_{i} $ , following Heywood, we wish to translate this equation into an expression involving $ \\overline{{{z}}}_{i}^{\\circ} $ (the offspring means of the parents in the absence of selection). To do so, we define $ \\delta_{i}^{\\circ}=\\overline{{{z}}}_{i}-\\overline{{{z}}}_{i}^{\\circ} $ as the difference in the offspring means for parent i when crossed to selected versus unselected parents. Because $ \\overline{{{z}}}_{i}=\\overline{{{z}}}_{i}^{\\circ}+\\delta_{i}^{\\circ} $"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.34]]"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.35]]"
+    },
+    {
+      "type": "proposition",
+      "content": "Thus"
+    },
+    {
+      "type": "proposition",
+      "content": "Equation [[SEE_FORMULA:6.35]] relates the parent-offspring regressions using unselected $ \\left( \\beta_{\\overline{z}^{\\circ}}|z\\right) $ versus selected $ \\left( \\beta_{\\overline{z}}|z\\right) $ parents."
+    },
+    {
+      "type": "proposition",
+      "content": "The same logic leading to Equation [[SEE_FORMULA:6.33f]] (Example [[SEE_FORMULA:6.8]]) can be used to obtain two useful identities:"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.36a]]"
+    },
+    {
+      "type": "proposition",
+      "content": "and"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.36b]]"
+    },
+    {
+      "type": "proposition",
+      "content": "Finally, while $ \\bar{\\delta}_{i} $ is often considered to be the change from parent to offspring in the absence of selection, this is not strictly correct. Formally, it has two components,"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.37]]"
+    },
+    {
+      "type": "proposition",
+      "content": "[[TABLE:6.3]] Terms in Heywood's (2005) decomposition of response and their biological interpretations. See the text for further details."
+    }
+  ]
+}

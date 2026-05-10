@@ -1,0 +1,12 @@
+{
+  "memory": {
+    "default_provider": "mem0",
+    "providers": [
+      "mem0",
+      "openclaw"
+    ],
+    "fallback_enabled": true
+  },
+  "deepseek_api_key": "",
+  "openai_api_key": ""
+}
