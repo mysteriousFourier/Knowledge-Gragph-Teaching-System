@@ -516,12 +516,113 @@
         let animationEnabled = true;
         let selectedNode = null;
         let focusChapter = null; // 默认显示所有chapter
+        const clickMoveTolerance = 5;
 
         const colorPalette = [
             '#667eea', '#764ba2', '#f093fb', '#f5576c',
             '#4facfe', '#00f2fe', '#43e97b', '#38f9d7',
             '#fa709a', '#fee140', '#30cfd0', '#330867'
         ];
+
+        function endpointId(value) {
+            if (value && typeof value === 'object') {
+                return String(value.id || value.node_id || value.nodeId || value.value || '').trim();
+            }
+            return value == null ? '' : String(value).trim();
+        }
+
+        function firstEndpoint(...values) {
+            for (const value of values) {
+                const id = endpointId(value);
+                if (id && id !== 'undefined' && id !== 'null') return id;
+            }
+            return '';
+        }
+
+        function linkMetadata(link) {
+            const raw = link && (link.metadata || link.properties);
+            if (!raw) return {};
+            if (typeof raw === 'string') {
+                try {
+                    const parsed = JSON.parse(raw);
+                    return parsed && typeof parsed === 'object' ? parsed : {};
+                } catch (_error) {
+                    return {};
+                }
+            }
+            return typeof raw === 'object' ? raw : {};
+        }
+
+        function linkSourceId(link) {
+            const metadata = linkMetadata(link);
+            return firstEndpoint(
+                link && link.source_id,
+                link && link.source_node,
+                link && link.source,
+                link && link.sourceId,
+                link && link.sourceNode,
+                link && link.from,
+                metadata.source_id,
+                metadata.source_node,
+                metadata.source,
+                metadata.sourceId,
+                metadata.sourceNode,
+                metadata.from
+            );
+        }
+
+        function linkTargetId(link) {
+            const metadata = linkMetadata(link);
+            return firstEndpoint(
+                link && link.target_id,
+                link && link.target_node,
+                link && link.target,
+                link && link.targetId,
+                link && link.targetNode,
+                link && link.to,
+                metadata.target_id,
+                metadata.target_node,
+                metadata.target,
+                metadata.targetId,
+                metadata.targetNode,
+                metadata.to
+            );
+        }
+
+        function linkTypeOf(link) {
+            const metadata = linkMetadata(link);
+            return firstEndpoint(
+                link && link.relation_type,
+                link && link.type,
+                link && link.label,
+                metadata.relation_type,
+                metadata.type,
+                metadata.label
+            ) || 'related';
+        }
+
+        function normalizeLink(link) {
+            const metadata = linkMetadata(link);
+            const sourceId = linkSourceId(link);
+            const targetId = linkTargetId(link);
+            const relationType = linkTypeOf(link);
+            return {
+                ...(link || {}),
+                source_id: sourceId,
+                target_id: targetId,
+                source_node: sourceId,
+                target_node: targetId,
+                source: sourceId,
+                target: targetId,
+                relation_type: relationType,
+                type: relationType,
+                metadata
+            };
+        }
+
+        function linkTouchesNode(link, nodeId) {
+            return linkSourceId(link) === nodeId || linkTargetId(link) === nodeId;
+        }
 
         document.addEventListener('DOMContentLoaded', function() {
             initGraph();
@@ -588,11 +689,16 @@
                 });
                 
                 console.log('节点ID映射:', Array.from(nodeMap.keys()).slice(0, 10));
-                console.log('原始关系数据:', relsData.relationships.slice(0, 5));
+                const rawRelationships = relsData.relationships || [];
+                console.log('原始关系数据:', rawRelationships.slice(0, 5));
                 
-                links = (relsData.relationships || []).filter(rel => {
-                    const sourceId = String(rel.source_node);
-                    const targetId = String(rel.target_node);
+                const normalizedRelationships = rawRelationships.map(normalizeLink);
+                const endpointRelationships = normalizedRelationships.filter(rel => linkSourceId(rel) && linkTargetId(rel));
+                const missingEndpointCount = normalizedRelationships.length - endpointRelationships.length;
+
+                links = endpointRelationships.filter(rel => {
+                    const sourceId = linkSourceId(rel);
+                    const targetId = linkTargetId(rel);
                     const sourceExists = nodeMap.has(sourceId);
                     const targetExists = nodeMap.has(targetId);
                     if (!sourceExists || !targetExists) {
@@ -601,17 +707,26 @@
                     return sourceExists && targetExists;
                 }).map(rel => ({
                     ...rel,
-                    source: nodeMap.get(String(rel.source_node)),
-                    target: nodeMap.get(String(rel.target_node))
+                    source_id: linkSourceId(rel),
+                    target_id: linkTargetId(rel),
+                    source_node: linkSourceId(rel),
+                    target_node: linkTargetId(rel),
+                    source: nodeMap.get(linkSourceId(rel)),
+                    target: nodeMap.get(linkTargetId(rel)),
+                    relation_type: linkTypeOf(rel),
+                    type: linkTypeOf(rel)
                 }));
+                const missingNodeCount = endpointRelationships.length - links.length;
                 
                 // 保存所有数据
                 allNodes = nodes;
                 allLinks = links;
                 
                 // 清理无效关系后更新统计
-                console.log(`原始节点数: ${nodesData.nodes.length}`);
-                console.log(`原始关系数: ${relsData.relationships.length}`);
+                console.log(`原始节点数: ${nodes.length}`);
+                console.log(`原始关系数: ${rawRelationships.length}`);
+                console.log(`端点缺失关系数: ${missingEndpointCount}`);
+                console.log(`节点不存在关系数: ${missingNodeCount}`);
                 console.log(`过滤后: ${nodes.length} 个节点, ${links.length} 个关系`);
                 
                 // 检查前5个关系
@@ -678,6 +793,8 @@
                 .data(links)
                 .enter().append('line')
                 .attr('class', 'link')
+                .attr('stroke', '#999')
+                .attr('stroke-opacity', 0.7)
                 .attr('stroke-width', d => Math.sqrt(d.strength || 1) * 2);
 
             const node = g.append('g')
@@ -692,11 +809,7 @@
 
             node.append('circle')
                 .attr('r', d => {
-                    const degree = links.filter(l => {
-                        const sourceId = typeof l.source === 'object' ? l.source.id : l.source;
-                        const targetId = typeof l.target === 'object' ? l.target.id : l.target;
-                        return sourceId === d.id || targetId === d.id;
-                    }).length;
+                    const degree = links.filter(l => linkTouchesNode(l, d.id)).length;
                     return 15 + Math.min(degree * 3, 20);
                 })
                 .attr('fill', d => colorScale(d.type || 'default'));
@@ -705,12 +818,6 @@
                 .attr('dx', 20)
                 .attr('dy', 5)
                 .text(d => d.label);
-
-            node.on('click', (event, d) => {
-                event.stopPropagation();
-                showDetail(d);
-                showNodeConnections(d.id);
-            });
 
             link.on('mouseenter', function(event, d) {
                 d3.select(this).attr('stroke', '#667eea').attr('stroke-opacity', 1);
@@ -737,17 +844,32 @@
             if (!event.active) simulation.alphaTarget(0.3).restart();
             d.fx = d.x;
             d.fy = d.y;
+            d.__dragStartX = event.x;
+            d.__dragStartY = event.y;
+            d.__dragMoved = false;
         }
 
         function dragged(event, d) {
+            const dx = event.x - (d.__dragStartX || event.x);
+            const dy = event.y - (d.__dragStartY || event.y);
+            if (Math.hypot(dx, dy) > clickMoveTolerance) d.__dragMoved = true;
             d.fx = event.x;
             d.fy = event.y;
         }
 
         function dragended(event, d) {
             if (!event.active) simulation.alphaTarget(0);
+            const dx = event.x - (d.__dragStartX || event.x);
+            const dy = event.y - (d.__dragStartY || event.y);
+            const moved = d.__dragMoved || Math.hypot(dx, dy) > clickMoveTolerance;
             d.fx = null;
             d.fy = null;
+            d.__dragMoved = false;
+            if (!moved) {
+                event.sourceEvent && event.sourceEvent.stopPropagation();
+                showDetail(d);
+                showNodeConnections(d.id);
+            }
         }
 
         function updateStats() {
@@ -815,7 +937,7 @@
 
                 d3.selectAll('.node').style('display', d => d.type === type ? 'block' : 'none');
                 d3.selectAll('.link').style('display', d =>
-                    filteredIds.has(d.source.id) && filteredIds.has(d.target.id) ? 'block' : 'none'
+                    filteredIds.has(linkSourceId(d)) && filteredIds.has(linkTargetId(d)) ? 'block' : 'none'
                 );
             }
         }
@@ -915,19 +1037,21 @@
 
             // 找到与chapter相关的节点
             const chapterLinks = allLinks.filter(link => 
-                link.source.id === chapterId || link.target.id === chapterId
+                linkSourceId(link) === chapterId || linkTargetId(link) === chapterId
             );
 
             // 收集所有相关节点
             const relatedNodeIds = new Set([chapterId]);
             chapterLinks.forEach(link => {
-                if (link.source.id !== chapterId) relatedNodeIds.add(link.source.id);
-                if (link.target.id !== chapterId) relatedNodeIds.add(link.target.id);
+                const sourceId = linkSourceId(link);
+                const targetId = linkTargetId(link);
+                if (sourceId !== chapterId) relatedNodeIds.add(sourceId);
+                if (targetId !== chapterId) relatedNodeIds.add(targetId);
             });
 
             // 找到这些节点之间的关系
             const nodeLinks = allLinks.filter(link => 
-                relatedNodeIds.has(link.source.id) && relatedNodeIds.has(link.target.id)
+                relatedNodeIds.has(linkSourceId(link)) && relatedNodeIds.has(linkTargetId(link))
             );
 
             // 过滤节点和关系
@@ -951,16 +1075,18 @@
             while (currentDepth < depth) {
                 const newNodes = [];
                 allLinks.forEach(link => {
-                    if (currentNodes.includes(link.source.id)) {
-                        if (!relatedNodeIds.has(link.target.id)) {
-                            relatedNodeIds.add(link.target.id);
-                            newNodes.push(link.target.id);
+                    const sourceId = linkSourceId(link);
+                    const targetId = linkTargetId(link);
+                    if (currentNodes.includes(sourceId)) {
+                        if (!relatedNodeIds.has(targetId)) {
+                            relatedNodeIds.add(targetId);
+                            newNodes.push(targetId);
                         }
                     }
-                    if (currentNodes.includes(link.target.id)) {
-                        if (!relatedNodeIds.has(link.source.id)) {
-                            relatedNodeIds.add(link.source.id);
-                            newNodes.push(link.source.id);
+                    if (currentNodes.includes(targetId)) {
+                        if (!relatedNodeIds.has(sourceId)) {
+                            relatedNodeIds.add(sourceId);
+                            newNodes.push(sourceId);
                         }
                     }
                 });
@@ -971,7 +1097,7 @@
             // 过滤节点和关系
             nodes = allNodes.filter(node => relatedNodeIds.has(node.id));
             links = allLinks.filter(link => 
-                relatedNodeIds.has(link.source.id) && relatedNodeIds.has(link.target.id)
+                relatedNodeIds.has(linkSourceId(link)) && relatedNodeIds.has(linkTargetId(link))
             );
 
             console.log(`显示节点 ${nodeId} 的 ${nodes.length} 个相关节点和 ${links.length} 个关系`);
@@ -997,19 +1123,21 @@
             
             // 找到与chapter相关的节点
             const chapterLinks = allLinks.filter(link => 
-                chapterIds.has(link.source.id) || chapterIds.has(link.target.id)
+                chapterIds.has(linkSourceId(link)) || chapterIds.has(linkTargetId(link))
             );
 
             // 收集所有相关节点
             const relatedNodeIds = new Set([...chapterIds]);
             chapterLinks.forEach(link => {
-                if (!chapterIds.has(link.source.id)) relatedNodeIds.add(link.source.id);
-                if (!chapterIds.has(link.target.id)) relatedNodeIds.add(link.target.id);
+                const sourceId = linkSourceId(link);
+                const targetId = linkTargetId(link);
+                if (!chapterIds.has(sourceId)) relatedNodeIds.add(sourceId);
+                if (!chapterIds.has(targetId)) relatedNodeIds.add(targetId);
             });
 
             // 找到这些节点之间的关系
             const nodeLinks = allLinks.filter(link => 
-                relatedNodeIds.has(link.source.id) && relatedNodeIds.has(link.target.id)
+                relatedNodeIds.has(linkSourceId(link)) && relatedNodeIds.has(linkTargetId(link))
             );
 
             // 过滤节点和关系

@@ -3,18 +3,42 @@ import { maintenanceClient } from "./client"
 import type { ApiResponse } from "@/types/api"
 import type { GraphNode, GraphRelation, GraphData } from "@/types/graph"
 
-const normalizeNode = (node: GraphNode): GraphNode => ({
-  ...node,
-  label: node.label || node.metadata?.label as string || node.id,
-  type: node.type || "concept",
-  confidence: typeof node.confidence === "number" ? node.confidence : 1,
-  reviewed: Boolean(node.reviewed),
-  metadata: node.metadata || {},
-})
+type MetadataRecord = Record<string, unknown>
+
+const normalizeMetadata = (value: unknown): MetadataRecord => {
+  if (!value) return {}
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value)
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as MetadataRecord) : {}
+    } catch {
+      return {}
+    }
+  }
+  return typeof value === "object" && !Array.isArray(value) ? (value as MetadataRecord) : {}
+}
 
 const firstString = (...values: unknown[]) => {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) return value.trim()
+  }
+  return ""
+}
+
+const endpointString = (value: unknown) => {
+  if (value && typeof value === "object") {
+    const record = value as MetadataRecord
+    return firstString(record.id, record.node_id, record.nodeId, record.value, record.label)
+  }
+  if (value === null || value === undefined) return ""
+  const text = String(value).trim()
+  return text && text !== "undefined" && text !== "null" ? text : ""
+}
+
+const firstEndpoint = (...values: unknown[]) => {
+  for (const value of values) {
+    const endpoint = endpointString(value)
+    if (endpoint) return endpoint
   }
   return ""
 }
@@ -27,42 +51,67 @@ const firstNumber = (...values: unknown[]) => {
   return 1
 }
 
-const normalizeRelation = (relation: GraphRelation): GraphRelation => ({
-  ...relation,
-  source_id: firstString(
+const normalizeNode = (node: GraphNode): GraphNode => {
+  const metadata = normalizeMetadata((node as { metadata?: unknown }).metadata)
+  return {
+    ...node,
+    label: node.label || firstString(metadata.label) || node.id,
+    type: node.type || "concept",
+    confidence: typeof node.confidence === "number" ? node.confidence : firstNumber(metadata.confidence),
+    reviewed: Boolean(node.reviewed ?? metadata.reviewed),
+    metadata,
+  }
+}
+
+const normalizeRelation = (relation: GraphRelation): GraphRelation => {
+  const metadata = normalizeMetadata((relation as { metadata?: unknown; properties?: unknown }).metadata || (relation as { properties?: unknown }).properties)
+  const sourceId = firstEndpoint(
     relation.source_id,
     relation.source,
     relation.source_node,
     relation.sourceId,
     relation.sourceNode,
     relation.from,
-    relation.metadata?.source_id,
-    relation.metadata?.source,
-    relation.metadata?.source_node,
-    relation.metadata?.sourceId,
-    relation.metadata?.sourceNode,
-    relation.metadata?.from,
-  ),
-  target_id: firstString(
+    metadata.source_id,
+    metadata.source,
+    metadata.source_node,
+    metadata.sourceId,
+    metadata.sourceNode,
+    metadata.from,
+  )
+  const targetId = firstEndpoint(
     relation.target_id,
     relation.target,
     relation.target_node,
     relation.targetId,
     relation.targetNode,
     relation.to,
-    relation.metadata?.target_id,
-    relation.metadata?.target,
-    relation.metadata?.target_node,
-    relation.metadata?.targetId,
-    relation.metadata?.targetNode,
-    relation.metadata?.to,
-  ),
-  relation_type: firstString(relation.relation_type, relation.type, relation.label, relation.metadata?.relation_type, relation.metadata?.type, relation.metadata?.label) || "related",
-  similarity: firstNumber(relation.similarity, relation.strength, relation.metadata?.similarity, relation.metadata?.strength),
-  description: firstString(relation.description, relation.metadata?.description),
-  reviewed: Boolean(relation.reviewed),
-  metadata: relation.metadata || {},
-})
+    metadata.target_id,
+    metadata.target,
+    metadata.target_node,
+    metadata.targetId,
+    metadata.targetNode,
+    metadata.to,
+  )
+  const relationType = firstEndpoint(relation.relation_type, relation.type, relation.label, metadata.relation_type, metadata.type, metadata.label) || "related"
+  const description = firstString(relation.description, metadata.description)
+
+  return {
+    ...relation,
+    source_id: sourceId,
+    target_id: targetId,
+    source: sourceId,
+    target: targetId,
+    source_node: sourceId,
+    target_node: targetId,
+    relation_type: relationType,
+    type: relationType,
+    similarity: firstNumber(relation.similarity, relation.strength, metadata.similarity, metadata.strength),
+    description,
+    reviewed: Boolean(relation.reviewed ?? metadata.reviewed),
+    metadata,
+  }
+}
 
 const graphRelations = (graph?: GraphData): GraphRelation[] => {
   const relations = graph?.relations
@@ -107,11 +156,18 @@ export const useGraphRelationships = (limit = 10000) => {
     queryFn: async () => {
       const graph = await getGraph()
       const visibleNodeIds = new Set((graph.data?.nodes || []).map(normalizeNode).filter((node) => !isLectureNode(node)).map((node) => node.id))
-      const relations = graphRelations(graph.data)
-        .map(normalizeRelation)
-        .filter((relation) => visibleNodeIds.has(relation.source_id) && visibleNodeIds.has(relation.target_id))
+      const normalizedRelations = graphRelations(graph.data).map(normalizeRelation)
+      const completeEndpointRelations = normalizedRelations.filter((relation) => relation.source_id && relation.target_id)
+      const relations = completeEndpointRelations.filter((relation) => visibleNodeIds.has(relation.source_id) && visibleNodeIds.has(relation.target_id))
       const relationships = relations.slice(0, limit)
-      return { success: graph.success, relationships, count: relations.length }
+      return {
+        success: graph.success,
+        relationships,
+        count: relations.length,
+        rawCount: normalizedRelations.length,
+        missingEndpointCount: normalizedRelations.length - completeEndpointRelations.length,
+        missingNodeCount: completeEndpointRelations.length - relations.length,
+      }
     },
   })
 }

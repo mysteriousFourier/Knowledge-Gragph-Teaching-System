@@ -308,6 +308,7 @@
   <script>
     let graph = { nodes: [], relations: [] };
     let audit = null;
+    let graphDiagnostics = { rawRelations: 0, missingEndpoint: 0, missingNode: 0 };
     let selectedId = "";
     let viewMode = "network";
     let positions = new Map();
@@ -318,7 +319,9 @@
     let layoutSignature = "";
     let renderTimer = null;
     let svgFrameRequested = false;
+    let suppressNodeClickUntil = 0;
     const networkNodeHardLimit = 320;
+    const clickMoveTolerance = 5;
 
     const colors = {
       chapter: "#f59e0b", formula: "#10b981", table: "#0ea5e9", note: "#0ea5e9",
@@ -630,6 +633,149 @@
       return (node.metadata && node.metadata.label) || node.label || node.id;
     }
 
+    function endpointId(value) {
+      if (value && typeof value === "object") {
+        return String(value.id || value.node_id || value.nodeId || value.value || "").trim();
+      }
+      return value == null ? "" : String(value).trim();
+    }
+
+    function firstEndpoint(...values) {
+      for (const value of values) {
+        const id = endpointId(value);
+        if (id && id !== "undefined" && id !== "null") return id;
+      }
+      return "";
+    }
+
+    function relationMetadata(relation) {
+      const raw = relation && (relation.metadata || relation.properties);
+      if (!raw) return {};
+      if (typeof raw === "string") {
+        try {
+          const parsed = JSON.parse(raw);
+          return parsed && typeof parsed === "object" ? parsed : {};
+        } catch (_error) {
+          return {};
+        }
+      }
+      return typeof raw === "object" ? raw : {};
+    }
+
+    function relationSourceId(relation) {
+      const metadata = relationMetadata(relation);
+      return firstEndpoint(
+        relation && relation.source_id,
+        relation && relation.source_node,
+        relation && relation.source,
+        relation && relation.from,
+        metadata.source_id,
+        metadata.source_node,
+        metadata.source,
+        metadata.from
+      );
+    }
+
+    function relationTargetId(relation) {
+      const metadata = relationMetadata(relation);
+      return firstEndpoint(
+        relation && relation.target_id,
+        relation && relation.target_node,
+        relation && relation.target,
+        relation && relation.to,
+        metadata.target_id,
+        metadata.target_node,
+        metadata.target,
+        metadata.to
+      );
+    }
+
+    function relationTypeOf(relation) {
+      const metadata = relationMetadata(relation);
+      return firstEndpoint(
+        relation && relation.relation_type,
+        relation && relation.type,
+        relation && relation.label,
+        metadata.relation_type,
+        metadata.type,
+        metadata.label
+      ) || "related";
+    }
+
+    function normalizeRelation(relation) {
+      const metadata = relationMetadata(relation);
+      const sourceId = relationSourceId(relation);
+      const targetId = relationTargetId(relation);
+      const relationType = relationTypeOf(relation);
+      return {
+        ...(relation || {}),
+        source_id: sourceId,
+        target_id: targetId,
+        source_node: sourceId,
+        target_node: targetId,
+        source: sourceId,
+        target: targetId,
+        relation_type: relationType,
+        type: relationType,
+        metadata
+      };
+    }
+
+    function normalizeGraph(data) {
+      const payload = data || {};
+      const nodes = (payload.nodes || [])
+        .map(node => ({ ...node, id: String(node.id || "") }))
+        .filter(node => node.id);
+      const nodeIds = new Set(nodes.map(node => String(node.id || "")));
+      const rawRelations = payload.relations || payload.edges || [];
+      const endpointRelations = rawRelations
+        .map(normalizeRelation)
+        .filter(relation => relation.source_id && relation.target_id);
+      const relations = endpointRelations
+        .filter(relation => nodeIds.has(relation.source_id) && nodeIds.has(relation.target_id));
+      graphDiagnostics = {
+        rawRelations: rawRelations.length,
+        missingEndpoint: rawRelations.length - endpointRelations.length,
+        missingNode: endpointRelations.length - relations.length
+      };
+      return {
+        ...payload,
+        nodes,
+        relations,
+        edges: relations
+      };
+    }
+
+    function relationKey(relation) {
+      return relation.id || `${relationSourceId(relation)}\u0000${relationTypeOf(relation)}\u0000${relationTargetId(relation)}`;
+    }
+
+    function mergeRelations(primary, secondary) {
+      const seen = new Set();
+      const merged = [];
+      primary.concat(secondary).forEach(relation => {
+        const key = relationKey(relation);
+        if (seen.has(key)) return;
+        seen.add(key);
+        merged.push(relation);
+      });
+      return merged;
+    }
+
+    function relationMatchesActiveType(relation) {
+      const relType = document.getElementById("relation-filter").value;
+      return !relType || relationTypeOf(relation) === relType;
+    }
+
+    function relationTouchesNode(relation, nodeId) {
+      return relationSourceId(relation) === nodeId || relationTargetId(relation) === nodeId;
+    }
+
+    function directRelationsFor(nodeId) {
+      if (!nodeId) return [];
+      return graph.relations.filter(relation => relationTouchesNode(relation, nodeId) && relationMatchesActiveType(relation));
+    }
+
     async function loadGraph() {
       document.getElementById("status").textContent = "正在加载图谱";
       const [graphResponse, auditResponse] = await Promise.all([
@@ -639,14 +785,15 @@
       const result = await graphResponse.json();
       const auditResult = await auditResponse.json();
       if (!result.success) throw new Error(result.error || "load failed");
-      graph = result.data || { nodes: [], relations: [] };
+      graph = normalizeGraph(result.data || { nodes: [], relations: [] });
       audit = auditResult.audit || null;
       document.getElementById("node-count").textContent = graph.nodes.length;
       document.getElementById("edge-count").textContent = graph.relations.length;
       fillFilters();
       renderAudit();
       render();
-      document.getElementById("status").textContent = `已加载 ${graph.nodes.length} 个节点 / ${graph.relations.length} 条关系`;
+      const dropped = graphDiagnostics.missingEndpoint + graphDiagnostics.missingNode;
+      document.getElementById("status").textContent = `已加载 ${graph.nodes.length} 个节点 / ${graph.relations.length} 条关系${dropped ? `，已跳过 ${dropped} 条异常关系` : ""}`;
     }
 
     function renderAudit() {
@@ -664,6 +811,7 @@
           <div>结构/引用关系: ${structural}</div>
           <div>语义/候选关系: ${semantic}（生成 ${candidates} 条）</div>
           <div>平均度: ${audit.avg_degree}，孤立节点: ${audit.isolated_count}</div>
+          <div>前端有效关系: ${graph.relations.length} / ${graphDiagnostics.rawRelations}，跳过端点缺失 ${graphDiagnostics.missingEndpoint}，节点缺失 ${graphDiagnostics.missingNode}</div>
           <div style="margin-top:5px;">${Object.entries(audit.type_counts || {}).map(([k, v]) => `<span class="badge">${esc(k)} ${v}</span>`).join("")}</div>
         </div>`;
     }
@@ -701,24 +849,37 @@
         const text = [node.id, node.label, node.type, node.content, metadata.label, metadata.chapter].join(" ").toLowerCase();
         return (!type || node.type === type) && (!term || text.includes(term));
       });
-      if (viewMode === "focus" && selectedId) {
+      const nodeById = new Map(graph.nodes.map(node => [node.id, node]));
+      if (selectedId && nodeById.has(selectedId) && viewMode !== "table") {
         const connected = new Set([selectedId]);
-        graph.relations.forEach(rel => {
-          if (rel.source_id === selectedId) connected.add(rel.target_id);
-          if (rel.target_id === selectedId) connected.add(rel.source_id);
+        directRelationsFor(selectedId).forEach(rel => {
+          connected.add(relationSourceId(rel));
+          connected.add(relationTargetId(rel));
         });
-        nodes = graph.nodes.filter(node => connected.has(node.id));
+        const selectedNodes = Array.from(connected)
+          .map(id => nodeById.get(id))
+          .filter(Boolean)
+          .filter(node => node.id === selectedId || !type || node.type === type);
+        const selectedNodeIds = new Set(selectedNodes.map(node => node.id));
+        if (viewMode === "focus") {
+          nodes = selectedNodes;
+        } else {
+          nodes = selectedNodes.concat(nodes.filter(node => !selectedNodeIds.has(node.id)));
+        }
       }
       return nodes.slice(0, max);
     }
 
     function filteredRelations(nodes) {
       const ids = new Set(nodes.map(n => n.id));
-      const relType = document.getElementById("relation-filter").value;
-      return graph.relations
-        .filter(r => ids.has(r.source_id) && ids.has(r.target_id))
-        .filter(r => !relType || r.relation_type === relType)
-        .slice(0, relType ? 1200 : (viewMode === "focus" ? 500 : 360));
+      const visibleRelations = graph.relations
+        .filter(r => ids.has(relationSourceId(r)) && ids.has(relationTargetId(r)))
+        .filter(relationMatchesActiveType);
+      const selectedRelations = selectedId && ids.has(selectedId)
+        ? directRelationsFor(selectedId).filter(r => ids.has(relationSourceId(r)) && ids.has(relationTargetId(r)))
+        : [];
+      const limit = document.getElementById("relation-filter").value ? 1200 : (viewMode === "focus" ? 500 : 360);
+      return mergeRelations(selectedRelations, visibleRelations).slice(0, limit);
     }
 
     function render() {
@@ -748,9 +909,9 @@
       const svg = document.getElementById("graph-svg");
       svg.innerHTML = `<foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:16px;height:100%;overflow:auto;">
         <div class="table">${relations.map(rel => `<div class="row" onclick="showRelation('${js(rel.id)}')">
-          <div>${renderRichLabel(labelOf(rel.source_id))}</div>
-          <div><b>${esc(rel.relation_type || "related")}</b></div>
-          <div>${renderRichLabel(labelOf(rel.target_id))}</div>
+          <div>${renderRichLabel(labelOf(relationSourceId(rel)))}</div>
+          <div><b>${esc(relationTypeOf(rel))}</b></div>
+          <div>${renderRichLabel(labelOf(relationTargetId(rel)))}</div>
         </div>`).join("") || '<div class="row"><div>暂无关系</div><div></div><div></div></div>'}</div>
       </div></foreignObject>`;
     }
@@ -784,13 +945,13 @@
           }
         }
         relations.forEach(rel => {
-          const a = map.get(rel.source_id);
-          const b = map.get(rel.target_id);
+          const a = map.get(relationSourceId(rel));
+          const b = map.get(relationTargetId(rel));
           if (!a || !b) return;
           let dx = b.x - a.x;
           let dy = b.y - a.y;
           let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          const target = rel.relation_type === "contains" ? 110 : 145;
+          const target = relationTypeOf(rel) === "contains" ? 110 : 145;
           const force = (dist - target) * 0.012;
           dx /= dist; dy /= dist;
           if (!a.fixed) { a.vx += dx * force; a.vy += dy * force; }
@@ -834,14 +995,14 @@
       svg.appendChild(root);
 
       relations.forEach(rel => {
-        const a = positions.get(rel.source_id);
-        const b = positions.get(rel.target_id);
+        const a = positions.get(relationSourceId(rel));
+        const b = positions.get(relationTargetId(rel));
         if (!a || !b) return;
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
         line.setAttribute("class", "edge");
         line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
         line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
-        line.setAttribute("stroke-width", rel.relation_type === "contains" ? 1.4 : 1.8);
+        line.setAttribute("stroke-width", relationTypeOf(rel) === "contains" ? 1.4 : 1.8);
         line.onclick = event => { event.stopPropagation(); showRelation(rel.id); };
         root.appendChild(line);
         if (document.getElementById("relation-filter").value || viewMode === "focus" || relations.length < 120) {
@@ -849,7 +1010,7 @@
           text.setAttribute("class", "edge-label");
           text.setAttribute("x", (a.x + b.x) / 2);
           text.setAttribute("y", (a.y + b.y) / 2);
-          text.textContent = (rel.relation_type || "related").slice(0, 22);
+          text.textContent = relationTypeOf(rel).slice(0, 22);
           root.appendChild(text);
         }
       });
@@ -860,15 +1021,27 @@
         group.setAttribute("class", "node" + (selectedId === node.id ? " selected" : ""));
         group.setAttribute("transform", `translate(${p.x},${p.y})`);
         group.onpointerdown = event => startNodeDrag(event, node.id);
-        group.onclick = event => { event.stopPropagation(); showNode(node.id); };
+        group.onclick = event => {
+          event.stopPropagation();
+          if (Date.now() < suppressNodeClickUntil) return;
+          showNode(node.id);
+        };
+        const hitArea = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        hitArea.setAttribute("x", -22);
+        hitArea.setAttribute("y", -18);
+        hitArea.setAttribute("width", Math.max(58, plainLatexLabel(labelOf(node)).slice(0, viewMode === "focus" ? 48 : 30).length * 6 + 42));
+        hitArea.setAttribute("height", 34);
+        hitArea.setAttribute("fill", "transparent");
+        hitArea.setAttribute("pointer-events", "all");
         const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        const degree = relations.filter(r => r.source_id === node.id || r.target_id === node.id).length;
+        const degree = relations.filter(r => relationTouchesNode(r, node.id)).length;
         circle.setAttribute("r", node.type === "chapter" ? 18 : Math.min(18, 8 + degree * 0.8));
         circle.setAttribute("fill", colors[node.type] || colors.default);
         const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
         text.setAttribute("x", 14);
         text.setAttribute("y", 4);
         text.textContent = plainLatexLabel(labelOf(node)).slice(0, viewMode === "focus" ? 48 : 30);
+        group.appendChild(hitArea);
         group.appendChild(circle);
         group.appendChild(text);
         root.appendChild(group);
@@ -894,23 +1067,36 @@
       event.stopPropagation();
       const p = positions.get(nodeId);
       p.fixed = true;
-      dragState = { nodeId, startX: event.clientX, startY: event.clientY, x: p.x, y: p.y };
+      dragState = { nodeId, startX: event.clientX, startY: event.clientY, x: p.x, y: p.y, moved: false };
       window.onpointermove = moveNodeDrag;
       window.onpointerup = stopNodeDrag;
     }
 
     function moveNodeDrag(event) {
       if (!dragState) return;
+      const dx = event.clientX - dragState.startX;
+      const dy = event.clientY - dragState.startY;
+      if (Math.hypot(dx, dy) > clickMoveTolerance) dragState.moved = true;
       const p = positions.get(dragState.nodeId);
-      p.x = dragState.x + (event.clientX - dragState.startX) / viewport.scale;
-      p.y = dragState.y + (event.clientY - dragState.startY) / viewport.scale;
+      p.x = dragState.x + dx / viewport.scale;
+      p.y = dragState.y + dy / viewport.scale;
       scheduleSvgRender();
     }
 
-    function stopNodeDrag() {
+    function stopNodeDrag(event) {
+      if (!dragState) return;
+      const finishedDrag = dragState;
+      const dx = event ? event.clientX - finishedDrag.startX : 0;
+      const dy = event ? event.clientY - finishedDrag.startY : 0;
+      const moved = finishedDrag.moved || Math.hypot(dx, dy) > clickMoveTolerance;
       dragState = null;
       window.onpointermove = null;
       window.onpointerup = null;
+      if (moved) {
+        suppressNodeClickUntil = Date.now() + 250;
+      } else {
+        showNode(finishedDrag.nodeId);
+      }
     }
 
     function startPan(event) {
@@ -979,14 +1165,14 @@
 
     async function showNode(nodeId) {
       selectedId = nodeId;
-      if (viewMode === "focus") render();
+      render();
       const response = await fetch(`/api/node?node_id=${encodeURIComponent(nodeId)}`);
       const result = await response.json();
       const node = result.node || {};
       const metadata = node.metadata || {};
       const relResponse = await fetch(`/api/relations?node_id=${encodeURIComponent(nodeId)}`);
       const relResult = await relResponse.json();
-      const relations = relResult.relations || [];
+      const relations = (relResult.relations || []).map(normalizeRelation);
       document.getElementById("detail-content").innerHTML = `
         <div class="muted">${esc(node.id)}</div>
         <label>节点名称</label>
@@ -1006,10 +1192,12 @@
     }
 
     function relationRow(nodeId, relation) {
-      const other = relation.source_id === nodeId ? relation.target_id : relation.source_id;
+      const sourceId = relationSourceId(relation);
+      const targetId = relationTargetId(relation);
+      const other = sourceId === nodeId ? targetId : sourceId;
       const sourceMark = (relation.metadata && relation.metadata.relation_source) ? ` / ${relation.metadata.relation_source}` : "";
       return `<div class="relation-row">
-        <div><b>${esc(relation.relation_type)}${esc(sourceMark)}</b><br><span class="muted">${renderRichLabel(labelOf(other))}</span></div>
+        <div><b>${esc(relationTypeOf(relation))}${esc(sourceMark)}</b><br><span class="muted">${renderRichLabel(labelOf(other))}</span></div>
         <button onclick="showRelation('${js(relation.id)}')">编辑</button>
       </div>`;
     }
@@ -1021,9 +1209,9 @@
       const metadata = relation.metadata || {};
       document.getElementById("detail-content").innerHTML = `
         <div class="muted">${esc(relation.id)}</div>
-        <label>源节点</label><input id="rel-source" value="${esc(relation.source_id || "")}">
-        <label>目标节点</label><input id="rel-target" value="${esc(relation.target_id || "")}">
-        <label>关系类型</label><input id="rel-type" value="${esc(relation.relation_type || "related")}">
+        <label>源节点</label><input id="rel-source" value="${esc(relationSourceId(relation))}">
+        <label>目标节点</label><input id="rel-target" value="${esc(relationTargetId(relation))}">
+        <label>关系类型</label><input id="rel-type" value="${esc(relationTypeOf(relation))}">
         <label>关系说明</label><textarea id="rel-description" oninput="updateRelationDescriptionPreview()">${esc(metadata.description || "")}</textarea>
         <div class="preview-heading"><span>关系说明预览（Markdown / LaTeX）</span></div>
         <div id="rel-description-preview" class="math-preview">${renderContentPreview(metadata.description || "")}</div>

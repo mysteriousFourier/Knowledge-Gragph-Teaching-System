@@ -6,7 +6,7 @@ export type GraphLayoutMode = "elk" | "dagre" | "grid"
 
 export interface LayoutOptions {
   mode: GraphLayoutMode
-  direction?: "RIGHT" | "DOWN"
+  direction?: "RIGHT" | "LEFT" | "DOWN" | "UP"
   nodeWidth?: number
   nodeHeight?: number
 }
@@ -81,7 +81,7 @@ function layoutWithDagre(nodes: Node[], edges: Edge[], options: LayoutOptions): 
   const graph = new graphlib.Graph()
   graph.setDefaultEdgeLabel(() => ({}))
   graph.setGraph({
-    rankdir: options.direction === "DOWN" ? "TB" : "LR",
+    rankdir: getDagreDirection(options.direction),
     nodesep: 74,
     ranksep: 126,
     marginx: 40,
@@ -128,6 +128,13 @@ function layoutWithGrid(nodes: Node[], options: LayoutOptions): Node[] {
 function getRenderableEdges(nodes: Node[], edges: Edge[]) {
   const nodeIds = new Set(nodes.map((node) => node.id))
   return edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+}
+
+function getDagreDirection(direction: LayoutOptions["direction"]) {
+  if (direction === "DOWN") return "TB"
+  if (direction === "UP") return "BT"
+  if (direction === "LEFT") return "RL"
+  return "LR"
 }
 
 function getNodeDimension(value: unknown, fallback: number): number {

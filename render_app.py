@@ -405,7 +405,7 @@ async def frontend_runtime_config() -> Response:
 async def graph_admin_page() -> FileResponse:
     if not GRAPH_ADMIN_HTML.exists():
         raise HTTPException(status_code=404, detail="Graph admin page is missing.")
-    return FileResponse(GRAPH_ADMIN_HTML)
+    return _frontend_file_response(GRAPH_ADMIN_HTML, "text/html; charset=utf-8")
 
 
 @app.get("/backend/vector_index_system/knowledge_graph/", include_in_schema=False)
