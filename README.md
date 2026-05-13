@@ -172,3 +172,8 @@ Azure 冷启动健康探测时间有限，默认会跳过结构化图谱重建�
 - [数据目录说明](data/README.md)
 - [结构化数据说明](structured/README.md)
 - [第三方依赖迁移说明](THIRD_PARTY_MIGRATION.md)
+
+## 运行截图演示
+
+<img width="2560" height="1380" alt="exam" src="https://github.com/user-attachments/assets/a20caa87-a2a2-4443-ba2c-0b708a32e5c7" />
+
