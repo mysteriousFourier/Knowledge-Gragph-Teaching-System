@@ -175,5 +175,31 @@ Azure 冷启动健康探测时间有限，默认会跳过结构化图谱重建�
 
 ## 运行截图演示
 
+<img width="2560" height="1380" alt="index" src="https://github.com/user-attachments/assets/8510a239-e652-4d5c-82f5-c6747c794582" />
+主界面
+
 <img width="2560" height="1380" alt="exam" src="https://github.com/user-attachments/assets/a20caa87-a2a2-4443-ba2c-0b708a32e5c7" />
+测试题
+
+<img width="2560" height="1380" alt="teacher" src="https://github.com/user-attachments/assets/46caec53-9947-43d5-8d83-4628b77623f4" />
+教师端
+
+<img width="2560" height="1380" alt="sheet" src="https://github.com/user-attachments/assets/03b812c7-3454-4b84-bc3d-f729ab52c2ca" />
+授课文案
+
+<img width="2560" height="1380" alt="graph-1" src="https://github.com/user-attachments/assets/ed9d5a25-d48c-4ad2-a101-2372676fa7e0" />
+图谱示例1
+
+<img width="2560" height="1380" alt="graph" src="https://github.com/user-attachments/assets/1f0b0f8f-b4da-47e4-9426-5fcec46a3006" />
+图谱示例2
+
+<img width="2560" height="1380" alt="graph-admin" src="https://github.com/user-attachments/assets/90f39d5d-7309-4c9d-8da1-c15791810680" />
+图谱管理，仅教师端，教师端也可直接编辑图谱
+
+
+
+
+
+
+
 
