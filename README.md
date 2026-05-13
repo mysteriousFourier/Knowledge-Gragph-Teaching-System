@@ -2,7 +2,9 @@
 
 Knowledge Graph Teaching System（KGTS）是一个面向教学场景的知识图谱应用仓库，包含 React + Vite 前端、Python API 服务、课程结构化数据、知识图谱维护工具，以及图谱管理页面。
 
-当前推荐的运行方式是根目录的单端口模式：React 构建产物、教学 API、维护 API 和图谱管理页统一由 `render_app.py` 托管，便于本地测试和部署。
+当前推荐的运行方式是根目录的单端口模式：React 构建产物、教学 API、维护 API 和图谱管理页统一由 `render_app.py` 托管，便于本地测试和部署，实际并不使用render免费版的全栈部署，因为需要信用卡进行验证。
+
+> [demo浏览，可进行知识图谱体验](https://kgts-interactive-learning-system-dggehyapfqd5fhhw.southeastasia-01.azurewebsites.net)
 
 ## 当前实现状态
 
