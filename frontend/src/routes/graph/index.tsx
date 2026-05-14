@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, ReactFlowProvider, getSimpleBezierPath, type Edge, type Node, type NodeProps, useReactFlow, useUpdateNodeInternals, useViewport } from "@xyflow/react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, ReactFlowProvider, getSimpleBezierPath, type Edge, type Node, type NodeProps, useUpdateNodeInternals } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import {
   BookOpen,
@@ -135,9 +135,13 @@ function GraphPage() {
   const updateNode = useUpdateNode()
 
   const rawNodes = useMemo(() => nodesData?.nodes || [], [nodesData?.nodes])
+  const selectedRelations = useMemo(
+    () => (selectedRelationsData?.nodeId === selectedNodeId ? selectedRelationsData.relations : []),
+    [selectedNodeId, selectedRelationsData?.nodeId, selectedRelationsData?.relations],
+  )
   const rawRelationships = useMemo(
-    () => mergeRelations(relationshipsData?.relationships || [], selectedRelationsData?.relations || []),
-    [relationshipsData?.relationships, selectedRelationsData?.relations],
+    () => mergeRelations(relationshipsData?.relationships || [], selectedRelations),
+    [relationshipsData?.relationships, selectedRelations],
   )
   const stats = statsData?.data
   const nodeById = useMemo(() => new Map(rawNodes.map((node) => [node.id, node])), [rawNodes])
@@ -347,6 +351,17 @@ function GraphPage() {
     setEditMessage("")
   }, [])
 
+  const selectGraphNode = useCallback((nodeId: string) => {
+    setSelectedNodeId((currentNodeId) => {
+      if (currentNodeId !== nodeId) {
+        setExpandedNodeIds(new Set())
+        setViewMode("explore")
+      }
+      return nodeId
+    })
+    setEditMessage("")
+  }, [])
+
   const expandSelected = useCallback(() => {
     if (!selectedNodeId) return
     setExpandedNodeIds((prev) => new Set([...prev, selectedNodeId, ...selectedNeighborIds]))
@@ -449,10 +464,7 @@ function GraphPage() {
               viewMode={viewMode}
               nodes={canvasNodes}
               edges={canvasEdges}
-              onSelectNode={(nodeId) => {
-                setSelectedNodeId(nodeId)
-                setEditMessage("")
-              }}
+              onSelectNode={selectGraphNode}
             />
           </ReactFlowProvider>
         </section>
@@ -501,9 +513,10 @@ function GraphCanvas({
   edges: Edge[]
   onSelectNode: (nodeId: string) => void
 }) {
-  const { fitView } = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
-  const viewport = useViewport()
+  const canvasRef = useRef<HTMLDivElement | null>(null)
+  const resetCountRef = useRef(0)
+  const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const nodeSignature = useMemo(
     () =>
       nodes
@@ -514,18 +527,32 @@ function GraphCanvas({
   )
   const edgeSignature = useMemo(() => edges.map((edge) => edge.id).sort().join("|"), [edges])
 
+  const resetViewport = useCallback(() => {
+    if (!nodes.length) return
+    const nextViewport = getViewportForNodes(nodes, canvasRef.current)
+    if (!nextViewport) return
+    resetCountRef.current += 1
+    setViewport(nextViewport)
+    Object.assign(window, {
+      __KGTS_GRAPH_RESET_DEBUG__: {
+        resetAt: new Date().toISOString(),
+        resetCount: resetCountRef.current,
+        nodeCount: nodes.length,
+        viewport: nextViewport,
+      },
+    })
+  }, [nodes])
+
   useEffect(() => {
     if (!nodes.length) return
-    let fitFrame = 0
     const measureFrame = window.requestAnimationFrame(() => {
       nodes.forEach((node) => updateNodeInternals(node.id))
-      fitFrame = window.requestAnimationFrame(() => fitView({ padding: 0.18, duration: 220 }))
+      resetViewport()
     })
     return () => {
       window.cancelAnimationFrame(measureFrame)
-      if (fitFrame) window.cancelAnimationFrame(fitFrame)
     }
-  }, [fitView, nodeSignature, nodes, updateNodeInternals, viewMode])
+  }, [nodeSignature, nodes, resetViewport, updateNodeInternals, viewMode])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -535,14 +562,16 @@ function GraphCanvas({
               reactFlowEdges: edges.length,
               renderedEdgeGroups: document.querySelectorAll(".kg-flow-overlay-edge").length,
               renderedEdgePaths: document.querySelectorAll(".kg-flow-overlay-path").length,
+              viewport,
+              resetCount: resetCountRef.current,
             },
           })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [edgeSignature, edges.length, nodeSignature, nodes.length])
+  }, [edgeSignature, edges.length, nodeSignature, nodes.length, viewport])
 
   return (
-    <div className="relative h-[460px] overflow-hidden bg-slate-50 sm:h-[560px] xl:h-[660px]">
+    <div ref={canvasRef} className="relative h-[460px] overflow-hidden bg-slate-50 sm:h-[560px] xl:h-[660px]">
       {isLoading ? (
         <div className="flex h-full items-center justify-center">
           <LoadingSpinner text="加载图谱中..." />
@@ -557,7 +586,8 @@ function GraphCanvas({
             nodes={nodes}
             edges={[]}
             nodeTypes={graphNodeTypes}
-            fitView
+            viewport={viewport}
+            onViewportChange={setViewport}
             minZoom={0.08}
             maxZoom={1.8}
             onNodeClick={(_, node) => onSelectNode(node.id)}
@@ -571,9 +601,9 @@ function GraphCanvas({
             <Background color="#cbd5e1" gap={36} />
             <Controls />
             <MiniMap className="hidden sm:block" pannable zoomable nodeColor={(node) => String(node.data?.color || "#64748b")} />
-            <FitViewButton />
           </ReactFlow>
           <GraphRelationOverlay nodes={nodes} edges={edges} viewport={viewport} />
+          <FitViewButton onReset={resetViewport} />
         </>
       )}
     </div>
@@ -588,9 +618,9 @@ function KnowledgeFlowNode({
 }: NodeProps<Node<FlowNodeData, "knowledge">>) {
   return (
     <>
-      <Handle className="kg-flow-handle" type="target" position={targetPosition} isConnectable={isConnectable} />
+      <Handle id="target" className="kg-flow-handle" type="target" position={targetPosition} isConnectable={isConnectable} />
       <span className="kg-flow-label">{data.label}</span>
-      <Handle className="kg-flow-handle" type="source" position={sourcePosition} isConnectable={isConnectable} />
+      <Handle id="source" className="kg-flow-handle" type="source" position={sourcePosition} isConnectable={isConnectable} />
     </>
   )
 }
@@ -606,7 +636,7 @@ function GraphRelationOverlay({ nodes, edges, viewport }: { nodes: Node[]; edges
           if (!sourceNode || !targetNode) return null
           const geometry = getOverlayEdgeGeometry(sourceNode, targetNode)
           if (!geometry) return null
-          const isFocused = Boolean(edge.animated || edge.zIndex && edge.zIndex > 1 || edge.label)
+          const isFocused = Boolean(edge.animated || (edge.zIndex && edge.zIndex > 1))
           return {
             ...geometry,
             id: edge.id,
@@ -691,17 +721,26 @@ function GraphRelationOverlay({ nodes, edges, viewport }: { nodes: Node[]; edges
   )
 }
 
-function FitViewButton() {
-  const { fitView } = useReactFlow()
+function FitViewButton({ onReset }: { onReset: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={() => fitView({ padding: 0.18, duration: 220 })}
-      className="absolute right-3 top-3 z-10 inline-flex items-center gap-2 rounded-lg border bg-white px-2.5 py-2 text-sm shadow-sm hover:bg-slate-50 sm:px-3"
-    >
-      <RotateCcw size={15} />
-      重置视图
-    </button>
+    <div className="absolute right-3 top-3 z-30">
+      <button
+        type="button"
+        onPointerDown={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          onReset()
+        }}
+        onClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        }}
+        className="nodrag nopan inline-flex items-center gap-2 rounded-lg border bg-white px-2.5 py-2 text-sm shadow-sm hover:bg-slate-50 sm:px-3"
+      >
+        <RotateCcw size={15} />
+        重置视图
+      </button>
+    </div>
   )
 }
 
@@ -828,6 +867,42 @@ function getNodeBox(node: Node) {
   }
 }
 
+function getViewportForNodes(nodes: Node[], container: HTMLDivElement | null) {
+  const width = container?.clientWidth || 960
+  const height = container?.clientHeight || 560
+  if (!width || !height || !nodes.length) return null
+
+  const bounds = nodes.reduce(
+    (acc, node) => {
+      const box = getNodeBox(node)
+      return {
+        minX: Math.min(acc.minX, box.x),
+        minY: Math.min(acc.minY, box.y),
+        maxX: Math.max(acc.maxX, box.x + box.width),
+        maxY: Math.max(acc.maxY, box.y + box.height),
+      }
+    },
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+  )
+
+  if (![bounds.minX, bounds.minY, bounds.maxX, bounds.maxY].every(Number.isFinite)) return null
+
+  const graphWidth = Math.max(1, bounds.maxX - bounds.minX)
+  const graphHeight = Math.max(1, bounds.maxY - bounds.minY)
+  const padding = 56
+  const availableWidth = Math.max(1, width - padding * 2)
+  const availableHeight = Math.max(1, height - padding * 2)
+  const zoom = Math.max(0.08, Math.min(1.25, availableWidth / graphWidth, availableHeight / graphHeight))
+  const centerX = bounds.minX + graphWidth / 2
+  const centerY = bounds.minY + graphHeight / 2
+
+  return {
+    x: width / 2 - centerX * zoom,
+    y: height / 2 - centerY * zoom,
+    zoom,
+  }
+}
+
 function createFlowEdges(relations: GraphRelation[], selectedNodeId: string | null): Edge[] {
   const showAllLabels = relations.length <= 90
   return relations
@@ -842,7 +917,7 @@ function createFlowEdges(relations: GraphRelation[], selectedNodeId: string | nu
         label: shouldShowLabel ? relation.relation_type : undefined,
         type: "smoothstep",
         animated: isFocused,
-        zIndex: isFocused ? 3 : 1,
+        zIndex: isFocused ? 5 : 0,
         markerEnd: {
           type: MarkerType.ArrowClosed,
           color: isFocused ? "#2563eb" : "#64748b",
@@ -854,11 +929,13 @@ function createFlowEdges(relations: GraphRelation[], selectedNodeId: string | nu
           stroke: isFocused ? "#2563eb" : "#64748b",
           strokeDasharray: isFocused ? undefined : "5 8",
           strokeLinecap: "round",
-          strokeWidth: isFocused ? 3 : 1.6,
-          opacity: selectedNodeId ? (isFocused ? 1 : 0.48) : 0.74,
+          strokeWidth: isFocused ? 2.8 : 1.7,
+          opacity: selectedNodeId ? (isFocused ? 0.96 : 0.36) : 0.62,
         },
         labelStyle: { fill: "#1d4ed8", fontSize: 11, fontWeight: 600 },
-        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.92 },
+        labelBgStyle: { fill: "#ffffff", fillOpacity: 0.94 },
+        labelBgPadding: [7, 3] as [number, number],
+        labelBgBorderRadius: 6,
       }
     })
 }
@@ -889,6 +966,7 @@ function createNodeHandle(type: "source" | "target", position: Position) {
     [Position.Bottom]: { x: centerX, y: FLOW_NODE_HEIGHT - half },
   }
   return {
+    id: type,
     type,
     position,
     ...coordinates[position],

@@ -192,7 +192,7 @@ export const useGraphRelations = (nodeId: string) => {
         .then((r) => {
           const payload = r.data
           const relations = payload.data?.relations || payload.relations || []
-          return { ...payload, relations: relations.map(normalizeRelation), count: payload.data?.count ?? payload.count ?? relations.length }
+          return { ...payload, nodeId, relations: relations.map(normalizeRelation), count: payload.data?.count ?? payload.count ?? relations.length }
         }),
     enabled: !!nodeId,
   })

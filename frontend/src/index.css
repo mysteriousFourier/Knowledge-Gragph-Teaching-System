@@ -603,10 +603,20 @@
     overflow: visible;
   }
 
+  .react-flow__node-knowledge {
+    align-items: center;
+    display: flex;
+  }
+
+  .kg-flow-overlay-path {
+    vector-effect: non-scaling-stroke;
+  }
+
   .kg-flow-label {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
+    width: 100%;
   }
 
   .kg-flow-handle {
