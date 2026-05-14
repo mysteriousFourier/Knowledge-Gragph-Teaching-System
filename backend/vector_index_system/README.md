@@ -1,4 +1,4 @@
-# Graph and Vector Subsystem
+# 图谱与向量子系统
 
 `backend/vector_index_system/` 保存知识图谱后台页面、默认图谱数据库位置，以及一部分历史遗留的图谱/向量/记忆子系统资产。
 

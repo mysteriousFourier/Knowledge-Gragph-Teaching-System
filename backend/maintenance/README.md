@@ -1,4 +1,4 @@
-# Maintenance API Compatibility Entry
+# 维护 API 兼容入口
 
 `backend/maintenance/` 是图谱维护 API 的兼容入口目录。当前主逻辑已经集中在仓库根目录的 `maintenance/` 包。
 
@@ -48,4 +48,3 @@ python backend/maintenance/api_server.py
 - 主逻辑改动优先落在根目录 `maintenance/`
 - 同步 `structured/` 前先确认数据允许公开或允许本地使用
 - 涉及字段名调整时，需要联动前端图谱页和教学侧桥接逻辑
-

@@ -1,4 +1,4 @@
-# Frontend
+# 前端
 
 `frontend/` 是 KGTS 的 React + Vite 前端，负责统一承载教师端、学生端、知识图谱浏览页和图谱管理入口。后端 API 不在这个目录实现，开发时通过 Vite 代理访问根目录的 Python 服务。
 

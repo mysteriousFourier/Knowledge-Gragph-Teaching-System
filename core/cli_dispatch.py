@@ -71,6 +71,10 @@ def dispatch_tool(name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
         return graph.search_nodes(args.get("keyword", ""), args.get("node_type"), int(args.get("limit", 20)))
     if name == "semantic_search":
         return graph.semantic_search(args.get("query", ""), args.get("node_type"), int(args.get("top_k", 10)))
+    if name == "rebuild_vector_index":
+        return graph.rebuild_vector_index()
+    if name == "reset_vector_index":
+        return graph.reset_vector_index()
     if name == "add_memory":
         created = graph.add_node(args.get("content", ""), args.get("type", "concept"), args.get("metadata"))
         memory.add_memory(

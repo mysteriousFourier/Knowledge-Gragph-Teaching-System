@@ -1,4 +1,4 @@
-# Education API Compatibility Entry
+# 教学 API 兼容入口
 
 `backend/education/` 是教学 API 的兼容入口目录。它主要保留旧的启动路径，真实业务逻辑已经迁移到仓库根目录的 `education/` 包。
 

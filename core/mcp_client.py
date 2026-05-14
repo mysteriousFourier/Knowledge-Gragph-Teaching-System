@@ -13,6 +13,8 @@ TOOL_NAMES = [
     "get_graph_schema",
     "search_nodes",
     "semantic_search",
+    "rebuild_vector_index",
+    "reset_vector_index",
     "add_memory",
     "update_memory",
     "delete_memory",

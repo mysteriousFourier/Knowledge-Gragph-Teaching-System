@@ -1,10 +1,10 @@
 # KGTS
 
-Knowledge Graph Teaching System（KGTS）是一个面向教学场景的知识图谱应用仓库，包含 React + Vite 前端、Python API 服务、课程结构化数据、知识图谱维护工具，以及图谱管理页面。
+知识图谱教学系统（KGTS）是一个面向教学场景的知识图谱应用仓库，包含 React + Vite 前端、Python API 服务、课程结构化数据、知识图谱维护工具，以及图谱管理页面。
 
 当前推荐的运行方式是根目录的单端口模式：React 构建产物、教学 API、维护 API 和图谱管理页统一由 `render_app.py` 托管，便于本地测试和部署，实际并不使用render免费版的全栈部署，因为需要信用卡进行验证。
 
-> [demo浏览，可进行知识图谱体验](https://kgts-interactive-learning-system-dggehyapfqd5fhhw.southeastasia-01.azurewebsites.net)
+> [演示站点浏览，可进行知识图谱体验](https://kgts-interactive-learning-system-dggehyapfqd5fhhw.southeastasia-01.azurewebsites.net)
 
 ## 当前实现状态
 
@@ -165,10 +165,33 @@ Azure 冷启动健康探测时间有限，默认会跳过结构化图谱重建�
 - `APP_BOOTSTRAP_SEED_DATA=1`
 - `DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS=0`
 
+### Azure F1 检索配置
+
+Azure F1 免费实例不要安装本地 embedding 大模型，也不要上传 `backend/vector_index_system/models/`。生产部署默认可保持：
+
+```text
+KGTS_RETRIEVAL_MODE=graph_db
+```
+
+如果希望在 F1 上启用免费的“图谱 + 向量式”检索，可设置：
+
+```text
+KGTS_RETRIEVAL_MODE=sparse_hybrid
+```
+
+`sparse_hybrid` 使用标准库 token/字符 n-gram 稀疏向量 + 图谱关系分重排，不依赖 FAISS、torch、sentence-transformers 或外部 API。真正的神经向量检索仍可在本地或高资源环境使用：
+
+```bash
+python -m pip install -r requirements-vector.txt
+```
+
+然后设置 `KGTS_RETRIEVAL_MODE=hybrid` 并提供匹配的模型和 FAISS 索引。GitHub Actions 部署包会继续排除 `backend/vector_index_system/models/` 和 `backend/vector_index_system/vector_index/`，避免 F1 重新部署时上传大文件。
+
 ## 文档索引
 
 - [前端说明](frontend/README.md)
 - [后端兼容目录说明](backend/README.md)
+- [检索模式与 Azure F1 说明](docs/retrieval-modes.md)
 - [数据目录说明](data/README.md)
 - [结构化数据说明](structured/README.md)
 - [第三方依赖迁移说明](THIRD_PARTY_MIGRATION.md)
