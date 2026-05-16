@@ -40,7 +40,11 @@ from KGTS.education.kg_constraints import (
     evidence_from_rag,
     evidence_from_graph,
     format_evidence,
+    format_formula_context,
+    format_graph_paths,
     expand_formula_references,
+    formula_context_for_text,
+    graph_paths_for_evidence,
 )
 from KGTS.config import load_root_env
 from KGTS.education.exercise_helpers import _normalize_exercise_bank
@@ -653,6 +657,7 @@ async def upload_ppt(
                 "chapter_title": chapter_title,
                 "slide_count": prompt_data["total_slides"],
                 "slides": slide_details,
+                "full_text": chapter_content,
                 "lecture_content": "",
                 "slide_lectures": [
                     {
@@ -682,6 +687,22 @@ async def upload_ppt(
             "title": chapter_title,
             "content": chapter_content,
         }
+        lecture_learning_plan = _build_ppt_learning_plan(
+            chapter_title=chapter_title,
+            chapter_content=chapter_content,
+            graph_data=graph_data if isinstance(graph_data, dict) else None,
+        )
+        lecture_graph_paths = graph_paths_for_evidence(
+            graph_data if isinstance(graph_data, dict) else None,
+            lecture_learning_plan.get("evidence") or [],
+            limit=10,
+        )
+        lecture_formula_context = formula_context_for_text(chapter_content, limit=10)
+        chapter_data["graph_context"] = _format_ppt_generation_context(
+            learning_plan=lecture_learning_plan,
+            graph_paths=lecture_graph_paths,
+            formulas=lecture_formula_context,
+        )
 
         claude_client = DeepSeekAPIClient(
             api_key=api_key,
@@ -702,14 +723,20 @@ async def upload_ppt(
             chapter_title,
             graph_data if isinstance(graph_data, dict) else None,
         )
+        lecture_consistency_report = _safe_consistency_report(lecture_content, lecture_learning_plan, task="lecture")
 
         return {
             "success": True,
             "chapter_title": chapter_title,
             "slide_count": prompt_data["total_slides"],
             "slides": slide_details,
+            "full_text": chapter_content,
             "lecture_content": lecture_content,
             "slide_lectures": slide_lectures,
+            "learning_plan": lecture_learning_plan,
+            "graph_paths": lecture_graph_paths,
+            "formula_context": lecture_formula_context,
+            "consistency_report": lecture_consistency_report,
             "style": style,
             "model": claude_client.model,
             "generated_at": datetime.now().isoformat(),
@@ -770,6 +797,8 @@ async def _generate_per_slide_lectures(
                 "skipped": True,
                 "learning_plan": learning_plan,
                 "sources": [],
+                "graph_paths": [],
+                "formula_context": [],
             })
             continue
 
@@ -777,11 +806,12 @@ async def _generate_per_slide_lectures(
             "title": f"{chapter_title} - 第 {slide['index']} 页",
             "content": slide_text,
         }
-        learning_plan = _build_plan_from_graph(
-            query=f"{chapter_title}\n{slide_text[:800]}",
+        learning_plan = _build_ppt_learning_plan(
+            chapter_title=chapter_title,
+            chapter_content=slide_text,
             graph_data=graph_data,
-            task="lecture",
             chapter_data=chapter_data,
+            query=f"{chapter_title}\n{slide_text[:800]}",
         )
         sources = learning_plan.get("evidence") or []
         if not sources:
@@ -798,12 +828,17 @@ async def _generate_per_slide_lectures(
                 )
             except Exception:
                 sources = []
+        graph_paths = graph_paths_for_evidence(graph_data, learning_plan.get("evidence") or [], limit=8)
+        formula_context = formula_context_for_text(slide_text, limit=8)
 
         requirements = [
             *build_lecture_gc_dpg_requirements(style, slide_level=True),
             "Explain this slide in accessible classroom language.",
             "Add only the background needed to make the slide teachable; keep unsupported extensions bounded.",
+            "Use the graph relation paths as the main teaching order when they are relevant.",
             "If formulas appear, explain the meaning of the main symbols.",
+            "When the same symbol can mean different things elsewhere, explain only the meaning in this slide/chapter scope.",
+            "If a formula is derived from earlier formulas, mention the immediate derivation dependency in teacher-friendly language.",
             "Include 1-2 natural classroom questions when useful.",
             "Output directly usable Markdown prose for this slide.",
         ]
@@ -820,6 +855,12 @@ Slide content:
 
 Available graph/RAG evidence for this slide:
 {format_evidence(learning_plan.get("evidence") or [])}
+
+Graph relation paths to use when teaching:
+{format_graph_paths(graph_paths)}
+
+Formula derivation and scoped symbol context:
+{format_formula_context(formula_context)}
 
 Requirements:
 {requirement_text}
@@ -846,11 +887,77 @@ Output only the final slide lecture script."""
             "lecture": lecture,
             "skipped": not lecture.strip(),
             "sources": sources,
+            "graph_paths": graph_paths,
+            "formula_context": formula_context,
             "learning_plan": learning_plan,
             "consistency_report": _safe_consistency_report(lecture, learning_plan, task="lecture"),
         })
 
     return results
+
+
+def _build_ppt_learning_plan(
+    *,
+    chapter_title: str,
+    chapter_content: str,
+    graph_data: Optional[Dict[str, Any]],
+    chapter_data: Optional[Dict[str, Any]] = None,
+    query: Optional[str] = None,
+) -> Dict[str, Any]:
+    chapter_payload = chapter_data or {"title": chapter_title, "content": chapter_content}
+    search_query = query or f"{chapter_title}\n{chapter_content[:1200]}"
+    evidence = evidence_from_graph(
+        graph_data,
+        query=search_query,
+        chapter_data=chapter_payload,
+        limit=10,
+    )
+    if chapter_content.strip():
+        slide_evidence = {
+            "index": 1,
+            "id": f"ppt_slide::{hashlib.md5(search_query.encode('utf-8')).hexdigest()[:10]}",
+            "label": str(chapter_payload.get("title") or chapter_title or "PPT slide"),
+            "type": "ppt_slide",
+            "content": chapter_content[:1800],
+            "source": "ppt",
+        }
+        evidence = [slide_evidence] + [
+            item for item in evidence if isinstance(item, dict) and item.get("id") != slide_evidence["id"]
+        ]
+    relations = graph_paths_for_evidence(graph_data, evidence, limit=12)
+    learning_relations = [
+        {
+            "source": item.get("source"),
+            "target": item.get("target"),
+            "type": item.get("type") or "related",
+            "metadata": {"description": item.get("description", "")},
+        }
+        for item in relations
+    ]
+    return build_learning_plan(
+        query=search_query,
+        evidence=evidence,
+        relations=learning_relations,
+        learner_intent="explain",
+        learning_level="beginner",
+        task="lecture",
+        chapter_data=chapter_payload,
+    )
+
+
+def _format_ppt_generation_context(
+    *,
+    learning_plan: Dict[str, Any],
+    graph_paths: List[Dict[str, Any]],
+    formulas: List[Dict[str, Any]],
+) -> str:
+    return "\n\n".join(
+        [
+            "Matched graph evidence:\n" + format_evidence(learning_plan.get("evidence") or []),
+            "Graph relation paths:\n" + format_graph_paths(graph_paths),
+            "Formula derivation and scoped symbol context:\n" + format_formula_context(formulas),
+        ]
+    )
 
 
 @router.post("/education/upload-ppt-preview")

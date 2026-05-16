@@ -166,6 +166,8 @@ export interface PptSlideLecture {
   lecture: string
   skipped: boolean
   sources?: unknown[]
+  graph_paths?: unknown[]
+  formula_context?: unknown[]
   learning_plan?: unknown
   consistency_report?: ConsistencyReport
 }
@@ -183,6 +185,10 @@ export interface PptPreviewResponse {
 export interface PptUploadResponse extends PptPreviewResponse {
   lecture_content: string
   slide_lectures: PptSlideLecture[]
+  learning_plan?: unknown
+  graph_paths?: unknown[]
+  formula_context?: unknown[]
+  consistency_report?: ConsistencyReport
   style?: string
   model?: string
   generated_at?: string

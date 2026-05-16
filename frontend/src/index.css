@@ -149,7 +149,7 @@
     display: grid;
     height: 100dvh;
     min-height: 640px;
-    grid-template-columns: minmax(48px, 1fr) 10px minmax(360px, var(--paper-width, clamp(560px, 44vw, 820px)));
+    grid-template-columns: minmax(0, 1fr);
     background:
       linear-gradient(90deg, rgb(var(--muted-ink-rgb) / 0.055) 1px, transparent 1px),
       linear-gradient(0deg, rgb(var(--muted-ink-rgb) / 0.05) 1px, transparent 1px),
@@ -158,60 +158,20 @@
   }
 
   .studio-shell.is-authenticated {
-    grid-template-columns: minmax(48px, 1fr) 10px minmax(420px, var(--paper-width, 58vw));
-  }
-
-  .map-plane {
-    position: relative;
-    min-width: 0;
-    overflow: hidden;
-  }
-
-  .workspace-resizer {
-    position: relative;
-    z-index: 12;
-    width: 10px;
-    min-width: 10px;
-    height: 100%;
-    cursor: col-resize;
-    border: 0;
-    border-inline: 1px solid var(--line-dark);
-    background: rgb(var(--paper-2-rgb) / 0.45);
-    padding: 0;
-    transition: background 160ms ease;
-  }
-
-  .workspace-resizer span {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 2px;
-    height: 54px;
-    transform: translate(-50%, -50%);
-    background: rgb(var(--muted-ink-rgb) / 0.34);
-    box-shadow: -3px 0 0 rgb(var(--muted-ink-rgb) / 0.16), 3px 0 0 rgb(var(--muted-ink-rgb) / 0.16);
-  }
-
-  .workspace-resizer:hover,
-  .is-resizing-workspace .workspace-resizer {
-    background: rgb(var(--signal-rgb) / 0.16);
-  }
-
-  .is-resizing-workspace {
-    cursor: col-resize;
-    user-select: none;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .coordinate-bar {
-    position: absolute;
-    top: var(--page-pad);
-    left: var(--page-pad);
+    position: relative;
+    top: auto;
+    left: auto;
     z-index: 10;
     display: flex;
-    max-width: calc(100% - (var(--page-pad) * 2));
+    max-width: none;
     overflow: auto;
-    border: 1px solid var(--line-dark);
-    background: rgb(var(--field-rgb) / 0.72);
+    border: 0;
+    border-bottom: 1px solid var(--line-dark);
+    background: rgb(var(--paper-2-rgb));
     backdrop-filter: blur(10px);
   }
 
@@ -253,95 +213,6 @@
     min-width: 132px;
   }
 
-  .axis {
-    position: absolute;
-    z-index: 2;
-    color: rgb(var(--muted-ink-rgb) / 0.46);
-    font-family: var(--mono);
-    font-size: 11px;
-  }
-
-  .x-axis {
-    left: var(--page-pad);
-    bottom: var(--page-pad);
-  }
-
-  .y-axis {
-    top: 134px;
-    left: -28px;
-    transform: rotate(-90deg);
-    transform-origin: left top;
-  }
-
-  .knowledge-field {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-  }
-
-  .thread {
-    fill: none;
-    stroke: rgb(var(--muted-ink-rgb) / 0.34);
-    stroke-width: 1.4;
-    stroke-dasharray: 5 8;
-  }
-
-  .thread.primary {
-    stroke: rgb(var(--signal-rgb));
-    stroke-width: 2.2;
-    stroke-dasharray: none;
-  }
-
-  .thread.faint {
-    opacity: 0.45;
-  }
-
-  .node {
-    transform: translate(var(--x), var(--y));
-  }
-
-  .node circle {
-    fill: rgb(var(--paper-rgb) / 0.78);
-    stroke: var(--ink);
-    stroke-width: 1.2;
-    transition: fill 180ms ease, stroke-width 180ms ease, transform 180ms ease;
-  }
-
-  .node.selected circle {
-    fill: rgb(var(--signal-rgb));
-    stroke-width: 2;
-    transform: scale(1.04);
-  }
-
-  .node text {
-    fill: var(--ink);
-    font-family: var(--mono);
-    font-size: 12px;
-    text-anchor: middle;
-    pointer-events: none;
-  }
-
-  .node.selected text {
-    fill: rgb(var(--paper-rgb));
-  }
-
-  .node.small text {
-    font-size: 10px;
-  }
-
-  .lens {
-    position: absolute;
-    left: var(--page-pad);
-    bottom: clamp(48px, 7vh, 72px);
-    z-index: 4;
-    width: min(clamp(340px, 34vw, 500px), calc(100% - (var(--page-pad) * 2)));
-    border: 1px solid var(--line-dark);
-    background: rgb(var(--paper-rgb) / 0.78);
-    padding: clamp(16px, 2vw, 22px);
-    backdrop-filter: blur(12px);
-  }
-
   .mono,
   .sheet-label {
     color: rgb(var(--signal-rgb));
@@ -351,44 +222,11 @@
     text-transform: uppercase;
   }
 
-  .lens h1 {
-    margin: 8px 0 0;
-    font-family: var(--serif);
-    font-size: clamp(38px, 5.5vw, 76px);
-    line-height: 0.9;
-    letter-spacing: 0;
-  }
-
-  .lens p {
-    margin: clamp(12px, 2vh, 18px) 0 0;
-    color: rgb(var(--muted-ink-rgb) / 0.58);
-    line-height: 1.68;
-  }
-
-  .lens-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: clamp(14px, 2.4vh, 22px);
-  }
-
-  .lens-actions span {
-    min-height: 34px;
-    border: 1px solid var(--line-dark);
-    background: rgb(var(--paper-2-rgb));
-    color: var(--ink);
-    display: inline-flex;
-    align-items: center;
-    padding: 0 12px;
-    font-family: var(--mono);
-    font-size: 11px;
-  }
-
   .paper-stack {
     display: grid;
     min-width: 0;
     min-height: 0;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
     background: rgb(var(--paper-rgb));
     overflow: hidden;
   }
@@ -408,6 +246,14 @@
     font-size: clamp(30px, 3vw, 42px);
     line-height: 0.95;
     letter-spacing: 0;
+  }
+
+  .paper-description {
+    margin: 8px 0 0;
+    max-width: 900px;
+    color: rgb(var(--muted-ink-rgb) / 0.58);
+    font-size: 14px;
+    line-height: 1.6;
   }
 
   .theme-switch {
@@ -606,10 +452,47 @@
   .react-flow__node-knowledge {
     align-items: center;
     display: flex;
+    z-index: 20 !important;
+  }
+
+  .react-flow__edge {
+    z-index: 2 !important;
+  }
+
+  .react-flow__edge-path {
+    vector-effect: non-scaling-stroke;
+  }
+
+  .react-flow__edge-textbg {
+    stroke: rgb(var(--paper-rgb));
+    stroke-width: 2px;
+  }
+
+  .react-flow__edge-text {
+    paint-order: stroke;
+    stroke: rgb(var(--paper-rgb));
+    stroke-width: 3px;
+  }
+
+  .kg-flow-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
   }
 
   .kg-flow-overlay-path {
     vector-effect: non-scaling-stroke;
+  }
+
+  .kg-flow-overlay-label {
+    fill: #1d4ed8;
+    font-size: 11px;
+    font-weight: 600;
   }
 
   .kg-flow-label {
@@ -657,18 +540,7 @@
     height: auto;
     min-height: 100dvh;
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
-  }
-
-  .workspace-resizer {
-    display: none;
-  }
-
-  .map-plane {
-    height: auto;
-    min-height: 320px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line-dark);
+    grid-template-rows: auto;
   }
 
   .paper-stack {
@@ -683,20 +555,12 @@
 
 @media (min-width: 981px) and (max-width: 1280px) {
   .studio-shell {
-    grid-template-columns: minmax(48px, 1fr) 10px minmax(420px, var(--paper-width, 58vw));
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .mark {
     min-width: 72px;
     font-size: 11px;
-  }
-
-  .lens {
-    width: min(380px, calc(100% - (var(--page-pad) * 2)));
-  }
-
-  .lens h1 {
-    font-size: clamp(38px, 4.6vw, 58px);
   }
 }
 
@@ -707,20 +571,6 @@
 
   .studio-shell {
     min-height: 560px;
-  }
-
-  .lens {
-    bottom: 42px;
-    padding: 16px;
-  }
-
-  .lens h1 {
-    font-size: clamp(34px, 4.2vw, 54px);
-  }
-
-  .lens p {
-    font-size: 14px;
-    line-height: 1.58;
   }
 
   .paper-top {
@@ -743,7 +593,7 @@
 
 @media (min-width: 1600px) {
   .studio-shell {
-    grid-template-columns: minmax(72px, 1fr) 10px minmax(520px, var(--paper-width, 58vw));
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -759,24 +609,10 @@
   }
 
   .studio-shell {
-    display: flex;
-    flex-direction: column;
     min-height: 100dvh;
   }
 
-  .map-plane {
-    display: flex;
-    min-height: 0;
-    flex-direction: column;
-    gap: 12px;
-    padding: 12px;
-  }
-
   .coordinate-bar {
-    position: relative;
-    top: auto;
-    right: auto;
-    left: auto;
     width: 100%;
     max-width: none;
     overflow-x: auto;
@@ -802,41 +638,7 @@
     min-width: 112px;
   }
 
-  .axis,
-  .knowledge-field {
-    display: none;
-  }
-
-  .lens {
-    position: relative;
-    left: auto;
-    bottom: auto;
-    width: 100%;
-    padding: 14px;
-  }
-
-  .lens h1 {
-    font-size: 30px;
-    line-height: 1;
-  }
-
-  .lens p {
-    margin-top: 8px;
-    font-size: 13px;
-    line-height: 1.55;
-  }
-
-  .lens-actions {
-    margin-top: 12px;
-  }
-
-  .lens-actions span {
-    min-height: 28px;
-    padding-inline: 9px;
-  }
-
   .paper-stack {
-    flex: 1 1 auto;
     min-height: 0;
   }
 

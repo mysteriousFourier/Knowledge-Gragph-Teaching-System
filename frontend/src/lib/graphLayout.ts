@@ -50,8 +50,11 @@ async function layoutWithElk(nodes: Node[], edges: Edge[], options: LayoutOption
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": options.direction ?? "RIGHT",
-      "elk.spacing.nodeNode": "78",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "118",
+      "elk.spacing.nodeNode": "132",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "188",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "44",
+      "elk.layered.spacing.edgeEdgeBetweenLayers": "22",
+      "elk.layered.spacing.edgeEdge": "18",
       "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
       "elk.edgeRouting": "ORTHOGONAL",
     },
@@ -82,10 +85,10 @@ function layoutWithDagre(nodes: Node[], edges: Edge[], options: LayoutOptions): 
   graph.setDefaultEdgeLabel(() => ({}))
   graph.setGraph({
     rankdir: getDagreDirection(options.direction),
-    nodesep: 74,
-    ranksep: 126,
-    marginx: 40,
-    marginy: 40,
+    nodesep: 132,
+    ranksep: 192,
+    marginx: 72,
+    marginy: 72,
   })
 
   nodes.forEach((node) => {
@@ -113,8 +116,8 @@ function layoutWithGrid(nodes: Node[], options: LayoutOptions): Node[] {
   const nodeWidth = options.nodeWidth ?? DEFAULT_NODE_WIDTH
   const nodeHeight = options.nodeHeight ?? DEFAULT_NODE_HEIGHT
   const columns = Math.max(1, Math.ceil(Math.sqrt(nodes.length)))
-  const xGap = nodeWidth + 76
-  const yGap = nodeHeight + 72
+  const xGap = nodeWidth + 126
+  const yGap = nodeHeight + 104
 
   return nodes.map((node, index) => ({
     ...node,

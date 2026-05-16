@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, ReactFlowProvider, getSimpleBezierPath, type Edge, type Node, type NodeProps, useUpdateNodeInternals } from "@xyflow/react"
+import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow, ReactFlowProvider, type Edge, type Node, type NodeProps, useUpdateNodeInternals } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import {
   BookOpen,
@@ -34,6 +34,7 @@ type GraphViewMode = "explore" | "chapterPath" | "prerequisites" | "formulaTheor
 type FlowNodeData = {
   label: string
   color: string
+  nodeType: string
 }
 
 interface GraphSubgraph {
@@ -69,10 +70,16 @@ const viewModes: Array<{ id: GraphViewMode; label: string; icon: React.ReactNode
 ]
 
 const layoutModes: Array<{ id: GraphLayoutMode; label: string }> = [
-  { id: "elk", label: "ELK 分层" },
-  { id: "dagre", label: "Dagre 快速" },
-  { id: "grid", label: "网格备用" },
+  { id: "elk", label: "ELK 自动定位" },
+  { id: "dagre", label: "Dagre 快速定位" },
+  { id: "grid", label: "网格定位" },
 ]
+
+const layoutDescriptions: Record<GraphLayoutMode, string> = {
+  elk: "ELK 分层定位会优先按关系方向排列节点；失败时自动回退到 Dagre，再回退到网格。",
+  dagre: "Dagre 快速定位适合中等规模有向关系；失败时自动回退到网格。",
+  grid: "网格定位不依赖关系结构，适合作为大图或异常数据的稳定兜底。",
+}
 
 const graphNodeTypes = {
   knowledge: KnowledgeFlowNode,
@@ -88,6 +95,27 @@ const FOCUSED_LIMIT = 82
 const OVERVIEW_LIMIT = 360
 const FOCUSED_EDGE_LIMIT = 220
 const OVERVIEW_EDGE_LIMIT = 1200
+const CANVAS_EDGE_LIMITS: Record<GraphViewMode, number> = {
+  explore: 18,
+  formulaTheorem: 36,
+  prerequisites: 36,
+  chapterPath: 48,
+  overview: 140,
+}
+const CANVAS_CONTEXT_EDGE_LIMITS: Record<GraphViewMode, number> = {
+  explore: 0,
+  formulaTheorem: 12,
+  prerequisites: 12,
+  chapterPath: 34,
+  overview: 140,
+}
+const CANVAS_LABEL_LIMIT = 6
+const FORMULA_CANVAS_NODE_LIMIT = 56
+const EDGE_ROUTE_OBSTACLE_PADDING = 16
+const EDGE_ROUTE_LANE_GAP = 34
+const EDGE_ROUTE_CORRIDOR_PADDING = 360
+const EDGE_ROUTE_OBSTACLE_LIMIT = 64
+const EDGE_PORT_SPACING = 18
 const LIMITED_NODE_FETCH_LIMIT = 5000
 const LIMITED_RELATION_FETCH_LIMIT = 50000
 const ALL_NODE_FETCH_LIMIT = 10000
@@ -118,12 +146,14 @@ function GraphPage() {
   const canEditGraph = user?.role === "teacher"
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [graphFocusNodeId, setGraphFocusNodeId] = useState<string | null>(null)
   const [nodeType, setNodeType] = useState(DEFAULT_TYPE)
   const [relationType, setRelationType] = useState(DEFAULT_RELATION)
   const [viewMode, setViewMode] = useState<GraphViewMode>("explore")
   const [layoutMode, setLayoutMode] = useState<GraphLayoutMode>("elk")
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set())
   const [flowNodes, setFlowNodes] = useState<Node[]>([])
+  const [layoutReadySignature, setLayoutReadySignature] = useState("")
   const [layoutStatus, setLayoutStatus] = useState("")
   const [editMessage, setEditMessage] = useState("")
 
@@ -143,9 +173,11 @@ function GraphPage() {
     () => mergeRelations(relationshipsData?.relationships || [], selectedRelations),
     [relationshipsData?.relationships, selectedRelations],
   )
+  const graphRelationships = useMemo(() => relationshipsData?.relationships || [], [relationshipsData?.relationships])
   const stats = statsData?.data
   const nodeById = useMemo(() => new Map(rawNodes.map((node) => [node.id, node])), [rawNodes])
   const degreeById = useMemo(() => buildDegreeMap(rawRelationships), [rawRelationships])
+  const graphDegreeById = useMemo(() => buildDegreeMap(graphRelationships), [graphRelationships])
 
   const nodeTypes = useMemo(() => unique(rawNodes.map((node) => node.type || "concept")), [rawNodes])
   const relationTypes = useMemo(
@@ -159,6 +191,14 @@ function GraphPage() {
         return nodeById.has(relation.source_id) && nodeById.has(relation.target_id)
       }),
     [nodeById, rawRelationships],
+  )
+  const graphContentRelations = useMemo(
+    () =>
+      graphRelationships.filter((relation) => {
+        if (isStructuralRelation(relation)) return false
+        return nodeById.has(relation.source_id) && nodeById.has(relation.target_id)
+      }),
+    [graphRelationships, nodeById],
   )
 
   const baseFilteredNodes = useMemo(() => {
@@ -181,48 +221,65 @@ function GraphPage() {
     [rawRelationships, relationType, selectedNodeId],
   )
   const selectedNeighborIds = useMemo(() => getNeighborIds(selectedNodeId, focusedRelationships), [focusedRelationships, selectedNodeId])
-  const recommendedNodes = useMemo(() => getRecommendedStarts(baseFilteredNodes, degreeById, contentRelations), [baseFilteredNodes, contentRelations, degreeById])
+  const graphFocusRelationships = useMemo(
+    () => getNodeRelations(graphFocusNodeId, graphRelationships, relationType),
+    [graphFocusNodeId, graphRelationships, relationType],
+  )
+  const graphNeighborIds = useMemo(() => getNeighborIds(graphFocusNodeId, graphFocusRelationships), [graphFocusNodeId, graphFocusRelationships])
+  const recommendedNodes = useMemo(() => getRecommendedStarts(baseFilteredNodes, graphDegreeById, graphContentRelations), [baseFilteredNodes, graphContentRelations, graphDegreeById])
+  const formulaStartNodeId = useMemo(
+    () =>
+      baseFilteredNodes
+        .filter((node) => FORMULA_CONTEXT_TYPES.has(node.type || ""))
+        .sort((a, b) => getNodeScore(b, graphDegreeById) - getNodeScore(a, graphDegreeById))[0]?.id || null,
+    [baseFilteredNodes, graphDegreeById],
+  )
 
   useEffect(() => {
-    if (!selectedNodeId && recommendedNodes[0]) {
-      setSelectedNodeId(recommendedNodes[0].id)
+    const recommendedStart = recommendedNodes[0]?.id
+    if (!recommendedStart) return
+    if (!selectedNodeId) {
+      setSelectedNodeId(recommendedStart)
     }
-  }, [recommendedNodes, selectedNodeId])
+    if (!graphFocusNodeId) {
+      setGraphFocusNodeId(recommendedStart)
+    }
+  }, [graphFocusNodeId, recommendedNodes, selectedNodeId])
 
   const graphSubgraph = useMemo<GraphSubgraph>(() => {
-    const filteredRelations = rawRelationships.filter((relation) => {
+    const filteredRelations = graphRelationships.filter((relation) => {
       if (relationType !== DEFAULT_RELATION && (relation.relation_type || "related") !== relationType) return false
       return nodeById.has(relation.source_id) && nodeById.has(relation.target_id)
     })
 
     return buildGraphSubgraph({
       viewMode,
-      selectedNodeId,
+      selectedNodeId: graphFocusNodeId,
       expandedNodeIds,
-      selectedNeighborIds,
+      selectedNeighborIds: graphNeighborIds,
       recommendedNodes,
       baseFilteredNodes,
       rawNodes,
       filteredNodeIds,
       filteredRelations,
-      contentRelations,
+      contentRelations: graphContentRelations,
       nodeById,
-      degreeById,
+      degreeById: graphDegreeById,
       limit: viewMode === "overview" ? OVERVIEW_LIMIT : FOCUSED_LIMIT,
     })
   }, [
     baseFilteredNodes,
-    contentRelations,
-    degreeById,
     expandedNodeIds,
     filteredNodeIds,
+    graphContentRelations,
+    graphDegreeById,
+    graphFocusNodeId,
+    graphNeighborIds,
+    graphRelationships,
     nodeById,
     rawNodes,
-    rawRelationships,
     recommendedNodes,
     relationType,
-    selectedNeighborIds,
-    selectedNodeId,
     viewMode,
   ])
 
@@ -238,32 +295,61 @@ function GraphPage() {
 
   const highlightedIds = useMemo(() => {
     if (!selectedNodeId) return new Set<string>()
-    return new Set([selectedNodeId, ...(viewMode === "explore" ? selectedNeighborIds : [])])
-  }, [selectedNeighborIds, selectedNodeId, viewMode])
+    if (viewMode === "formulaTheorem") {
+      return new Set([
+        selectedNodeId,
+        ...(graphFocusNodeId ? [graphFocusNodeId] : []),
+        ...selectedNeighborIds,
+        ...graphNeighborIds,
+        ...visibleNodes.filter((node) => FORMULA_CONTEXT_TYPES.has(node.type || "")).map((node) => node.id),
+      ])
+    }
+    return new Set([selectedNodeId, ...(graphFocusNodeId ? [graphFocusNodeId] : []), ...(viewMode === "explore" ? graphNeighborIds : [])])
+  }, [graphFocusNodeId, graphNeighborIds, selectedNeighborIds, selectedNodeId, viewMode, visibleNodes])
 
   const baseFlowNodes = useMemo<Node[]>(
     () => visibleNodes.map((node) => createFlowNode(node, highlightedIds, selectedNodeId, getLayoutDirection(viewMode))),
     [highlightedIds, selectedNodeId, viewMode, visibleNodes],
   )
+  const canvasRelationships = useMemo(
+    () => selectCanvasRelationships(renderRelationships, graphFocusNodeId, viewMode, graphDegreeById),
+    [graphDegreeById, graphFocusNodeId, renderRelationships, viewMode],
+  )
+  const canvasRelationshipNodeIds = useMemo(() => getRelationNodeIds(canvasRelationships), [canvasRelationships])
   const flowEdges = useMemo<Edge[]>(
-    () => createFlowEdges(renderRelationships, selectedNodeId),
-    [renderRelationships, selectedNodeId],
+    () => createFlowEdges(canvasRelationships, selectedNodeId),
+    [canvasRelationships, selectedNodeId],
   )
-  const canvasNodes = useMemo<Node[]>(
-    () => (hasSameNodeIds(flowNodes, baseFlowNodes) ? flowNodes : seedFlowNodes(baseFlowNodes, flowNodes)),
-    [baseFlowNodes, flowNodes],
+  const canvasBaseFlowNodes = useMemo(
+    () => selectCanvasNodes(baseFlowNodes, canvasRelationshipNodeIds, graphFocusNodeId, viewMode),
+    [baseFlowNodes, canvasRelationshipNodeIds, graphFocusNodeId, viewMode],
   )
+  const baseFlowNodeIds = useMemo(() => new Set(canvasBaseFlowNodes.map((node) => node.id)), [canvasBaseFlowNodes])
+  const layoutEdges = useMemo<Edge[]>(
+    () => flowEdges.filter((edge) => baseFlowNodeIds.has(edge.source) && baseFlowNodeIds.has(edge.target)),
+    [baseFlowNodeIds, flowEdges],
+  )
+  const effectiveLayoutMode: GraphLayoutMode = viewMode === "formulaTheorem" ? "grid" : layoutMode
+  const effectiveLayoutEdges = layoutEdges
+  const layoutSignature = useMemo(
+    () => getLayoutSignature(canvasBaseFlowNodes, effectiveLayoutEdges, graphFocusNodeId, viewMode, effectiveLayoutMode),
+    [canvasBaseFlowNodes, effectiveLayoutEdges, effectiveLayoutMode, graphFocusNodeId, viewMode],
+  )
+  const canvasNodes = useMemo<Node[]>(() => seedFlowNodes(canvasBaseFlowNodes, flowNodes), [canvasBaseFlowNodes, flowNodes])
   const canvasNodeIds = useMemo(() => new Set(canvasNodes.map((node) => node.id)), [canvasNodes])
   const canvasEdges = useMemo<Edge[]>(
     () => flowEdges.filter((edge) => canvasNodeIds.has(edge.source) && canvasNodeIds.has(edge.target)),
     [canvasNodeIds, flowEdges],
   )
+  const isLayoutReady = layoutReadySignature === layoutSignature
+  const renderedCanvasEdges = useMemo(() => (isLayoutReady ? canvasEdges : []), [canvasEdges, isLayoutReady])
   const hiddenCanvasEdgeCount = flowEdges.length - canvasEdges.length
 
   useEffect(() => {
     Object.assign(window, {
       __KGTS_GRAPH_DEBUG__: {
         selectedNodeId,
+        graphFocusNodeId,
         anchorNodeId: graphSubgraph.anchorNodeId,
         viewMode,
         rawRelationshipPayload: relationshipsData?.rawCount ?? rawRelationships.length,
@@ -271,30 +357,43 @@ function GraphPage() {
         missingNodeRelationships: relationshipsData?.missingNodeCount ?? 0,
         rawNodes: rawNodes.length,
         rawRelationships: rawRelationships.length,
-        contentRelationships: contentRelations.length,
+        contentRelationships: graphContentRelations.length,
         visibleNodes: visibleNodes.length,
         visibleRelationships: visibleRelationships.length,
         renderRelationships: renderRelationships.length,
+        canvasRelationships: canvasRelationships.length,
+        canvasRelationshipNodes: canvasRelationshipNodeIds.size,
         flowNodes: flowNodes.length,
         flowEdges: flowEdges.length,
+        layoutEdges: layoutEdges.length,
         canvasNodes: canvasNodes.length,
         canvasEdges: canvasEdges.length,
+        renderedCanvasEdges: renderedCanvasEdges.length,
+        isLayoutReady,
         hiddenCanvasEdges: hiddenCanvasEdgeCount,
         selectedRelations: focusedRelationships.length,
         selectedNeighbors: selectedNeighborIds.size,
+        graphNeighbors: graphNeighborIds.size,
       },
     })
   }, [
     canvasEdges.length,
+    canvasRelationships.length,
+    canvasRelationshipNodeIds.size,
     canvasNodes.length,
-    contentRelations.length,
+    graphContentRelations.length,
     flowEdges.length,
     flowNodes.length,
     focusedRelationships.length,
+    graphFocusNodeId,
     graphSubgraph.anchorNodeId,
+    graphNeighborIds.size,
     hiddenCanvasEdgeCount,
+    layoutEdges.length,
+    isLayoutReady,
     rawNodes.length,
     rawRelationships.length,
+    renderedCanvasEdges.length,
     relationshipsData?.missingEndpointCount,
     relationshipsData?.missingNodeCount,
     relationshipsData?.rawCount,
@@ -308,22 +407,37 @@ function GraphPage() {
 
   useEffect(() => {
     let cancelled = false
-    setFlowNodes((currentNodes) => seedFlowNodes(baseFlowNodes, currentNodes))
-    setLayoutStatus(layoutMode === "elk" ? "正在计算 ELK 布局..." : layoutMode === "dagre" ? "正在计算 Dagre 布局..." : "")
-    layoutGraphNodes(baseFlowNodes, flowEdges, {
-      mode: layoutMode,
-      direction: getLayoutDirection(viewMode),
-      nodeWidth: FLOW_NODE_WIDTH,
-      nodeHeight: FLOW_NODE_HEIGHT,
-    }).then((nodes) => {
+    const currentLayoutSignature = layoutSignature
+    setLayoutReadySignature("")
+    setFlowNodes((currentNodes) => seedFlowNodes(canvasBaseFlowNodes, currentNodes))
+    setLayoutStatus(
+      viewMode === "formulaTheorem"
+        ? "正在恢复公式节点阵列..."
+        : layoutMode === "elk"
+          ? "正在计算 ELK 自动定位..."
+          : layoutMode === "dagre"
+            ? "正在计算 Dagre 快速定位..."
+            : "正在计算网格定位...",
+    )
+    const layoutPromise =
+      viewMode === "formulaTheorem"
+        ? Promise.resolve(layoutFormulaGridNodes(canvasBaseFlowNodes, graphFocusNodeId, effectiveLayoutEdges))
+        : layoutGraphNodes(canvasBaseFlowNodes, effectiveLayoutEdges, {
+            mode: effectiveLayoutMode,
+            direction: getLayoutDirection(viewMode),
+            nodeWidth: FLOW_NODE_WIDTH,
+            nodeHeight: FLOW_NODE_HEIGHT,
+          })
+    layoutPromise.then((nodes) => {
       if (cancelled) return
       setFlowNodes(nodes)
+      setLayoutReadySignature(currentLayoutSignature)
       setLayoutStatus("")
     })
     return () => {
       cancelled = true
     }
-  }, [baseFlowNodes, flowEdges, layoutMode, viewMode])
+  }, [layoutSignature])
 
   const selectedNode = selectedNodeId ? nodeById.get(selectedNodeId) : recommendedNodes[0]
   const isLoading = nodesLoading || relationshipsLoading
@@ -346,6 +460,7 @@ function GraphPage() {
 
   const startFromNode = useCallback((nodeId: string) => {
     setSelectedNodeId(nodeId)
+    setGraphFocusNodeId(nodeId)
     setViewMode("explore")
     setExpandedNodeIds(new Set())
     setEditMessage("")
@@ -355,25 +470,52 @@ function GraphPage() {
     setSelectedNodeId((currentNodeId) => {
       if (currentNodeId !== nodeId) {
         setExpandedNodeIds(new Set())
-        setViewMode("explore")
       }
       return nodeId
     })
+    setGraphFocusNodeId(nodeId)
     setEditMessage("")
   }, [])
 
+  const resetGraphView = useCallback(() => {
+    const startNodeId = viewMode === "formulaTheorem" ? formulaStartNodeId || recommendedNodes[0]?.id || null : recommendedNodes[0]?.id || null
+    setSelectedNodeId(startNodeId)
+    setGraphFocusNodeId(startNodeId)
+    setExpandedNodeIds(new Set())
+    setEditMessage("")
+    return startNodeId
+  }, [formulaStartNodeId, recommendedNodes, viewMode])
+
+  const selectViewMode = useCallback(
+    (mode: GraphViewMode) => {
+      setViewMode(mode)
+      setExpandedNodeIds(new Set())
+      setEditMessage("")
+      if (mode === "formulaTheorem") {
+        const startNodeId = formulaStartNodeId || recommendedNodes[0]?.id || null
+        setSelectedNodeId(startNodeId)
+        setGraphFocusNodeId(startNodeId)
+      }
+    },
+    [formulaStartNodeId, recommendedNodes],
+  )
+
   const expandSelected = useCallback(() => {
     if (!selectedNodeId) return
+    setGraphFocusNodeId(selectedNodeId)
     setExpandedNodeIds((prev) => new Set([...prev, selectedNodeId, ...selectedNeighborIds]))
   }, [selectedNeighborIds, selectedNodeId])
 
   const resetToFocus = useCallback(() => {
+    setGraphFocusNodeId(selectedNodeId)
     setExpandedNodeIds(new Set())
     setViewMode("explore")
-  }, [])
+  }, [selectedNodeId])
 
   const backToStarts = useCallback(() => {
-    setSelectedNodeId(recommendedNodes[0]?.id || null)
+    const startNodeId = recommendedNodes[0]?.id || null
+    setSelectedNodeId(startNodeId)
+    setGraphFocusNodeId(startNodeId)
     setExpandedNodeIds(new Set())
     setViewMode("explore")
   }, [recommendedNodes])
@@ -418,7 +560,7 @@ function GraphPage() {
       <div className="rounded-lg border bg-card">
         <div className="flex flex-wrap items-center gap-2 border-b p-3">
           {viewModes.map((mode) => (
-            <button key={mode.id} type="button" onClick={() => setViewMode(mode.id)} className={cnSegment(viewMode === mode.id)}>
+            <button key={mode.id} type="button" onClick={() => selectViewMode(mode.id)} className={cnSegment(viewMode === mode.id)}>
               {mode.icon}
               {mode.label}
             </button>
@@ -444,6 +586,7 @@ function GraphPage() {
           </button>
           {hiddenCount > 0 && <span className="text-sm text-muted-foreground">当前视图收起 {hiddenCount} 个节点，可搜索、切换模式或进入全图概览。</span>}
           {viewMode === "overview" && <span className="text-sm text-amber-600">全图概览最多显示 {OVERVIEW_LIMIT} 个节点，大图渲染可能较慢。</span>}
+          <span className="text-sm text-muted-foreground">{layoutDescriptions[layoutMode]}</span>
         </div>
       </div>
 
@@ -455,16 +598,20 @@ function GraphPage() {
               图谱可视化
             </h2>
             <span className="text-xs text-muted-foreground">
-              {layoutStatus || `${visibleNodes.length} nodes / ${renderRelationships.length} edges`}
+              {layoutStatus || `${visibleNodes.length} nodes / ${canvasRelationships.length} of ${renderRelationships.length} edges`}
             </span>
           </div>
           <ReactFlowProvider>
             <GraphCanvas
               isLoading={isLoading}
+              isLayoutReady={isLayoutReady}
               viewMode={viewMode}
+              focusNodeId={graphFocusNodeId}
               nodes={canvasNodes}
-              edges={canvasEdges}
+              edges={renderedCanvasEdges}
+              graphSignature={layoutSignature}
               onSelectNode={selectGraphNode}
+              onResetGraphView={resetGraphView}
             />
           </ReactFlowProvider>
         </section>
@@ -502,20 +649,30 @@ function GraphPage() {
 
 function GraphCanvas({
   isLoading,
+  isLayoutReady,
   viewMode,
+  focusNodeId,
   nodes,
   edges,
+  graphSignature,
   onSelectNode,
+  onResetGraphView,
 }: {
   isLoading: boolean
+  isLayoutReady: boolean
   viewMode: GraphViewMode
+  focusNodeId: string | null
   nodes: Node[]
   edges: Edge[]
+  graphSignature: string
   onSelectNode: (nodeId: string) => void
+  onResetGraphView: () => string | null
 }) {
   const updateNodeInternals = useUpdateNodeInternals()
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const resetCountRef = useRef(0)
+  const fittedGraphSignatureRef = useRef("")
+  const pinnedClickRef = useRef<{ nodeId: string; screenX: number; screenY: number; graphSignature: string } | null>(null)
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 })
   const nodeSignature = useMemo(
     () =>
@@ -527,7 +684,7 @@ function GraphCanvas({
   )
   const edgeSignature = useMemo(() => edges.map((edge) => edge.id).sort().join("|"), [edges])
 
-  const resetViewport = useCallback(() => {
+  const fitViewport = useCallback(() => {
     if (!nodes.length) return
     const nextViewport = getViewportForNodes(nodes, canvasRef.current)
     if (!nextViewport) return
@@ -543,16 +700,90 @@ function GraphCanvas({
     })
   }, [nodes])
 
+  const centerViewportOnNode = useCallback(
+    (nodeId: string | null, preferredZoom = 1) => {
+      if (!nodeId) return false
+      const node = nodes.find((item) => item.id === nodeId)
+      const nextViewport = getViewportForNode(node, canvasRef.current, preferredZoom)
+      if (!nextViewport) return false
+      resetCountRef.current += 1
+      setViewport(nextViewport)
+      Object.assign(window, {
+        __KGTS_GRAPH_RESET_DEBUG__: {
+          resetAt: new Date().toISOString(),
+          resetCount: resetCountRef.current,
+          resetKind: "focus-node",
+          focusNodeId: nodeId,
+          nodeCount: nodes.length,
+          viewport: nextViewport,
+        },
+      })
+      return true
+    },
+    [nodes],
+  )
+
+  const resetViewport = useCallback(() => {
+    pinnedClickRef.current = null
+    const resetFocusNodeId = onResetGraphView()
+    window.requestAnimationFrame(() => {
+      if (viewMode === "formulaTheorem" && centerViewportOnNode(resetFocusNodeId, Math.max(viewport.zoom || 1, 0.9))) return
+      fitViewport()
+    })
+  }, [centerViewportOnNode, fitViewport, onResetGraphView, viewMode, viewport.zoom])
+
+  const selectNodeWithoutJump = useCallback(
+    (nodeId: string) => {
+      if (viewMode === "formulaTheorem") {
+        pinnedClickRef.current = null
+        onSelectNode(nodeId)
+        window.requestAnimationFrame(() => centerViewportOnNode(nodeId, Math.max(viewport.zoom || 1, 0.9)))
+        return
+      }
+      const node = nodes.find((item) => item.id === nodeId)
+      if (node) {
+        const box = getNodeBox(node)
+        pinnedClickRef.current = {
+          nodeId,
+          screenX: (box.x + box.width / 2) * viewport.zoom + viewport.x,
+          screenY: (box.y + box.height / 2) * viewport.zoom + viewport.y,
+          graphSignature,
+        }
+      }
+      onSelectNode(nodeId)
+    },
+    [centerViewportOnNode, graphSignature, nodes, onSelectNode, viewMode, viewport],
+  )
+
   useEffect(() => {
-    if (!nodes.length) return
+    if (!nodes.length || !isLayoutReady) return
     const measureFrame = window.requestAnimationFrame(() => {
       nodes.forEach((node) => updateNodeInternals(node.id))
-      resetViewport()
+      if (fittedGraphSignatureRef.current !== graphSignature) {
+        fittedGraphSignatureRef.current = graphSignature
+        if (viewMode === "formulaTheorem" && centerViewportOnNode(focusNodeId, Math.max(viewport.zoom || 1, 0.9))) {
+          pinnedClickRef.current = null
+          return
+        }
+        const pinnedClick = pinnedClickRef.current
+        const pinnedNode = pinnedClick?.graphSignature !== graphSignature ? nodes.find((node) => node.id === pinnedClick?.nodeId) : null
+        if (pinnedClick && pinnedNode) {
+          const pinnedBox = getNodeBox(pinnedNode)
+          setViewport((currentViewport) => ({
+            ...currentViewport,
+            x: pinnedClick.screenX - (pinnedBox.x + pinnedBox.width / 2) * currentViewport.zoom,
+            y: pinnedClick.screenY - (pinnedBox.y + pinnedBox.height / 2) * currentViewport.zoom,
+          }))
+          pinnedClickRef.current = null
+        } else {
+          fitViewport()
+        }
+      }
     })
     return () => {
       window.cancelAnimationFrame(measureFrame)
     }
-  }, [nodeSignature, nodes, resetViewport, updateNodeInternals, viewMode])
+  }, [centerViewportOnNode, fitViewport, focusNodeId, graphSignature, isLayoutReady, nodeSignature, nodes, updateNodeInternals, viewMode, viewport.zoom])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -560,15 +791,17 @@ function GraphCanvas({
             __KGTS_GRAPH_RENDER_DEBUG__: {
               reactFlowNodes: nodes.length,
               reactFlowEdges: edges.length,
+              renderedNativeEdges: document.querySelectorAll(".react-flow__edge").length,
               renderedEdgeGroups: document.querySelectorAll(".kg-flow-overlay-edge").length,
               renderedEdgePaths: document.querySelectorAll(".kg-flow-overlay-path").length,
+              graphSignature,
               viewport,
               resetCount: resetCountRef.current,
             },
           })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [edgeSignature, edges.length, nodeSignature, nodes.length, viewport])
+  }, [edgeSignature, edges.length, graphSignature, nodeSignature, nodes.length, viewport])
 
   return (
     <div ref={canvasRef} className="relative h-[460px] overflow-hidden bg-slate-50 sm:h-[560px] xl:h-[660px]">
@@ -590,7 +823,7 @@ function GraphCanvas({
             onViewportChange={setViewport}
             minZoom={0.08}
             maxZoom={1.8}
-            onNodeClick={(_, node) => onSelectNode(node.id)}
+            onNodeClick={(_, node) => selectNodeWithoutJump(node.id)}
             nodesDraggable
             nodesConnectable={false}
             elementsSelectable
@@ -599,10 +832,10 @@ function GraphCanvas({
             }}
           >
             <Background color="#cbd5e1" gap={36} />
+            <GraphRelationOverlay key={graphSignature} nodes={nodes} edges={edges} viewport={viewport} />
             <Controls />
             <MiniMap className="hidden sm:block" pannable zoomable nodeColor={(node) => String(node.data?.color || "#64748b")} />
           </ReactFlow>
-          <GraphRelationOverlay nodes={nodes} edges={edges} viewport={viewport} />
           <FitViewButton onReset={resetViewport} />
         </>
       )}
@@ -627,20 +860,21 @@ function KnowledgeFlowNode({
 
 function GraphRelationOverlay({ nodes, edges, viewport }: { nodes: Node[]; edges: Edge[]; viewport: { x: number; y: number; zoom: number } }) {
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
+  const edgeOffsets = useMemo(() => getEdgePortOffsets(edges), [edges])
   const overlayEdges = useMemo(
     () =>
       edges
         .map((edge) => {
           const sourceNode = nodeById.get(edge.source)
           const targetNode = nodeById.get(edge.target)
-          if (!sourceNode || !targetNode) return null
-          const geometry = getOverlayEdgeGeometry(sourceNode, targetNode)
+          if (!sourceNode || !targetNode || sourceNode.id === targetNode.id) return null
+          const geometry = getOverlayEdgeGeometry(sourceNode, targetNode, nodes, edgeOffsets.get(edge.id) || 0)
           if (!geometry) return null
-          const isFocused = Boolean(edge.animated || (edge.zIndex && edge.zIndex > 1))
+          const isFocused = Boolean(edge.animated || (edge.zIndex && edge.zIndex > 0))
           return {
             ...geometry,
             id: edge.id,
-            label: typeof edge.label === "string" ? edge.label : edge.data?.relationType,
+            label: typeof edge.label === "string" ? edge.label : undefined,
             isFocused,
           }
         })
@@ -649,35 +883,16 @@ function GraphRelationOverlay({ nodes, edges, viewport }: { nodes: Node[]; edges
         path: string
         labelX: number
         labelY: number
-        sourceX: number
-        sourceY: number
-        targetX: number
-        targetY: number
-        sourcePosition: Position
-        targetPosition: Position
         label?: string
         isFocused: boolean
       }>,
-    [edges, nodeById],
+    [edgeOffsets, edges, nodeById, nodes],
   )
 
   if (!overlayEdges.length) return null
 
   return (
-    <svg
-      className="kg-flow-overlay"
-      aria-hidden="true"
-      style={{
-        position: "absolute",
-        inset: 0,
-        width: "100%",
-        height: "100%",
-        overflow: "visible",
-        pointerEvents: "none",
-        display: "block",
-        zIndex: 6,
-      }}
-    >
+    <svg className="kg-flow-overlay" aria-hidden="true">
       <defs>
         <marker id="kg-flow-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse">
           <path d="M0,0 L12,6 L0,12 z" fill="#64748b" />
@@ -690,29 +905,35 @@ function GraphRelationOverlay({ nodes, edges, viewport }: { nodes: Node[]; edges
         {overlayEdges.map((edge) => {
           const marker = edge.isFocused ? "url(#kg-flow-arrow-focus)" : "url(#kg-flow-arrow)"
           const stroke = edge.isFocused ? "#2563eb" : "#64748b"
-          const strokeWidth = edge.isFocused ? 2.8 : 1.8
-          const opacity = edge.isFocused ? 1 : 0.7
+          const strokeWidth = edge.isFocused ? 2.6 : 1.7
+          const opacity = edge.isFocused ? 0.98 : 0.58
           return (
-            <g key={edge.id} className="kg-flow-overlay-edge">
-              <path
-                className="kg-flow-overlay-path"
-                d={edge.path}
-                fill="none"
-                stroke={stroke}
-                strokeWidth={strokeWidth}
-                strokeLinecap="round"
-                strokeDasharray={edge.isFocused ? undefined : "5 8"}
-                opacity={opacity}
-                markerEnd={marker}
-              />
-              {edge.label ? (
-                <g transform={`translate(${edge.labelX}, ${edge.labelY})`}>
-                  <rect x={-44} y={-11} width={88} height={22} rx={8} fill="#ffffff" fillOpacity={0.95} stroke={stroke} strokeOpacity={0.25} />
-                  <text className="kg-flow-overlay-label" textAnchor="middle" dominantBaseline="middle">
-                    {edge.label}
-                  </text>
-                </g>
-              ) : null}
+            <path
+              key={`${edge.id}-path`}
+              className="kg-flow-overlay-path"
+              d={edge.path}
+              fill="none"
+              stroke={stroke}
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeDasharray={edge.isFocused ? undefined : "5 8"}
+              opacity={opacity}
+              markerEnd={marker}
+            />
+          )
+        })}
+        {overlayEdges.map((edge) => {
+          const stroke = edge.isFocused ? "#2563eb" : "#64748b"
+          const labelText = edge.label ? truncateRelationLabel(edge.label) : ""
+          const labelWidth = Math.min(148, Math.max(56, labelText.length * 7 + 22))
+          if (!labelText) return null
+          return (
+            <g key={`${edge.id}-label`} className="kg-flow-overlay-edge" transform={`translate(${edge.labelX}, ${edge.labelY})`}>
+              <rect x={-labelWidth / 2} y={-10} width={labelWidth} height={20} rx={6} fill="#ffffff" fillOpacity={0.98} stroke={stroke} strokeOpacity={0.32} />
+              <text className="kg-flow-overlay-label" textAnchor="middle" dominantBaseline="middle">
+                {labelText}
+              </text>
             </g>
           )
         })}
@@ -767,6 +988,7 @@ function createFlowNode(node: GraphNode, highlightedIds: Set<string>, selectedNo
     data: {
       label: truncateLabel(node.label || node.id),
       color,
+      nodeType: type,
     },
     style: {
       width: 220,
@@ -784,76 +1006,247 @@ function createFlowNode(node: GraphNode, highlightedIds: Set<string>, selectedNo
   }
 }
 
-function getOverlayEdgeGeometry(sourceNode: Node, targetNode: Node) {
+function getOverlayEdgeGeometry(sourceNode: Node, targetNode: Node, allNodes: Node[], edgeOffset: number) {
   const sourceBox = getNodeBox(sourceNode)
   const targetBox = getNodeBox(targetNode)
   const sourceCenter = { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 }
   const targetCenter = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + targetBox.height / 2 }
   const dx = targetCenter.x - sourceCenter.x
   const dy = targetCenter.y - sourceCenter.y
-  const offset = 6
+  const sourceSide = getEdgeSide(dx, dy, "source")
+  const targetSide = getEdgeSide(dx, dy, "target")
+  const source = getBoxPort(sourceBox, sourceSide, edgeOffset)
+  const target = getBoxPort(targetBox, targetSide, -edgeOffset)
 
-  let sourcePosition: Position
-  let targetPosition: Position
-  let sourceX: number
-  let sourceY: number
-  let targetX: number
-  let targetY: number
-
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    if (dx >= 0) {
-      sourcePosition = Position.Right
-      targetPosition = Position.Left
-      sourceX = sourceBox.x + sourceBox.width + offset
-      sourceY = sourceCenter.y
-      targetX = targetBox.x - offset
-      targetY = targetCenter.y
-    } else {
-      sourcePosition = Position.Left
-      targetPosition = Position.Right
-      sourceX = sourceBox.x - offset
-      sourceY = sourceCenter.y
-      targetX = targetBox.x + targetBox.width + offset
-      targetY = targetCenter.y
-    }
-  } else {
-    if (dy >= 0) {
-      sourcePosition = Position.Bottom
-      targetPosition = Position.Top
-      sourceX = sourceCenter.x
-      sourceY = sourceBox.y + sourceBox.height + offset
-      targetX = targetCenter.x
-      targetY = targetBox.y - offset
-    } else {
-      sourcePosition = Position.Top
-      targetPosition = Position.Bottom
-      sourceX = sourceCenter.x
-      sourceY = sourceBox.y - offset
-      targetX = targetCenter.x
-      targetY = targetBox.y + targetBox.height + offset
-    }
-  }
-
-  const [path, labelX, labelY] = getSimpleBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-  })
+  const obstacleBoxes = getRouteObstacles(sourceNode, targetNode, allNodes)
+  const points = routeOrthogonalPath(source, target, sourceSide, targetSide, obstacleBoxes)
+  const path = pointsToPath(points)
+  const labelPoint = getPathLabelPoint(points)
 
   return {
     path,
-    labelX,
-    labelY,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
+    labelX: labelPoint.x,
+    labelY: labelPoint.y,
   }
+}
+
+function getEdgeSide(dx: number, dy: number, endpoint: "source" | "target"): EdgeSide {
+  const forward = endpoint === "source" ? 1 : -1
+  if (Math.abs(dx) >= Math.abs(dy)) return dx * forward >= 0 ? "right" : "left"
+  return dy * forward >= 0 ? "bottom" : "top"
+}
+
+function getBoxPort(box: NodeBox, side: EdgeSide, offset = 0): Point {
+  const centerX = box.x + box.width / 2
+  const centerY = box.y + box.height / 2
+  if (side === "left") return { x: box.x - 2, y: clamp(centerY + offset, box.y + 14, box.y + box.height - 14) }
+  if (side === "right") return { x: box.x + box.width + 2, y: clamp(centerY + offset, box.y + 14, box.y + box.height - 14) }
+  if (side === "top") return { x: clamp(centerX + offset, box.x + 18, box.x + box.width - 18), y: box.y - 2 }
+  return { x: clamp(centerX + offset, box.x + 18, box.x + box.width - 18), y: box.y + box.height + 2 }
+}
+
+function getRouteObstacles(sourceNode: Node, targetNode: Node, allNodes: Node[]) {
+  const sourceBox = getNodeBox(sourceNode)
+  const targetBox = getNodeBox(targetNode)
+  const corridor = getCorridorBox(sourceBox, targetBox, EDGE_ROUTE_CORRIDOR_PADDING)
+  return allNodes
+    .filter((node) => node.id !== sourceNode.id && node.id !== targetNode.id)
+    .map((node) => inflateBox(getNodeBox(node), EDGE_ROUTE_OBSTACLE_PADDING))
+    .filter((box) => boxesOverlap(box, corridor))
+    .sort((a, b) => boxDistanceToPoint(a, sourceBox) - boxDistanceToPoint(b, sourceBox))
+    .slice(0, EDGE_ROUTE_OBSTACLE_LIMIT)
+}
+
+function routeOrthogonalPath(source: Point, target: Point, sourceSide: EdgeSide, targetSide: EdgeSide, obstacles: NodeBox[]) {
+  const sourceLead = getLeadPoint(source, sourceSide, EDGE_ROUTE_LANE_GAP)
+  const targetLead = getLeadPoint(target, targetSide, EDGE_ROUTE_LANE_GAP)
+  const xLanes = getRouteLanes(sourceLead.x, targetLead.x, obstacles, "x")
+  const yLanes = getRouteLanes(sourceLead.y, targetLead.y, obstacles, "y")
+  const candidates: Point[][] = []
+
+  xLanes.forEach((x) => {
+    candidates.push([source, sourceLead, { x, y: sourceLead.y }, { x, y: targetLead.y }, targetLead, target])
+  })
+  yLanes.forEach((y) => {
+    candidates.push([source, sourceLead, { x: sourceLead.x, y }, { x: targetLead.x, y }, targetLead, target])
+  })
+  xLanes.forEach((x) => {
+    yLanes.forEach((y) => {
+      candidates.push([source, sourceLead, { x, y: sourceLead.y }, { x, y }, { x: targetLead.x, y }, targetLead, target])
+      candidates.push([source, sourceLead, { x: sourceLead.x, y }, { x, y }, { x, y: targetLead.y }, targetLead, target])
+    })
+  })
+
+  return candidates
+    .map(compactPathPoints)
+    .sort((a, b) => scoreOrthogonalPath(a, obstacles) - scoreOrthogonalPath(b, obstacles))[0]
+}
+
+type Point = { x: number; y: number }
+type NodeBox = { x: number; y: number; width: number; height: number }
+type EdgeSide = "left" | "right" | "top" | "bottom"
+
+function getEdgePortOffsets(edges: Edge[]) {
+  const edgeIdsByNode = new Map<string, string[]>()
+  edges.forEach((edge) => {
+    if (!edgeIdsByNode.has(edge.source)) edgeIdsByNode.set(edge.source, [])
+    if (!edgeIdsByNode.has(edge.target)) edgeIdsByNode.set(edge.target, [])
+    edgeIdsByNode.get(edge.source)?.push(edge.id)
+    edgeIdsByNode.get(edge.target)?.push(edge.id)
+  })
+
+  const offsets = new Map<string, number[]>()
+  edgeIdsByNode.forEach((edgeIds) => {
+    const orderedIds = [...edgeIds].sort()
+    const center = (orderedIds.length - 1) / 2
+    orderedIds.forEach((edgeId, index) => {
+      const current = offsets.get(edgeId) || []
+      current.push((index - center) * EDGE_PORT_SPACING)
+      offsets.set(edgeId, current)
+    })
+  })
+
+  return new Map(Array.from(offsets, ([edgeId, values]) => [edgeId, average(values)]))
+}
+
+function getLeadPoint(point: Point, side: EdgeSide, gap: number): Point {
+  if (side === "left") return { x: point.x - gap, y: point.y }
+  if (side === "right") return { x: point.x + gap, y: point.y }
+  if (side === "top") return { x: point.x, y: point.y - gap }
+  return { x: point.x, y: point.y + gap }
+}
+
+function getRouteLanes(sourceValue: number, targetValue: number, obstacles: NodeBox[], axis: "x" | "y") {
+  const min = Math.min(sourceValue, targetValue)
+  const max = Math.max(sourceValue, targetValue)
+  const midpoint = (sourceValue + targetValue) / 2
+  const values = new Set<number>([sourceValue, targetValue, midpoint])
+  const outsideGap = EDGE_ROUTE_LANE_GAP * 1.7
+
+  values.add(min - outsideGap)
+  values.add(max + outsideGap)
+  obstacles.forEach((box) => {
+    const start = axis === "x" ? box.x : box.y
+    const end = axis === "x" ? box.x + box.width : box.y + box.height
+    values.add(start - EDGE_ROUTE_LANE_GAP)
+    values.add(end + EDGE_ROUTE_LANE_GAP)
+  })
+
+  return Array.from(values)
+    .filter(Number.isFinite)
+    .sort((a, b) => Math.abs(a - midpoint) - Math.abs(b - midpoint))
+    .slice(0, 18)
+}
+
+function compactPathPoints(points: Point[]) {
+  const compact: Point[] = []
+  points.forEach((point) => {
+    const prev = compact[compact.length - 1]
+    if (!prev || prev.x !== point.x || prev.y !== point.y) compact.push(point)
+  })
+  return compact
+}
+
+function scoreOrthogonalPath(points: Point[], obstacles: NodeBox[]) {
+  let score = points.length * 18
+  let intersections = 0
+  for (let index = 1; index < points.length; index += 1) {
+    const start = points[index - 1]
+    const end = points[index]
+    score += Math.abs(end.x - start.x) + Math.abs(end.y - start.y)
+    obstacles.forEach((box) => {
+      if (segmentIntersectsBox(start, end, box)) {
+        intersections += 1
+        score += 1_000_000
+      }
+    })
+  }
+  score += intersections * intersections * 2_000_000
+  return score
+}
+
+function segmentIntersectsBox(start: Point, end: Point, box: NodeBox) {
+  if (start.x === end.x) {
+    const minY = Math.min(start.y, end.y)
+    const maxY = Math.max(start.y, end.y)
+    return start.x >= box.x && start.x <= box.x + box.width && maxY >= box.y && minY <= box.y + box.height
+  }
+  if (start.y === end.y) {
+    const minX = Math.min(start.x, end.x)
+    const maxX = Math.max(start.x, end.x)
+    return start.y >= box.y && start.y <= box.y + box.height && maxX >= box.x && minX <= box.x + box.width
+  }
+  return false
+}
+
+function inflateBox(box: NodeBox, padding: number) {
+  return {
+    x: box.x - padding,
+    y: box.y - padding,
+    width: box.width + padding * 2,
+    height: box.height + padding * 2,
+  }
+}
+
+function boxesOverlap(a: NodeBox, b: NodeBox) {
+  return a.x <= b.x + b.width && a.x + a.width >= b.x && a.y <= b.y + b.height && a.y + a.height >= b.y
+}
+
+function getCorridorBox(a: NodeBox, b: NodeBox, padding: number) {
+  const minX = Math.min(a.x, b.x) - padding
+  const minY = Math.min(a.y, b.y) - padding
+  const maxX = Math.max(a.x + a.width, b.x + b.width) + padding
+  const maxY = Math.max(a.y + a.height, b.y + b.height) + padding
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  }
+}
+
+function boxDistanceToPoint(box: NodeBox, pointOrBox: Point | NodeBox) {
+  const centerX = box.x + box.width / 2
+  const centerY = box.y + box.height / 2
+  const point = "width" in pointOrBox ? { x: pointOrBox.x + pointOrBox.width / 2, y: pointOrBox.y + pointOrBox.height / 2 } : pointOrBox
+  return Math.abs(centerX - point.x) + Math.abs(centerY - point.y)
+}
+
+function getPathLabelPoint(points: Point[]) {
+  if (points.length <= 2) return points[Math.max(0, points.length - 1)]
+  const segments = points.slice(1).map((point, index) => ({
+    start: points[index],
+    end: point,
+    length: Math.abs(point.x - points[index].x) + Math.abs(point.y - points[index].y),
+  }))
+  const totalLength = segments.reduce((sum, segment) => sum + segment.length, 0)
+  let cursor = 0
+  for (const segment of segments) {
+    if (cursor + segment.length >= totalLength / 2) {
+      const remaining = totalLength / 2 - cursor
+      const ratio = segment.length ? remaining / segment.length : 0
+      return {
+        x: segment.start.x + (segment.end.x - segment.start.x) * ratio,
+        y: segment.start.y + (segment.end.y - segment.start.y) * ratio,
+      }
+    }
+    cursor += segment.length
+  }
+  return points[Math.floor(points.length / 2)]
+}
+
+function pointsToPath(points: Point[]) {
+  const [first, ...rest] = points
+  return `M${first.x} ${first.y} ${rest.map((point) => `L${point.x} ${point.y}`).join(" ")}`
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function average(values: number[]) {
+  if (!values.length) return 0
+  return values.reduce((sum, value) => sum + value, 0) / values.length
 }
 
 function getNodeBox(node: Node) {
@@ -903,41 +1296,137 @@ function getViewportForNodes(nodes: Node[], container: HTMLDivElement | null) {
   }
 }
 
+function getViewportForNode(node: Node | undefined, container: HTMLDivElement | null, preferredZoom = 1) {
+  if (!node) return null
+  const width = container?.clientWidth || 960
+  const height = container?.clientHeight || 560
+  if (!width || !height) return null
+  const box = getNodeBox(node)
+  const zoom = Math.max(0.18, Math.min(1.18, preferredZoom || 1))
+  return {
+    x: width / 2 - (box.x + box.width / 2) * zoom,
+    y: height / 2 - (box.y + box.height / 2) * zoom,
+    zoom,
+  }
+}
+
+function selectCanvasRelationships(relations: GraphRelation[], selectedNodeId: string | null, viewMode: GraphViewMode, degreeById: Map<string, number>) {
+  const edgeLimit = CANVAS_EDGE_LIMITS[viewMode] ?? 24
+  const contextLimit = CANVAS_CONTEXT_EDGE_LIMITS[viewMode] ?? 0
+  if (!selectedNodeId) {
+    return [...relations]
+      .sort((a, b) => getRelationPriority(b, selectedNodeId, degreeById) - getRelationPriority(a, selectedNodeId, degreeById))
+      .slice(0, edgeLimit)
+  }
+
+  const focused = relations
+    .filter((relation) => relation.source_id === selectedNodeId || relation.target_id === selectedNodeId)
+    .sort((a, b) => getRelationPriority(b, selectedNodeId, degreeById) - getRelationPriority(a, selectedNodeId, degreeById))
+    .slice(0, edgeLimit)
+
+  const seen = new Set(focused.map(getRelationKey))
+  const context = contextLimit
+    ? relations
+        .filter((relation) => !seen.has(getRelationKey(relation)))
+        .sort((a, b) => getRelationPriority(b, selectedNodeId, degreeById) - getRelationPriority(a, selectedNodeId, degreeById))
+        .slice(0, Math.max(0, edgeLimit - focused.length, contextLimit))
+    : []
+
+  return focused.concat(context)
+}
+
+function selectCanvasNodes(nodes: Node[], relationNodeIds: Set<string>, selectedNodeId: string | null, viewMode: GraphViewMode) {
+  if (viewMode === "overview") return nodes
+  if (viewMode === "formulaTheorem") {
+    return selectFormulaCanvasNodes(nodes, relationNodeIds, selectedNodeId)
+  }
+  const visibleIds = new Set(relationNodeIds)
+  if (selectedNodeId) visibleIds.add(selectedNodeId)
+
+  const selected = nodes.filter((node) => visibleIds.has(node.id))
+  const fallbackLimit = viewMode === "explore" ? 6 : 10
+  const fallback = nodes.filter((node) => !visibleIds.has(node.id)).slice(0, Math.max(0, fallbackLimit - selected.length))
+  return selected.concat(fallback)
+}
+
+function selectFormulaCanvasNodes(nodes: Node[], relationNodeIds: Set<string>, selectedNodeId: string | null) {
+  const formulaNodes = nodes.filter((node) => FORMULA_CONTEXT_TYPES.has(String(node.data?.nodeType || "")))
+  const visibleIds = new Set<string>()
+  formulaNodes.forEach((node) => {
+    if (visibleIds.size < FORMULA_CANVAS_NODE_LIMIT) visibleIds.add(node.id)
+  })
+  relationNodeIds.forEach((id) => {
+    if (visibleIds.size < FORMULA_CANVAS_NODE_LIMIT) visibleIds.add(id)
+  })
+  if (selectedNodeId && nodes.some((node) => node.id === selectedNodeId && FORMULA_CONTEXT_TYPES.has(String(node.data?.nodeType || "")))) {
+    visibleIds.add(selectedNodeId)
+  }
+
+  const selected = nodes.filter((node) => visibleIds.has(node.id)).sort((a, b) => getFormulaNodePriority(b, selectedNodeId) - getFormulaNodePriority(a, selectedNodeId))
+  const selectedIds = new Set(selected.map((node) => node.id))
+  const context = nodes
+    .filter((node) => !selectedIds.has(node.id) && !FORMULA_CONTEXT_TYPES.has(String(node.data?.nodeType || "")))
+    .slice(0, Math.max(0, 10 - selected.length))
+
+  return selected.concat(context).slice(0, FORMULA_CANVAS_NODE_LIMIT)
+}
+
+function getFormulaNodePriority(node: Node, selectedNodeId: string | null) {
+  if (selectedNodeId && node.id === selectedNodeId) return 10_000
+  const type = String(node.data?.nodeType || "")
+  const typeWeight: Record<string, number> = {
+    formula: 900,
+    theorem: 860,
+    table: 760,
+    note: 620,
+  }
+  return typeWeight[type] || 100
+}
+
 function createFlowEdges(relations: GraphRelation[], selectedNodeId: string | null): Edge[] {
-  const showAllLabels = relations.length <= 90
   return relations
     .filter((relation) => relation.source_id && relation.target_id)
     .map((relation, index) => {
       const isFocused = !!selectedNodeId && (relation.source_id === selectedNodeId || relation.target_id === selectedNodeId)
-      const shouldShowLabel = isFocused || showAllLabels
+      const shouldShowLabel = isFocused && index < CANVAS_LABEL_LIMIT
       return {
         id: relation.id || `${relation.source_id}-${relation.relation_type || "related"}-${relation.target_id}-${index}`,
         source: relation.source_id,
         target: relation.target_id,
+        sourceHandle: "source",
+        targetHandle: "target",
         label: shouldShowLabel ? relation.relation_type : undefined,
         type: "smoothstep",
         animated: isFocused,
-        zIndex: isFocused ? 5 : 0,
+        zIndex: isFocused ? 1 : 0,
         markerEnd: {
           type: MarkerType.ArrowClosed,
           color: isFocused ? "#2563eb" : "#64748b",
-          width: 18,
-          height: 18,
+          width: 14,
+          height: 14,
         },
         className: isFocused ? "kg-flow-edge kg-flow-edge-focused" : "kg-flow-edge",
         style: {
           stroke: isFocused ? "#2563eb" : "#64748b",
           strokeDasharray: isFocused ? undefined : "5 8",
           strokeLinecap: "round",
-          strokeWidth: isFocused ? 2.8 : 1.7,
+          strokeWidth: isFocused ? 2.4 : 1.5,
           opacity: selectedNodeId ? (isFocused ? 0.96 : 0.36) : 0.62,
         },
         labelStyle: { fill: "#1d4ed8", fontSize: 11, fontWeight: 600 },
         labelBgStyle: { fill: "#ffffff", fillOpacity: 0.94 },
-        labelBgPadding: [7, 3] as [number, number],
+        labelBgPadding: [5, 2] as [number, number],
         labelBgBorderRadius: 6,
       }
     })
+}
+
+function truncateRelationLabel(label: string) {
+  return label.length > 18 ? `${label.slice(0, 17)}...` : label
+}
+
+function getRelationKey(relation: GraphRelation) {
+  return relation.id || `${relation.source_id}:${relation.relation_type || "related"}:${relation.target_id}`
 }
 
 type LayoutDirection = "RIGHT" | "LEFT" | "DOWN" | "UP"
@@ -984,10 +1473,87 @@ function getNodeDimension(value: unknown, fallback: number): number {
   return fallback
 }
 
-function hasSameNodeIds(a: Node[], b: Node[]) {
-  if (a.length !== b.length) return false
-  const ids = new Set(a.map((node) => node.id))
-  return b.every((node) => ids.has(node.id))
+function layoutFormulaGridNodes(nodes: Node[], focusNodeId: string | null, edges: Edge[]) {
+  if (!nodes.length) return []
+  const focusNode = focusNodeId ? nodes.find((node) => node.id === focusNodeId) : undefined
+  const focusRelatedIds = new Set<string>()
+  if (focusNodeId) {
+    edges.forEach((edge) => {
+      if (edge.source === focusNodeId) focusRelatedIds.add(edge.target)
+      if (edge.target === focusNodeId) focusRelatedIds.add(edge.source)
+    })
+  }
+  const scoreNode = (node: Node) => {
+    if (focusNodeId && node.id === focusNodeId) return 1_000_000
+    let score = getFormulaNodePriority(node, focusNodeId)
+    if (focusRelatedIds.has(node.id)) score += 12_000
+    return score
+  }
+  const formulaNodes = nodes
+    .filter((node) => node.id !== focusNodeId && FORMULA_CONTEXT_TYPES.has(String(node.data?.nodeType || "")))
+    .sort((a, b) => scoreNode(b) - scoreNode(a))
+  const contextNodes = nodes
+    .filter((node) => node.id !== focusNodeId && !FORMULA_CONTEXT_TYPES.has(String(node.data?.nodeType || "")))
+    .sort((a, b) => scoreNode(b) - scoreNode(a))
+  const orderedNodes = [...(focusNode ? [focusNode] : []), ...formulaNodes, ...contextNodes]
+  const xGap = FLOW_NODE_WIDTH + 148
+  const yGap = FLOW_NODE_HEIGHT + 118
+
+  if (!focusNode) {
+    const columns = Math.max(2, Math.min(6, Math.ceil(Math.sqrt(Math.max(1, orderedNodes.length)))))
+    return orderedNodes.map((node, index) => ({
+      ...node,
+      position: {
+        x: (index % columns) * xGap,
+        y: Math.floor(index / columns) * yGap,
+      },
+    }))
+  }
+
+  const cells = getCenteredFormulaCells(orderedNodes.length, xGap, yGap)
+
+  return orderedNodes.map((node, index) => {
+    const cell = cells[index] || { x: 0, y: 0 }
+    return {
+      ...node,
+      position: cell,
+    }
+  })
+}
+
+function getCenteredFormulaCells(count: number, xGap: number, yGap: number) {
+  let columns = Math.max(3, Math.min(7, Math.ceil(Math.sqrt(Math.max(1, count)))))
+  if (columns % 2 === 0) columns += 1
+  let rows = Math.max(3, Math.ceil(count / columns))
+  if (rows % 2 === 0) rows += 1
+  while (rows * columns < count) rows += 2
+  const centerColumn = Math.floor(columns / 2)
+  const centerRow = Math.floor(rows / 2)
+  const cells: Array<{ x: number; y: number; row: number; col: number; distance: number }> = []
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < columns; col += 1) {
+      const distance = Math.abs(row - centerRow) + Math.abs(col - centerColumn)
+      cells.push({
+        x: (col - centerColumn) * xGap,
+        y: (row - centerRow) * yGap,
+        row,
+        col,
+        distance,
+      })
+    }
+  }
+
+  return cells
+    .sort((a, b) => {
+      const distanceDelta = a.distance - b.distance
+      if (distanceDelta) return distanceDelta
+      const rowDelta = Math.abs(a.row - centerRow) - Math.abs(b.row - centerRow)
+      if (rowDelta) return rowDelta
+      return Math.abs(a.col - centerColumn) - Math.abs(b.col - centerColumn)
+    })
+    .slice(0, count)
+    .map(({ x, y }) => ({ x, y }))
 }
 
 function seedFlowNodes(nextNodes: Node[], currentNodes: Node[]) {
@@ -1003,6 +1569,12 @@ function seedFlowNodes(nextNodes: Node[], currentNodes: Node[]) {
       },
     }
   })
+}
+
+function getLayoutSignature(nodes: Node[], edges: Edge[], selectedNodeId: string | null, viewMode: GraphViewMode, layoutMode: GraphLayoutMode) {
+  const nodePart = nodes.map((node) => node.id).sort().join(",")
+  const edgePart = edges.map((edge) => `${edge.source}->${edge.target}:${edge.id}`).sort().join(",")
+  return `${viewMode}|${layoutMode}|${selectedNodeId || ""}|${nodePart}|${edgePart}`
 }
 
 function mergeRelations(primary: GraphRelation[], secondary: GraphRelation[]) {
@@ -1485,10 +2057,31 @@ function buildFormulaSubgraph(
   const formulaRelations = relations.filter((relation) => FORMULA_RELATION_TYPES.has(relation.relation_type || ""))
   const semanticRelations = relations.filter((relation) => SEMANTIC_RELATION_TYPES.has(relation.relation_type || ""))
   const nodeIds = new Set<string>([anchorNodeId])
+  const formulaContextNodes = rawNodes
+    .filter((node) => FORMULA_CONTEXT_TYPES.has(node.type || "") && filteredNodeIds.has(node.id))
+    .sort((a, b) => getNodeScore(b, degreeById) - getNodeScore(a, degreeById))
+    .slice(0, Math.min(34, FORMULA_CANVAS_NODE_LIMIT, limit))
+
+  formulaContextNodes.forEach((node) => {
+    if (nodeIds.size < limit) nodeIds.add(node.id)
+  })
+
+  const formulaContextIds = new Set(formulaContextNodes.map((node) => node.id))
+  formulaRelations
+    .filter((relation) => formulaContextIds.has(relation.source_id) || formulaContextIds.has(relation.target_id))
+    .sort((a, b) => getRelationPriority(b, anchorNodeId, degreeById) - getRelationPriority(a, anchorNodeId, degreeById))
+    .slice(0, 36)
+    .forEach((relation) => {
+      if (nodeIds.size < limit) nodeIds.add(relation.source_id)
+      if (nodeIds.size < limit) nodeIds.add(relation.target_id)
+    })
+
   const directFormulaRelations = getTopRelationsForNode(anchorNodeId, formulaRelations, degreeById, 26)
   directFormulaRelations.forEach((relation) => {
-    nodeIds.add(relation.source_id)
-    nodeIds.add(relation.target_id)
+    if (nodeIds.size < limit) {
+      nodeIds.add(relation.source_id)
+      nodeIds.add(relation.target_id)
+    }
   })
 
   const formulaIds = new Set(
@@ -1499,23 +2092,13 @@ function buildFormulaSubgraph(
   )
 
   formulaIds.forEach((formulaId) => {
-    getTopRelationsForNode(formulaId, formulaRelations.concat(semanticRelations), degreeById, 8).forEach((relation) => {
+    getTopRelationsForNode(formulaId, formulaRelations.concat(semanticRelations), degreeById, 3).forEach((relation) => {
       if (nodeIds.size < limit) {
         nodeIds.add(relation.source_id)
         nodeIds.add(relation.target_id)
       }
     })
   })
-
-  if (nodeIds.size < 8) {
-    rawNodes
-      .filter((node) => FORMULA_CONTEXT_TYPES.has(node.type || "") && filteredNodeIds.has(node.id))
-      .sort((a, b) => getNodeScore(b, degreeById) - getNodeScore(a, degreeById))
-      .slice(0, 24)
-      .forEach((node) => {
-        if (nodeIds.size < limit) nodeIds.add(node.id)
-      })
-  }
 
   return finalizeSubgraph({
     nodeIds,
@@ -1586,11 +2169,15 @@ function finalizeSubgraph({
     addNode(relation.target_id)
   })
 
+  const finalNodes = keptNodes
+    .sort((a, b) => getVisibleNodePriority(b, anchorNodeId, selectedNeighborIds, degreeById) - getVisibleNodePriority(a, anchorNodeId, selectedNeighborIds, degreeById))
+    .slice(0, nodeLimit)
+  const finalNodeIds = new Set(finalNodes.map((node) => node.id))
+  const finalRelationships = keptRelations.filter((relation) => finalNodeIds.has(relation.source_id) && finalNodeIds.has(relation.target_id))
+
   return {
-    nodes: keptNodes
-      .sort((a, b) => getVisibleNodePriority(b, anchorNodeId, selectedNeighborIds, degreeById) - getVisibleNodePriority(a, anchorNodeId, selectedNeighborIds, degreeById))
-      .slice(0, nodeLimit),
-    relationships: keptRelations,
+    nodes: finalNodes,
+    relationships: finalRelationships,
     anchorNodeId,
   }
 }

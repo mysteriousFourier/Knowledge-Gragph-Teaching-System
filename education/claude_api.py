@@ -239,6 +239,7 @@ class DeepSeekAPIClient:
         chapter_data = dict(chapter_data or {})
         title = chapter_data.get("title", "未命名章节")
         content = expand_formula_references(chapter_data.get("content", ""))
+        graph_context = str(chapter_data.get("graph_context") or "").strip()
         chapter_data["content"] = content
         evidence = evidence_from_graph(graph_data, query=f"{title}\n{content[:1200]}", chapter_data=chapter_data, limit=10)
         if content.strip():
@@ -266,13 +267,15 @@ class DeepSeekAPIClient:
         return build_constrained_generation_prompt(
             task_title="生成授课文案",
             user_input=title,
-            source_content=content,
+            source_content=f"{content}\n\n{graph_context}" if graph_context else content,
             learning_plan=learning_plan,
             requirements=[
                 *build_lecture_gc_dpg_requirements(style),
                 "Generate a complete lecture script with Markdown level-2/level-3 headings, not just an outline.",
                 "Cover: opening, core concept explanation, relation path, example or derivation, classroom questions, common mistakes, and closing summary.",
                 "Use an evidence-first order: start from chapter content and retrieved evidence, then connect only the few necessary terms into a coherent teaching flow.",
+                "When graph relation paths are provided, use them to decide the teaching order instead of listing graph entities.",
+                "When formula derivation or scoped symbol context is provided, explain only the symbols in the current chapter/formula scope and mention immediate derivation dependencies where useful.",
                 "Keep the length around 1400-2200 Chinese characters when possible; if the material is complex, prioritize completeness and do not cut off abruptly.",
                 "Output only the lecture script itself.",
             ],

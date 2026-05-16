@@ -50,22 +50,33 @@ DEFAULT_CONSTRAINTS = [
 
 FORMULA_REFERENCE_PATTERN = re.compile(r"\[\[(SEE_)?FORMULA:([^\]]+)\]\]", re.I)
 EQUATION_LABEL_PATTERN = re.compile(r"\b(?:Equation|Eq\.)\s+([0-9]+(?:\.[0-9]+[a-z]?)?)\b(?!\s*[:(])", re.I)
-_FORMULA_INDEX: Optional[Dict[str, Dict[str, str]]] = None
+INLINE_MATH_PATTERN = re.compile(r"\${1,2}\s*(.+?)\s*\${1,2}", re.S)
+_FORMULA_INDEX: Optional[Dict[str, Dict[str, Any]]] = None
 
 
-def _load_formula_index() -> Dict[str, Dict[str, str]]:
+def _structured_dir() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "structured" / "formula_library.json"
+        if candidate.exists():
+            return parent / "structured"
+    return Path(__file__).resolve().parents[1] / "structured"
+
+
+def _load_formula_index() -> Dict[str, Dict[str, Any]]:
     global _FORMULA_INDEX
     if _FORMULA_INDEX is not None:
         return _FORMULA_INDEX
 
-    formula_path = Path(__file__).resolve().parents[2] / "structured" / "formula_library.json"
-    index: Dict[str, Dict[str, str]] = {}
+    structured_dir = _structured_dir()
+    formula_path = structured_dir / "formula_library.json"
+    index: Dict[str, Dict[str, Any]] = {}
     try:
         payload = json.loads(formula_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         _FORMULA_INDEX = index
         return index
 
+    explicit_derives_to: Dict[str, List[str]] = {}
     for item in payload.get("formulas") or []:
         if not isinstance(item, dict):
             continue
@@ -73,11 +84,51 @@ def _load_formula_index() -> Dict[str, Dict[str, str]]:
         latex = str(item.get("latex") or "").strip()
         if not formula_id or not latex:
             continue
+        source = item.get("source") if isinstance(item.get("source"), dict) else {}
+        symbols = item.get("symbols")
+        if not isinstance(symbols, list):
+            symbols = _infer_formula_symbols(
+                formula_id=formula_id,
+                latex=latex,
+                context=str(item.get("context") or ""),
+                source=source,
+            )
+        derives_from = _normalize_formula_id_list(item.get("derives_from") or item.get("derived_from"))
+        derives_to = _normalize_formula_id_list(item.get("derives_to") or item.get("derived_to"))
+        for upstream in derives_from:
+            explicit_derives_to.setdefault(upstream.lower(), []).append(formula_id)
         index[formula_id.lower()] = {
             "id": formula_id,
             "label": str(item.get("label_format") or f"Equation {formula_id}").strip(),
             "latex": latex,
+            "formula_type": str(item.get("formula_type") or "block"),
+            "source": source,
+            "context": str(item.get("context") or ""),
+            "description": item.get("description"),
+            "symbols": symbols,
+            "derives_from": derives_from,
+            "derives_to": derives_to,
         }
+
+    inferred_derivations = _infer_formula_derivations(structured_dir)
+    for formula_id, upstream_ids in inferred_derivations.items():
+        record = index.get(formula_id.lower())
+        if not record:
+            continue
+        record["derives_from"] = _unique_formula_ids(
+            [*record.get("derives_from", []), *upstream_ids],
+            exclude={formula_id},
+        )
+
+    for upstream_id, downstream_ids in explicit_derives_to.items():
+        record = index.get(upstream_id.lower())
+        if record:
+            record["derives_to"] = _unique_formula_ids([*record.get("derives_to", []), *downstream_ids])
+    for formula_id, record in index.items():
+        for upstream_id in record.get("derives_from", []):
+            upstream = index.get(str(upstream_id).lower())
+            if upstream:
+                upstream["derives_to"] = _unique_formula_ids([*upstream.get("derives_to", []), record["id"]])
 
     _FORMULA_INDEX = index
     return index
@@ -122,6 +173,292 @@ def expand_formula_references(value: Any, *, display: bool = True, expand_labels
     return expanded
 
 
+def formula_context_for_text(text: Any, *, limit: int = 8) -> List[Dict[str, Any]]:
+    """Return formula records referenced by structured tags or equation labels in text."""
+    index = _load_formula_index()
+    formula_ids = _formula_ids_in_text(str(text or ""))
+    records: List[Dict[str, Any]] = []
+    for formula_id in formula_ids:
+        record = index.get(formula_id.lower())
+        if not record:
+            continue
+        records.append(_public_formula_record(record))
+        if len(records) >= limit:
+            break
+    return records
+
+
+def format_formula_context(formulas: Sequence[Dict[str, Any]]) -> str:
+    if not formulas:
+        return "No directly referenced formulas."
+    lines: List[str] = []
+    for formula in formulas:
+        label = formula.get("label") or f"Equation {formula.get('id', '')}".strip()
+        lines.append(f"- {label}: $$ {formula.get('latex', '')} $$")
+        source = formula.get("source") if isinstance(formula.get("source"), dict) else {}
+        source_bits = [str(source.get(key) or "").strip() for key in ("chapter", "unit_id", "subsection")]
+        source_text = " / ".join(bit for bit in source_bits if bit)
+        if source_text:
+            lines.append(f"  Scope: {source_text}")
+        derives_from = formula.get("derives_from") or []
+        derives_to = formula.get("derives_to") or []
+        if derives_from:
+            lines.append(f"  Derived from: {', '.join(str(item) for item in derives_from[:6])}")
+        if derives_to:
+            lines.append(f"  Leads to: {', '.join(str(item) for item in derives_to[:6])}")
+        symbol_lines = []
+        for symbol in formula.get("symbols") or []:
+            name = symbol.get("symbol")
+            meaning = symbol.get("meaning")
+            if name and meaning:
+                symbol_lines.append(f"{name} = {meaning}")
+        if symbol_lines:
+            lines.append(f"  Symbols in this scope: {'; '.join(symbol_lines[:8])}")
+    return "\n".join(lines)
+
+
+def graph_paths_for_evidence(
+    graph_data: Optional[Dict[str, Any]],
+    evidence: Sequence[Dict[str, Any]],
+    *,
+    limit: int = 8,
+) -> List[Dict[str, Any]]:
+    """Build short relation paths among selected evidence nodes."""
+    if not graph_data or not evidence:
+        return []
+    nodes = graph_data.get("nodes") or []
+    relations = graph_data.get("relations") or graph_data.get("edges") or []
+    if not isinstance(nodes, list) or not isinstance(relations, list):
+        return []
+
+    evidence_ids = [str(item.get("id") or "") for item in evidence if item.get("id")]
+    evidence_id_set = set(evidence_ids)
+    if not evidence_id_set:
+        return []
+    node_by_id = {str(node.get("id") or ""): node for node in nodes if isinstance(node, dict)}
+    paths: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for relation in relations:
+        if not isinstance(relation, dict):
+            continue
+        source = str(relation.get("source_id") or relation.get("source") or relation.get("from") or "")
+        target = str(relation.get("target_id") or relation.get("target") or relation.get("to") or "")
+        if source not in evidence_id_set and target not in evidence_id_set:
+            continue
+        if source not in node_by_id or target not in node_by_id:
+            continue
+        relation_type = str(relation.get("relation_type") or relation.get("type") or "related")
+        key = f"{source}:{relation_type}:{target}"
+        if key in seen:
+            continue
+        seen.add(key)
+        paths.append(
+            {
+                "source": source,
+                "source_label": _node_label(node_by_id[source]) or source,
+                "target": target,
+                "target_label": _node_label(node_by_id[target]) or target,
+                "type": relation_type,
+                "description": str(
+                    relation.get("description")
+                    or (relation.get("metadata") or {}).get("description")
+                    or ""
+                ),
+            }
+        )
+        if len(paths) >= limit:
+            break
+    return paths
+
+
+def format_graph_paths(paths: Sequence[Dict[str, Any]]) -> str:
+    if not paths:
+        return "No direct graph relation paths among the selected evidence."
+    lines = []
+    for path in paths:
+        description = str(path.get("description") or "").strip()
+        suffix = f" — {description}" if description else ""
+        lines.append(
+            f"- {path.get('source_label') or path.get('source')} --{path.get('type') or 'related'}--> "
+            f"{path.get('target_label') or path.get('target')}{suffix}"
+        )
+    return "\n".join(lines)
+
+
+def _public_formula_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": record.get("id"),
+        "label": record.get("label"),
+        "latex": record.get("latex"),
+        "source": record.get("source") or {},
+        "context": _clip(str(record.get("context") or ""), 500),
+        "symbols": record.get("symbols") or [],
+        "derives_from": record.get("derives_from") or [],
+        "derives_to": record.get("derives_to") or [],
+    }
+
+
+def _formula_ids_in_text(text: str) -> List[str]:
+    ids: List[str] = []
+    ids.extend(match.group(2).strip() for match in FORMULA_REFERENCE_PATTERN.finditer(text or ""))
+    ids.extend(match.group(1).strip() for match in EQUATION_LABEL_PATTERN.finditer(text or ""))
+    return _unique_formula_ids(ids)
+
+
+def _normalize_formula_id_list(value: Any) -> List[str]:
+    if isinstance(value, str):
+        candidates = re.split(r"[,;\s]+", value)
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        candidates = [str(item) for item in value]
+    else:
+        candidates = []
+    return _unique_formula_ids(candidates)
+
+
+def _unique_formula_ids(values: Iterable[Any], *, exclude: Optional[set[str]] = None) -> List[str]:
+    exclude_lower = {item.lower() for item in (exclude or set())}
+    result: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        lower = text.lower()
+        if lower in seen or lower in exclude_lower:
+            continue
+        seen.add(lower)
+        result.append(text)
+    return result
+
+
+def _infer_formula_derivations(structured_dir: Path) -> Dict[str, List[str]]:
+    derivations: Dict[str, List[str]] = {}
+    for chapter_path in sorted(structured_dir.glob("chapter*.json")):
+        try:
+            payload = json.loads(chapter_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        blocks = payload.get("blocks")
+        if not isinstance(blocks, list):
+            continue
+
+        recent_formula_ids: List[str] = []
+        pending_reference_ids: List[str] = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            content = str(block.get("content") or "")
+            formula_ids = _formula_ids_in_text(content)
+            if not formula_ids:
+                continue
+            inline_ids = [
+                formula_id
+                for formula_id in formula_ids
+                if f"[[FORMULA:{formula_id}]]" not in content
+            ]
+            direct_formula_ids = [
+                formula_id
+                for formula_id in formula_ids
+                if f"[[FORMULA:{formula_id}]]" in content
+            ]
+            pending_reference_ids = _unique_formula_ids([*pending_reference_ids, *inline_ids])
+            for formula_id in direct_formula_ids:
+                upstream = _unique_formula_ids([*recent_formula_ids[-4:], *pending_reference_ids], exclude={formula_id})
+                if upstream:
+                    derivations[formula_id] = _unique_formula_ids([*derivations.get(formula_id, []), *upstream])
+                recent_formula_ids = _unique_formula_ids([*recent_formula_ids, formula_id])[-8:]
+                pending_reference_ids = []
+    return derivations
+
+
+def _infer_formula_symbols(
+    *,
+    formula_id: str,
+    latex: str,
+    context: str,
+    source: Dict[str, Any],
+) -> List[Dict[str, str]]:
+    symbols = _extract_latex_symbols(latex)
+    if not symbols:
+        return []
+    definitions = _symbol_definitions_from_context(context)
+    scope = {
+        "chapter": str(source.get("chapter") or ""),
+        "unit_id": str(source.get("unit_id") or ""),
+        "formula_id": formula_id,
+    }
+    return [
+        {
+            "symbol": symbol,
+            "meaning": definitions.get(symbol) or _default_symbol_meaning(symbol),
+            **scope,
+        }
+        for symbol in symbols[:18]
+    ]
+
+
+def _extract_latex_symbols(latex: str) -> List[str]:
+    text = re.sub(r"\\(?:begin|end)\s*\{[^}]+\}", " ", latex or "")
+    command_symbols = re.findall(r"\\(?:Delta|delta|alpha|beta|gamma|sigma|mu|bar|overline)\s*(?:_\s*\{?([A-Za-z])\}?)?", text)
+    symbols: List[str] = []
+    for command, subscript in re.findall(r"\\(Delta|delta|alpha|beta|gamma|sigma|mu)\s*(?:_\s*\{?([A-Za-z])\}?)?", text):
+        symbol = f"\\{command}"
+        if subscript:
+            symbol = f"{symbol}_{subscript}"
+        symbols.append(symbol)
+    for command, inner in re.findall(r"\\(bar|overline)\s*\{+\s*([A-Za-z])\s*\}+", text):
+        symbols.append(f"\\{command}{{{inner}}}")
+    for token in re.findall(r"(?<![A-Za-z\\])([A-Za-z])(?:\s*_\s*\{?([A-Za-z]+)\}?)?", text):
+        base, subscript = token
+        if base in {"l", "r"}:
+            continue
+        symbols.append(f"{base}_{subscript}" if subscript else base)
+    symbols.extend(f"\\Delta {item}" for item in re.findall(r"\\Delta\s+([A-Za-z])", text))
+    return _unique_formula_ids(symbols)
+
+
+def _symbol_definitions_from_context(context: str) -> Dict[str, str]:
+    text = re.sub(r"\s+", " ", context or "")
+    definitions: Dict[str, str] = {}
+    for symbol, meaning in re.findall(
+        r"\$\s*([^$]{1,24}?)\s*\$\s+(?:denotes?|is|means?|represents?)\s+([^.;]{3,180})",
+        text,
+        flags=re.I,
+    ):
+        clean_symbol = _normalize_symbol_text(symbol)
+        if clean_symbol:
+            definitions[clean_symbol] = meaning.strip()
+    for meaning, symbol in re.findall(
+        r"([^.;]{3,120}?)\s+(?:is denoted by|is written as)\s+\$\s*([^$]{1,24}?)\s*\$",
+        text,
+        flags=re.I,
+    ):
+        clean_symbol = _normalize_symbol_text(symbol)
+        if clean_symbol:
+            definitions[clean_symbol] = meaning.strip()
+    return definitions
+
+
+def _normalize_symbol_text(symbol: str) -> str:
+    return re.sub(r"\s+", " ", symbol or "").strip()
+
+
+def _default_symbol_meaning(symbol: str) -> str:
+    known = {
+        "p": "allele frequency or probability in the local formula scope",
+        "q": "category or allele frequency in the local formula scope",
+        "W": "absolute fitness in the local formula scope",
+        "w": "relative fitness in the local formula scope",
+        "z": "trait value in the local formula scope",
+        "R": "response or change measured by the local formula",
+        "\\alpha": "average effect in the local formula scope",
+        "\\sigma": "variance/covariance operator in the local formula scope",
+        "\\Delta p": "change in allele frequency in the local formula scope",
+    }
+    return known.get(symbol, "meaning depends on the chapter/formula scope")
+
+
 INTENT_KEYWORDS = [
     ("feedback", ("批改", "评价", "判断", "答案", "得分", "哪里错", "对不对")),
     ("hint", ("提示", "hint", "思路", "下一步")),
@@ -138,10 +475,17 @@ SUPPORTED_RELATION_TYPES = {
     "related",
     "precedes",
     "prerequisite_of",
+    "defines",
+    "derives",
+    "explains",
     "depends_on",
     "example_of",
     "exercise_of",
     "misconception_of",
+    "references_formula",
+    "references_table",
+    "supports",
+    "causes",
 }
 
 

@@ -226,7 +226,10 @@ function TeacherPptPage() {
             {generatePptLectures.isPending ? (
               <LoadingSpinner text="生成逐页文案中..." />
             ) : selectedLecture?.lecture ? (
-              <RichTextContent content={selectedLecture.lecture} />
+              <div className="space-y-4">
+                <EvidenceTrace lecture={selectedLecture} />
+                <RichTextContent content={selectedLecture.lecture} />
+              </div>
             ) : (
               <EmptyPanel text="生成后将在这里显示当前页文案" />
             )}
@@ -235,6 +238,61 @@ function TeacherPptPage() {
       </div>
     </div>
   )
+}
+
+function EvidenceTrace({ lecture }: { lecture: PptSlideLecture }) {
+  const pathLabels = (lecture.graph_paths || []).map(formatGraphPath).filter(Boolean)
+  const formulaLabels = (lecture.formula_context || []).map(formatFormulaContext).filter(Boolean)
+  if (!pathLabels.length && !formulaLabels.length) return null
+
+  return (
+    <section className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+      <div className="mb-2 font-medium text-foreground">图谱与公式依据</div>
+      {pathLabels.length ? (
+        <div>
+          <div className="font-medium text-foreground">关系路径</div>
+          <ul className="mt-1 list-disc space-y-1 pl-4">
+            {pathLabels.slice(0, 4).map((item, index) => (
+              <li key={`${item}-${index}`}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {formulaLabels.length ? (
+        <div className={cn(pathLabels.length && "mt-3")}>
+          <div className="font-medium text-foreground">公式作用域</div>
+          <ul className="mt-1 list-disc space-y-1 pl-4">
+            {formulaLabels.slice(0, 4).map((item, index) => (
+              <li key={`${item}-${index}`}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function formatGraphPath(value: unknown) {
+  if (!value || typeof value !== "object") return ""
+  const item = value as Record<string, unknown>
+  const source = String(item.source_label || item.source || "").trim()
+  const target = String(item.target_label || item.target || "").trim()
+  const type = String(item.type || "related").trim()
+  if (!source || !target) return ""
+  return `${source} --${type}--> ${target}`
+}
+
+function formatFormulaContext(value: unknown) {
+  if (!value || typeof value !== "object") return ""
+  const item = value as Record<string, unknown>
+  const label = String(item.label || item.id || "").trim()
+  const source = item.source && typeof item.source === "object" ? item.source as Record<string, unknown> : {}
+  const scope = [source.chapter, source.unit_id].map((part) => String(part || "").trim()).filter(Boolean).join(" / ")
+  const derivesFrom = Array.isArray(item.derives_from) && item.derives_from.length
+    ? `，由 ${item.derives_from.slice(0, 3).join(", ")} 推导`
+    : ""
+  if (!label) return ""
+  return scope ? `${label}（${scope}${derivesFrom}）` : `${label}${derivesFrom}`
 }
 
 function SlidePreview({ slide }: { slide: PptSlideDetail }) {
