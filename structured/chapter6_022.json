@@ -1,0 +1,58 @@
+{
+  "id": "chapter6_022",
+  "metadata": {
+    "chapter": "chapter6",
+    "section": "Chapter 6: Theorems of Natural Selection",
+    "subsections": [
+      "Heywood's Decomposition of Response"
+    ],
+    "source_file": "chapter6原文.json",
+    "source_title": "Evolution and Selection of Quantitative Traits",
+    "formula_references": [
+      "6.32",
+      "6.33f",
+      "6.35",
+      "6.38",
+      "6.39",
+      "6.40",
+      "6.41"
+    ],
+    "table_references": [
+      "6.3"
+    ]
+  },
+  "blocks": [
+    {
+      "type": "derivation",
+      "content": "We now have all of the components in place for Heywood's decomposition of the selection response. Expressed in terms of a regression using parents before selection $ (\\beta_{\\overline{z}^{\\circ},z}) $ substituting Equations [[SEE_FORMULA:6.35]]-[[SEE_FORMULA:6.38]] into Equation [[SEE_FORMULA:6.32]] yields"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.39]]"
+    },
+    {
+      "type": "proposition",
+      "content": "Conversely, when expressed in terms of the regression after selection $ (\\beta_{\\overline{z}|z}) $ , the response is"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.40]]"
+    },
+    {
+      "type": "proposition",
+      "content": "This is obtained from Equation [[SEE_FORMULA:6.39]], using Equation [[SEE_FORMULA:6.35]] and the identity"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.41]]"
+    },
+    {
+      "type": "proposition",
+      "content": "Equation [[SEE_FORMULA:6.41]] follows, using the same logic leading to Equation [[SEE_FORMULA:6.33f]]. Beside the different regression coefficients $ (\\beta_{\\overline{z}^{\\circ}|z} $ vs. $ \\beta_{\\overline{z}|z} $ ), Equations [[SEE_FORMULA:6.39]] and [[SEE_FORMULA:6.40]] differ in that $ \\sigma(w,\\delta^{\\circ}) $ in Equation [[SEE_FORMULA:6.39]] is replaced by $ \\sigma(w,\\delta^{\\circ}\\parallel z) $ when we use the regression on selected parents."
+    },
+    {
+      "type": "derivation",
+      "content": "Heywood noted that the last four terms in Equations [[SEE_FORMULA:6.39]] and [[SEE_FORMULA:6.40]] arise because of imperfect transmission of parental to offspring phenotype. If transmission is perfect, then $ z_{i}=\\overline{z}_{i}^{\\circ}=\\overline{z}_{i} $ and $ \\delta_{i}^{\\circ}=0 $ , and these last four terms are all zero. Heywood pointed out that although all four terms are due to imperfect transmission, they have different causes and can be thought of as logically distinct processes, as is summarized in [[SEE_TABLE:6.3]]. In the decomposition given by Equation [[SEE_FORMULA:6.39]], the linear response to selection $ (\\beta S) $ is exactly the breeder's equation (assuming that $ \\beta_{\\overline{z}^{\\circ}|z}=h^{2} $ ), as the regression coefficient is based on unselected parents. In the version given by Equation [[SEE_FORMULA:6.32]], $ \\beta $ is the parent-offspring regression following selection. This regression may change as the fitness scheme changes, while the before-selection regression remains unchanged under any fitness scheme (assuming an unselected base population). Once selection has occurred, the genotypic frequencies in the offspring from selected parents will depart from those in the unselected base population. Hence, the regression based on unselected individuals starting from this new population will likely be different (although perhaps only trivially so) from that in the founding, unselected base population. These issues are examined in Chapters 15, 16, and especially 24-26. See Heywood (2005) for several worked examples using this decomposition."
+    }
+  ]
+}

@@ -1,0 +1,1892 @@
+/* ========== 全局重置 ========== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+               "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #f0f2f5;
+  color: #333;
+  min-height: 100vh;
+}
+
+/* ========== 双栏布局 ========== */
+.container {
+  display: flex;
+  gap: 0;
+  padding: 20px;
+  height: 100vh;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.panel {
+  background: #fff;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  overflow-y: auto;
+}
+
+.panel-input {
+  flex: 0 0 400px;
+  min-width: 320px;
+  max-width: calc(100% - 520px);
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-output {
+  flex: 1 1 auto;
+  min-width: 500px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.resize-handle {
+  flex: 0 0 24px;
+  position: relative;
+  cursor: col-resize;
+  user-select: none;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  z-index: 5;
+}
+
+.resize-handle::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  transform: translateX(-50%);
+  border-radius: 8px;
+  background: #007470;
+  box-shadow: 0 0 0 2px #ffffff, 0 3px 12px rgba(0, 116, 112, 0.35);
+  transition: background 0.15s, width 0.15s;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 52px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background:
+    linear-gradient(to bottom, transparent 0 6px, #ffffff 6px 9px, transparent 9px 15px) repeat-y;
+  background-size: 100% 15px;
+}
+
+.resize-handle-grip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 74px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(0, 116, 112, 0.55);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+  pointer-events: none;
+}
+
+.resize-handle:hover::before,
+body.resizing-columns .resize-handle::before {
+  width: 12px;
+  background: #005e5a;
+}
+
+.input-collapse-toggle {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 54px);
+  width: 22px;
+  height: 28px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(0, 116, 112, 0.65);
+  border-radius: 6px;
+  background: #fff;
+  color: #007470;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 7;
+  box-shadow: 0 2px 8px rgba(0, 116, 112, 0.18);
+}
+
+.input-collapse-toggle:hover {
+  background: #e6f7f6;
+}
+
+.container.input-collapsed .panel-input {
+  display: none !important;
+  flex-basis: 0 !important;
+  min-width: 0;
+  max-width: 0;
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.container.input-collapsed .panel-output {
+  min-width: 0;
+}
+
+.container.input-collapsed .resize-handle {
+  flex-basis: 28px;
+  cursor: default;
+}
+
+.container.input-collapsed .resize-handle::before {
+  width: 10px;
+}
+
+.container.input-collapsed .input-collapse-toggle {
+  top: 50%;
+}
+
+.container.input-collapsed .output-header {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.container.input-collapsed .tab-bar {
+  display: flex;
+}
+
+.container.input-collapsed .output-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.container.input-collapsed .latex-actions,
+.container.input-collapsed .ppt-actions {
+  display: flex !important;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.container.input-collapsed .panel-output {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 18px minmax(260px, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+}
+
+.container.input-collapsed .output-header {
+  grid-column: 1 / -1;
+}
+
+.container.input-collapsed #viewLatex,
+.container.input-collapsed #viewPpt {
+  display: flex !important;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.container.input-collapsed #viewLatex {
+  grid-column: 1;
+  grid-row: 2;
+  padding-right: 12px;
+  border-right: 1px solid #dce0e6;
+}
+
+.container.input-collapsed #innerResizeHandle {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
+.container.input-collapsed #viewPpt {
+  grid-column: 3;
+  grid-row: 2;
+  padding-left: 12px;
+}
+
+.container.input-collapsed .ppt-editor {
+  gap: 10px;
+}
+
+.container.input-collapsed .slide-list {
+  flex-basis: 96px;
+}
+
+.container.input-collapsed .slide-toolbar {
+  width: 66px;
+}
+
+body.resizing-columns {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.inner-resize-handle {
+  display: none;
+  position: relative;
+  width: 18px;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 6;
+}
+
+.inner-resize-handle::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: #007470;
+  box-shadow: 0 0 0 2px #ffffff, 0 3px 12px rgba(0, 116, 112, 0.25);
+}
+
+.inner-resize-handle .resize-handle-grip {
+  width: 12px;
+  height: 56px;
+}
+
+/* ========== 标题 ========== */
+h2 {
+  margin-bottom: 16px;
+  font-size: 20px;
+  color: #007470;
+  font-weight: 700;
+}
+
+/* ========== 表单 ========== */
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 3px;
+  font-size: 13px;
+  color: #555;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #dce0e6;
+  border-radius: 6px;
+  font-size: 13px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  background: #fafbfc;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: #007470;
+  box-shadow: 0 0 0 3px rgba(0, 116, 112, 0.12);
+  background: #fff;
+}
+
+.form-group small {
+  color: #999;
+  font-size: 11px;
+  margin-top: 1px;
+  display: block;
+}
+
+.form-group textarea {
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.source-content-store {
+  display: none !important;
+}
+
+.lecture-preview-box {
+  margin-top: 8px;
+  border: 1px solid #dce0e6;
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.lecture-preview-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid #e8eaed;
+  background: #f8f9fc;
+  padding: 0 10px;
+}
+
+.lecture-preview-title {
+  color: #555;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 0;
+}
+
+.lecture-preview-title-row .btn-secondary {
+  padding: 4px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.math-preview {
+  min-height: 260px;
+  max-height: 460px;
+  overflow: auto;
+  padding: 10px;
+  color: #333;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.math-preview.muted {
+  color: #999;
+}
+
+.package-image-panel {
+  position: fixed;
+  z-index: 1100;
+  width: min(720px, calc(100vw - 24px));
+  max-height: min(72vh, 560px);
+  overflow: auto;
+  border-top: 1px solid #e8eaed;
+  padding: 40px 10px 10px;
+  background: #fff;
+  border: 1px solid #dce0e6;
+  border-radius: 6px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+}
+
+.package-image-panel-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #111827;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.package-image-panel-close:hover {
+  background: rgba(15, 23, 42, 0.14);
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
+.package-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  max-height: none;
+  overflow: visible;
+}
+
+.package-image-item {
+  position: relative;
+  appearance: none;
+  border: 1px solid #dce0e6;
+  border-radius: 6px;
+  background: #fafbfc;
+  padding: 6px;
+  cursor: zoom-in;
+  text-align: left;
+  width: 100%;
+}
+
+.package-image-item:hover {
+  border-color: #9ab3ff;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+}
+
+.package-image-item:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.package-image-number {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.78);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 7px;
+}
+
+.package-image-thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  display: block;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.package-image-caption {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #666;
+  word-break: break-all;
+}
+
+.package-image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+}
+
+.package-image-viewer-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.package-image-viewer-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(96vw, 1200px);
+  height: min(92vh, 920px);
+  margin: 4vh auto 0;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.package-image-viewer-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #111827;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.package-image-viewer-image {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  background: #111827;
+}
+
+.package-image-viewer-caption {
+  flex: 0 0 auto;
+  padding: 10px 14px 14px;
+  font-size: 12px;
+  color: #4b5563;
+  word-break: break-all;
+  background: #fff;
+  border-top: 1px solid #e5e7eb;
+}
+
+.figure-ref {
+  color: #2563eb;
+  cursor: help;
+  font-weight: 700;
+  border-bottom: 1px dotted currentColor;
+}
+
+.figure-ref:hover {
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.figure-hover-preview {
+  position: fixed;
+  z-index: 1180;
+  width: 300px;
+  pointer-events: none;
+}
+
+.figure-hover-preview-inner {
+  border: 1px solid #dce0e6;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+}
+
+.figure-hover-preview-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: #111827;
+}
+
+.figure-hover-preview-meta {
+  padding: 8px 10px 10px;
+}
+
+.figure-hover-preview-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.figure-hover-preview-caption {
+  font-size: 11px;
+  color: #475569;
+  line-height: 1.45;
+  max-height: 4.35em;
+  overflow: hidden;
+}
+
+.math-preview .katex-display {
+  margin: 0.55em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.slide-math-preview {
+  width: 100%;
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 4px 0;
+  color: #333;
+  font-size: 15px;
+  line-height: 1.65;
+  overflow-x: auto;
+  white-space: normal;
+}
+
+.slide-math-preview:empty {
+  display: none;
+}
+
+.slide-hidden-math-source {
+  display: none !important;
+}
+
+.slide-formula-boxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.slide-formula-box {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid #cdd8e4;
+  border-radius: 6px;
+  background: #f8fbff;
+  padding: 4px 8px;
+  color: #172033;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.slide-formula-box .katex-display {
+  margin: 0;
+}
+
+.slide-inline-formula-box {
+  display: inline-flex;
+  max-width: 100%;
+  vertical-align: -0.18em;
+  border: 1px solid #cdd8e4;
+  border-radius: 5px;
+  background: #f8fbff;
+  padding: 1px 5px;
+  margin: 0 2px;
+  color: #172033;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.slide-rich-text-preview {
+  min-height: 30px;
+  outline: none;
+  border-bottom: 1px solid transparent;
+}
+
+.slide-rich-text-preview:focus {
+  border-bottom-color: #007470;
+  background: rgba(0, 116, 112, 0.045);
+}
+
+.slide-item-content > .slide-formula-boxes,
+.slide-textbox [data-formula-source] {
+  display: none !important;
+}
+
+.slide-title-formulas,
+.slide-subtitle-formulas {
+  margin-top: 3px;
+}
+
+.slide-table-formulas {
+  margin-top: 4px;
+}
+
+.slide-table-formulas .slide-formula-box {
+  background: #ffffff;
+  color: #172033;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.slide-notes-formulas .slide-formula-box {
+  font-size: 12px;
+}
+
+[data-math-row].is-editing .slide-hidden-math-source {
+  display: block !important;
+}
+
+[data-math-row].is-editing .slide-math-preview {
+  display: none !important;
+}
+
+.slide-item-content .slide-hidden-math-source,
+.slide-textbox [data-math-row] .slide-hidden-math-source {
+  display: none !important;
+}
+
+.slide-item-content .slide-math-preview,
+.slide-textbox [data-math-row] .slide-math-preview {
+  display: block !important;
+}
+
+[data-math-row] .slide-math-preview {
+  cursor: text;
+}
+
+[data-math-row] .slide-math-preview:hover {
+  background: rgba(0, 116, 112, 0.06);
+}
+
+.form-row {
+  display: flex;
+  gap: 10px;
+}
+
+.form-row .form-group {
+  flex: 1;
+}
+
+.saved-lecture-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* ========== Tab 栏 ========== */
+.tab-bar {
+  display: flex;
+  gap: 4px;
+}
+
+.tab-btn {
+  padding: 6px 18px;
+  border: none;
+  background: #f0f2f5;
+  color: #666;
+  border-radius: 6px 6px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-btn.active {
+  background: #007470;
+  color: #fff;
+}
+
+.tab-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tab-btn:not(.active):not(:disabled):hover {
+  background: #e4e7ec;
+}
+
+/* ========== 按钮 ========== */
+.btn-primary {
+  width: 100%;
+  padding: 11px;
+  background: linear-gradient(135deg, #007470, #00a89e);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+  margin-top: 4px;
+}
+
+.btn-primary:hover { opacity: 0.92; transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.btn-secondary {
+  padding: 6px 14px;
+  background: #f0f2f5;
+  color: #333;
+  border: 1px solid #dce0e6;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-secondary:hover { background: #e4e7ec; }
+.btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-accent {
+  padding: 6px 14px;
+  background: linear-gradient(135deg, #007470, #00a89e);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-accent:hover { opacity: 0.88; }
+.btn-accent:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-danger {
+  padding: 3px 8px;
+  background: #fee;
+  color: #e53e3e;
+  border: 1px solid #fcc;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.btn-danger:hover { background: #fdd; }
+
+/* ========== 输出区头部 ========== */
+.output-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.output-actions { display: flex; gap: 8px; }
+
+/* ========== 视图切换 ========== */
+.view-panel {
+  flex: 1;
+  min-height: 0;
+  display: none;
+}
+
+.view-panel.active {
+  display: flex;
+  flex-direction: column;
+}
+
+.latex-status {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border: 1px solid #dce0e6;
+  border-radius: 6px;
+  background: #f8fafc;
+  flex-shrink: 0;
+}
+
+.latex-status:empty {
+  display: none;
+}
+
+#editorWrapper {
+  flex: 1;
+  border: 1px solid #dce0e6;
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.ppt-to-latex-view {
+  min-height: 0;
+}
+
+.ppt-to-latex-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
+  gap: 14px;
+}
+
+.ppt-import-panel,
+.ppt-latex-preview-panel {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid #dce0e6;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.ppt-import-panel {
+  padding: 14px;
+}
+
+.ppt-import-dropzone {
+  height: 100%;
+  min-height: 360px;
+  border: 2px dashed #a8c8c5;
+  border-radius: 8px;
+  background: #f7fbfa;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.ppt-import-dropzone input[type="file"] {
+  display: none;
+}
+
+.ppt-import-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  background: #007470;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.ppt-import-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2933;
+}
+
+.ppt-import-meta {
+  font-size: 13px;
+  color: #667085;
+  max-width: 90%;
+  overflow-wrap: anywhere;
+}
+
+.ppt-latex-preview-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ppt-latex-preview-header {
+  height: 44px;
+  padding: 0 12px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-weight: 700;
+  color: #1f2933;
+}
+
+.ppt-latex-output {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  padding: 12px;
+  resize: none;
+  outline: none;
+  background: #111827;
+  color: #e5e7eb;
+  font-family: "Fira Code", "JetBrains Mono", "Consolas", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.CodeMirror {
+  height: 100% !important;
+  font-size: 13px;
+  font-family: "Fira Code", "JetBrains Mono", "Consolas", monospace;
+}
+
+.latex-sync-highlight {
+  background: rgba(255, 213, 79, 0.42);
+  outline: 1px solid rgba(245, 158, 11, 0.75);
+}
+
+.sync-highlight {
+  background-color: rgba(255, 213, 79, 0.34) !important;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.72) !important;
+  border-color: #f59e0b !important;
+  border-radius: 4px;
+}
+
+[data-math-row].sync-highlight {
+  background-color: rgba(255, 213, 79, 0.22) !important;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.72) !important;
+  border-radius: 4px;
+}
+
+/* ========== PPT 编辑器 ========== */
+.ppt-editor {
+  flex: 1;
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 左侧缩略图列表 */
+.slide-list {
+  flex: 0 0 118px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 8px;
+}
+
+.slide-thumb {
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #fff;
+  position: relative;
+  min-height: 80px;
+}
+
+.slide-thumb:hover { border-color: #007470; }
+
+.slide-thumb.active {
+  border-color: #007470;
+  box-shadow: 0 0 0 2px rgba(0, 116, 112, 0.2);
+}
+
+.slide-thumb-number {
+  font-size: 10px;
+  color: #999;
+  margin-bottom: 4px;
+}
+
+.slide-thumb-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slide-thumb-type {
+  font-size: 9px;
+  color: #007470;
+  background: #e6f7f6;
+  padding: 1px 6px;
+  border-radius: 3px;
+  display: inline-block;
+  margin-top: 4px;
+}
+
+.slide-thumb-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fee;
+  color: #e53e3e;
+  border: none;
+  font-size: 11px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.slide-thumb:hover .slide-thumb-delete {
+  display: flex;
+}
+
+/* 右侧编辑区 */
+.slide-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  overflow: hidden;
+  gap: 8px;
+}
+
+.slide-canvas {
+  flex: 1;
+  border: 1px solid #dce0e6;
+  border-radius: 8px;
+  overflow-y: auto;
+  background: #fafbfc;
+  padding: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.slide-main-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.slide-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #999;
+  font-size: 16px;
+}
+
+/* ========== 幻灯片渲染样式 ========== */
+.slide-render {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  padding: 0;
+  width: 100%;
+  max-width: min(1120px, 100%);
+  aspect-ratio: 16 / 9;
+  min-height: 0;
+  margin: 0 auto;
+  position: relative;
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+}
+
+.slide-topline {
+  height: 3px;
+  background: #007470;
+  position: absolute;
+  top: 13%;
+  left: 0;
+  right: 0;
+}
+
+.slide-title-bar {
+  padding: 16px 28px 0;
+}
+
+.slide-title-input {
+  width: 100%;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 22px;
+  font-weight: 700;
+  color: #333;
+  background: transparent;
+  padding: 6px 0;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.slide-title-input:hover,
+.slide-title-input:focus {
+  border-bottom-color: #007470;
+}
+
+.slide-title-rich {
+  min-height: 42px;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.slide-subtitle-bar {
+  padding: 2px 28px 0;
+}
+
+.slide-subtitle-input {
+  width: 100%;
+  border: none;
+  font-size: 12px;
+  color: #888;
+  background: transparent;
+  padding: 3px 0;
+  outline: none;
+}
+
+.slide-subtitle-input:hover,
+.slide-subtitle-input:focus {
+  border-bottom: 1px dashed #ccc;
+}
+
+.slide-subtitle-rich {
+  min-height: 22px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.slide-body {
+  padding: 12px 28px 20px;
+  position: relative;
+  z-index: 2;
+  min-height: 0;
+  overflow: visible;
+}
+
+.slide-body.has-right-figure {
+  padding-right: clamp(180px, 28%, 280px);
+}
+
+/* 列表项编辑 */
+.slide-items-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.slide-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.slide-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.slide-item-bullet {
+  color: #007470;
+  font-size: 18px;
+  line-height: 1.6;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.slide-item-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid transparent;
+  font-size: 15px;
+  color: #333;
+  padding: 4px 0;
+  outline: none;
+  background: transparent;
+  line-height: 1.5;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  min-height: 34px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.slide-item-content .slide-math-preview {
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+
+.slide-item-input:hover,
+.slide-item-input:focus {
+  border-bottom-color: #dce0e6;
+}
+
+.slide-item-remove {
+  color: #ccc;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: color 0.2s;
+  visibility: hidden;
+}
+
+.slide-item-row:hover .slide-item-remove {
+  visibility: visible;
+}
+
+.slide-item-remove:hover {
+  color: #e53e3e;
+}
+
+.slide-add-item {
+  display: inline-block;
+  color: #007470;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+  margin-top: 4px;
+  border: none;
+  background: none;
+}
+
+.slide-add-item:hover {
+  text-decoration: underline;
+}
+
+/* 公式区 */
+.slide-equations {
+  margin-top: 12px;
+  padding: 10px 16px;
+  background: #f8f9fc;
+  border-radius: 6px;
+  border-left: 3px solid #2864b4;
+}
+
+.slide-eq-input {
+  width: 100%;
+  border: none;
+  font-size: 14px;
+  font-style: italic;
+  color: #2864b4;
+  background: transparent;
+  padding: 4px 0;
+  outline: none;
+  font-family: "Georgia", "Times New Roman", serif;
+}
+
+.slide-equation-row + .slide-equation-row {
+  margin-top: 8px;
+}
+
+/* 表格区 */
+.slide-table-wrap {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.slide-table-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.slide-table-tools button {
+  border: 1px solid #dce0e6;
+  background: #fff;
+  border-radius: 4px;
+  color: #333;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.slide-table-tools button:hover {
+  border-color: #007470;
+  background: #f2fbfa;
+}
+
+.slide-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.slide-table th {
+  background: #007470;
+  color: #fff;
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+}
+
+.slide-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.slide-table tr:nth-child(even) td {
+  background: #f8f9fc;
+}
+
+.slide-table input {
+  border: none;
+  background: transparent;
+  width: 100%;
+  font-size: 13px;
+  padding: 2px 0;
+  outline: none;
+}
+
+.slide-table input:focus {
+  border-bottom: 1px solid #007470;
+}
+
+.slide-table-rich {
+  min-height: 22px;
+  outline: none;
+  border-bottom: 1px solid transparent;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.slide-table-rich:focus {
+  border-bottom-color: currentColor;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.slide-table th .slide-inline-formula-box {
+  background: #ffffff;
+  color: #172033;
+  border-color: rgba(255, 255, 255, 0.85);
+}
+
+.slide-table td .slide-inline-formula-box {
+  background: #ffffff;
+  color: #172033;
+}
+
+/* 图片区域 */
+.slide-images {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.slide-image-item {
+  position: absolute;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: grab;
+  transition: border-color 0.2s;
+  background: #fff;
+  display: block;
+  pointer-events: auto;
+}
+
+.slide-image-item:hover {
+  border-color: #007470;
+}
+
+.slide-image-item.dragging {
+  cursor: grabbing;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  z-index: 100;
+  opacity: 0.9;
+}
+
+.slide-image-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.slide-image-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(229, 62, 62, 0.85);
+  color: #fff;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.slide-image-resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, #007470 50%);
+  border-radius: 0 0 4px 0;
+  z-index: 10;
+}
+
+.slide-insert-image {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #007470;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 6px 0;
+  border: none;
+  background: none;
+  margin-top: 6px;
+}
+
+.slide-insert-image:hover {
+  text-decoration: underline;
+}
+
+/* 编辑工具栏（右侧竖排） */
+.slide-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 6px;
+  background: #fafbfc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  width: 74px;
+  flex-shrink: 0;
+  align-items: stretch;
+  overflow-y: auto;
+}
+
+.toolbar-btn {
+  padding: 6px 4px;
+  background: #fff;
+  border: 1px solid #dce0e6;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #333;
+  transition: all 0.15s;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.toolbar-btn:hover {
+  background: #e4e7ec;
+  border-color: #007470;
+}
+
+.toolbar-sep {
+  height: 1px;
+  background: #dce0e6;
+  margin: 2px 0;
+}
+
+.toolbar-color {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+  color: #666;
+}
+
+.toolbar-color input[type="color"] {
+  width: 32px;
+  height: 24px;
+  border: 1px solid #dce0e6;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 1px;
+  background: #fff;
+}
+
+.toolbar-label {
+  font-size: 10px;
+  color: #999;
+  text-align: center;
+  margin-top: 4px;
+}
+
+#toolbarFontSize,
+#toolbarTextAlign {
+  width: 100%;
+  padding: 4px 2px;
+  font-size: 11px;
+  border: 1px solid #dce0e6;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.toolbar-row {
+  display: flex;
+  gap: 4px;
+}
+
+.toolbar-mini {
+  flex: 1;
+  font-weight: 700;
+}
+
+/* 自由文本框 */
+.slide-free-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.slide-textboxes {
+  z-index: 6;
+}
+
+.slide-textbox {
+  position: absolute;
+  border: 1px dashed #ccc;
+  border-radius: 4px;
+  padding: 8px 28px 8px 18px;
+  cursor: grab;
+  transition: border-color 0.2s;
+  background: #fff;
+  min-width: 120px;
+  display: block;
+  min-height: 36px;
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.slide-image-placeholder {
+  position: absolute;
+  border: 2px dashed #007470;
+  border-radius: 6px;
+  background: rgba(0, 116, 112, 0.06);
+  color: #007470;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 80px;
+  min-height: 60px;
+  pointer-events: auto;
+  overflow: hidden;
+  cursor: move;
+}
+
+.slide-image-placeholder.has-image {
+  border-style: solid;
+  background: #fff;
+}
+
+.slide-placeholder-preview {
+  width: 100%;
+  height: calc(100% - 34px);
+  object-fit: contain;
+  display: block;
+  background: #fff;
+  pointer-events: none;
+  user-select: none;
+}
+
+.slide-image-placeholder.has-image .slide-placeholder-label {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 6px;
+  width: auto;
+  padding: 3px 6px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 116, 112, 0.24);
+  border-radius: 4px;
+}
+
+.slide-image-placeholder.dragging {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  z-index: 11;
+}
+
+.slide-placeholder-drag {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  color: #007470;
+  cursor: move;
+  font-size: 11px;
+  user-select: none;
+}
+
+.slide-placeholder-icon {
+  width: 28px;
+  height: 28px;
+  border: 1px dashed currentColor;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.slide-placeholder-label {
+  width: 80%;
+  border: none;
+  border-bottom: 1px solid rgba(0, 116, 112, 0.35);
+  background: transparent;
+  color: #007470;
+  font-size: 13px;
+  text-align: center;
+  outline: none;
+  cursor: text;
+}
+
+.slide-placeholder-remove {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  color: #94a3b8;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.slide-placeholder-remove:hover {
+  color: #e53e3e;
+}
+
+.slide-placeholder-resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, #007470 50%);
+  border-radius: 0 0 4px 0;
+}
+
+.slide-textbox-drag {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  bottom: 3px;
+  width: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a94a6;
+  font-size: 10px;
+  line-height: 1;
+  cursor: move;
+  user-select: none;
+}
+
+.slide-textbox:hover,
+.slide-textbox:focus-within {
+  border-color: #007470;
+  border-style: solid;
+}
+
+.slide-textbox.dragging {
+  cursor: grabbing;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  z-index: 10;
+}
+
+.slide-textbox-content {
+  width: 100%;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: none;
+  min-height: 24px;
+  background: transparent;
+  font-family: inherit;
+  cursor: text;
+  overflow: auto;
+}
+
+.slide-textbox-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  color: #ccc;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.slide-textbox-remove:hover {
+  color: #e53e3e;
+}
+
+.slide-textbox-resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, #999 50%);
+  border-radius: 0 0 4px 0;
+}
+
+/* 备注区 */
+.slide-notes-section {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.slide-notes-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #999;
+  margin-bottom: 4px;
+}
+
+.slide-notes-input {
+  width: 100%;
+  border: 1px solid #e8eaed;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #666;
+  resize: vertical;
+  min-height: 40px;
+  outline: none;
+  background: #fafbfc;
+}
+
+.slide-notes-input:focus {
+  border-color: #007470;
+}
+
+/* ========== 状态栏 ========== */
+.status {
+  font-size: 13px;
+  min-height: 18px;
+  line-height: 1.5;
+}
+
+.status.info { color: #007470; }
+.status.error { color: #e53e3e; }
+.status.success { color: #38a169; }
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.progress-bar {
+  height: 3px;
+  background: #e2e8f0;
+  border-radius: 2px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.progress-bar .progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #007470, #00a89e);
+  border-radius: 2px;
+  width: 0;
+  transition: width 0.25s ease;
+}
+
+.progress-percent {
+  min-width: 38px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 600;
+  color: #007470;
+}
+
+/* ========== 响应式 ========== */
+@media (max-width: 960px) {
+  .container {
+    flex-direction: column;
+    height: auto;
+  }
+  .panel-input { flex: none; }
+  .panel-output { min-height: 600px; }
+  .resize-handle { display: none; }
+  .container.input-collapsed .panel-output {
+    display: flex;
+  }
+  .container.input-collapsed .panel-input {
+    display: none;
+  }
+  .container.input-collapsed #viewLatex,
+  .container.input-collapsed #viewPpt {
+    flex: none;
+    min-height: 520px;
+  }
+  .container.input-collapsed #viewLatex {
+    padding-right: 0;
+    border-right: 0;
+  }
+  .container.input-collapsed #viewPpt {
+    padding-left: 0;
+  }
+  .form-row { flex-direction: column; gap: 0; }
+  .ppt-to-latex-layout { grid-template-columns: 1fr; }
+  .ppt-import-dropzone { min-height: 240px; }
+  .ppt-editor { flex-direction: column; }
+  .slide-list { flex: none; flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+  .slide-thumb { min-width: 120px; }
+}

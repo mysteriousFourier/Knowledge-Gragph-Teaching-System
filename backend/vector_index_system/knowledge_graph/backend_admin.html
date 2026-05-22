@@ -1,0 +1,1262 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>后端知识图谱管理</title>
+  <link rel="stylesheet" href="https://unpkg.com/katex@0.16.9/dist/katex.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css'">
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --line: #d7dce2;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --blue: #2563eb;
+      --green: #059669;
+      --amber: #d97706;
+      --red: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+    header {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    header h1 { margin: 0; font-size: 18px; font-weight: 650; }
+    main {
+      height: calc(100vh - 56px);
+      display: grid;
+      grid-template-columns: 300px minmax(460px, 1fr) 390px;
+      min-height: 640px;
+    }
+    aside, section {
+      min-width: 0;
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+    }
+    aside { padding: 14px; overflow: auto; }
+    #stage { position: relative; background: #fbfcfd; }
+    #graph-svg { width: 100%; height: 100%; display: block; cursor: grab; }
+    #detail { padding: 14px; overflow: auto; border-right: 0; }
+    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      min-height: 34px;
+      padding: 0 11px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+    }
+    button.primary { border-color: var(--blue); background: var(--blue); color: white; }
+    button.active { border-color: var(--blue); color: var(--blue); background: #eff6ff; }
+    button:hover { filter: brightness(0.97); }
+    input, textarea, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 9px;
+      font: inherit;
+      background: white;
+      color: var(--text);
+    }
+    textarea { min-height: 150px; resize: vertical; line-height: 1.5; }
+    label { display: block; margin: 12px 0 6px; font-size: 12px; color: var(--muted); font-weight: 650; }
+    .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+    .stat { border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
+    .stat b { display: block; font-size: 22px; line-height: 1.1; }
+    .stat span { color: var(--muted); font-size: 12px; }
+    .segmented { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; }
+    .list { display: grid; gap: 6px; margin-top: 10px; }
+    .item {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px;
+      cursor: pointer;
+      background: #fff;
+    }
+    .item:hover { border-color: var(--blue); }
+    .item-title { font-weight: 650; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-meta { margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .preview-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .preview-heading span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .math-preview {
+      min-height: 72px;
+      max-height: 240px;
+      overflow: auto;
+      margin: 6px 0 12px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfdff;
+      line-height: 1.7;
+      word-break: break-word;
+    }
+    .math-preview p { margin: 0 0 10px; }
+    .math-preview p:last-child { margin-bottom: 0; }
+    .math-preview h1,
+    .math-preview h2,
+    .math-preview h3 {
+      margin: 12px 0 8px;
+      font-size: 15px;
+    }
+    .math-preview ul,
+    .math-preview ol {
+      margin: 0 0 10px;
+      padding-left: 1.35em;
+    }
+    .latex-fallback {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      padding: 1px 5px;
+      border: 1px solid rgba(37, 99, 235, 0.18);
+      border-radius: 6px;
+      background: rgba(37, 99, 235, 0.06);
+      font-family: "Cambria Math", "Times New Roman", serif;
+      line-height: 1.35;
+      vertical-align: baseline;
+    }
+    .latex-fallback-display {
+      display: block;
+      overflow-x: auto;
+      margin: 9px 0;
+      padding: 9px 10px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .mini-katex {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      max-width: 100%;
+      font-family: "Cambria Math", "STIX Two Math", "Times New Roman", serif;
+      font-size: 1.06em;
+      line-height: 1.3;
+      color: #111827;
+      vertical-align: middle;
+    }
+    .mini-katex-display {
+      display: flex;
+      justify-content: center;
+      overflow-x: auto;
+      margin: 9px 0;
+      padding: 9px 10px;
+      border-radius: 6px;
+      background: rgba(37, 99, 235, 0.04);
+    }
+    .mini-frac {
+      display: inline-grid;
+      grid-template-rows: auto auto;
+      align-items: center;
+      margin: 0 3px;
+      text-align: center;
+      vertical-align: middle;
+    }
+    .mini-frac > span:first-child {
+      border-bottom: 1px solid currentColor;
+      padding: 0 4px 1px;
+    }
+    .mini-frac > span:last-child {
+      padding: 1px 4px 0;
+    }
+    .mini-sqrt {
+      display: inline-flex;
+      align-items: flex-start;
+      gap: 2px;
+    }
+    .mini-sqrt .radicand {
+      border-top: 1px solid currentColor;
+      padding: 0 3px;
+    }
+    .mini-overline {
+      text-decoration: overline;
+      text-decoration-thickness: 1px;
+    }
+    .katex-display {
+      overflow-x: auto;
+      overflow-y: hidden;
+      margin: 10px 0;
+      padding: 8px;
+      border-radius: 6px;
+      background: rgba(37, 99, 235, 0.04);
+    }
+    .status { color: var(--muted); font-size: 13px; }
+    .node { cursor: grab; }
+    .node:active { cursor: grabbing; }
+    .node circle { stroke: white; stroke-width: 2; }
+    .node text { font-size: 10px; fill: #374151; pointer-events: none; }
+    .edge { stroke: #9aa4b2; stroke-opacity: .42; cursor: pointer; }
+    .edge:hover { stroke: var(--blue); stroke-opacity: .95; }
+    .edge-label { fill: #4b5563; font-size: 9px; pointer-events: none; paint-order: stroke; stroke: white; stroke-width: 3px; }
+    .selected circle { stroke: var(--red); stroke-width: 3; }
+    .relation-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      border-bottom: 1px solid #edf0f3;
+      padding: 7px 0;
+      font-size: 12px;
+    }
+    .table {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+      margin-top: 10px;
+      font-size: 12px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1.1fr 95px 1.1fr;
+      gap: 8px;
+      padding: 8px;
+      border-bottom: 1px solid #edf0f3;
+      cursor: pointer;
+      background: white;
+    }
+    .row:hover { background: #f8fbff; }
+    .badge {
+      display: inline-block;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: #eef2f7;
+      color: #334155;
+      font-size: 12px;
+      margin: 3px 4px 3px 0;
+    }
+    @media (max-width: 1100px) {
+      main { grid-template-columns: 260px 1fr; }
+      #detail { grid-column: 1 / -1; height: 340px; border-top: 1px solid var(--line); }
+    }
+  </style>
+  <script defer src="https://unpkg.com/katex@0.16.9/dist/katex.min.js" onload="window.refreshDetailPreviews && window.refreshDetailPreviews()"></script>
+</head>
+<body>
+  <header>
+    <h1>后端知识图谱管理</h1>
+    <div class="toolbar">
+      <span id="status" class="status">加载中</span>
+      <button onclick="zoomBy(1.18)">放大</button>
+      <button onclick="zoomBy(0.84)">缩小</button>
+      <button onclick="forceRelayout()">力导向重排</button>
+      <button onclick="showFormulaRelations()">公式关系</button>
+      <button onclick="resetView()">重置视图</button>
+      <button onclick="loadGraph()">刷新</button>
+      <button onclick="location.href='/viz'">旧版视图</button>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <input id="search" placeholder="搜索节点、内容、类型或章节" oninput="scheduleRender()">
+      <label>视图</label>
+      <div class="segmented">
+        <button id="view-network" class="active" onclick="setView('network')">图谱</button>
+        <button id="view-focus" onclick="setView('focus')">聚焦</button>
+        <button id="view-table" onclick="setView('table')">关系表</button>
+      </div>
+      <label>节点类型</label>
+      <select id="type-filter" onchange="render()"><option value="">全部</option></select>
+      <label>关系类型</label>
+      <select id="relation-filter" onchange="render()"><option value="">全部</option></select>
+      <label>最大节点数</label>
+      <select id="max-nodes" onchange="render()">
+        <option value="80">80</option>
+        <option value="140" selected>140</option>
+        <option value="220">220</option>
+        <option value="all">全部</option>
+      </select>
+      <div class="stats">
+        <div class="stat"><b id="node-count">0</b><span>节点</span></div>
+        <div class="stat"><b id="edge-count">0</b><span>关系</span></div>
+      </div>
+      <div id="audit" class="muted">正在加载关系审计</div>
+      <div id="node-list" class="list"></div>
+    </aside>
+    <section id="stage">
+      <svg id="graph-svg"></svg>
+    </section>
+    <section id="detail">
+      <h2 style="margin:0 0 8px;font-size:16px;">详情</h2>
+      <div id="detail-content" class="muted">请选择一个节点或关系。</div>
+    </section>
+  </main>
+  <script>
+    let graph = { nodes: [], relations: [] };
+    let audit = null;
+    let graphDiagnostics = { rawRelations: 0, missingEndpoint: 0, missingNode: 0 };
+    let selectedId = "";
+    let viewMode = "network";
+    let positions = new Map();
+    let visible = { nodes: [], relations: [] };
+    let viewport = { scale: 1, x: 0, y: 0 };
+    let dragState = null;
+    let panState = null;
+    let layoutSignature = "";
+    let renderTimer = null;
+    let svgFrameRequested = false;
+    let suppressNodeClickUntil = 0;
+    const networkNodeHardLimit = 320;
+    const clickMoveTolerance = 5;
+
+    const colors = {
+      chapter: "#f59e0b", formula: "#10b981", table: "#0ea5e9", note: "#0ea5e9",
+      proposition: "#ef4444", derivation: "#6366f1", discussion: "#14b8a6",
+      concept: "#64748b", default: "#6b7280"
+    };
+
+    function esc(value) {
+      const div = document.createElement("div");
+      div.textContent = value == null ? "" : String(value);
+      return div.innerHTML;
+    }
+
+    function js(value) {
+      return esc(String(value || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
+    }
+
+    const latexCommandMap = {
+      "\\alpha": "α", "\\beta": "β", "\\gamma": "γ", "\\delta": "δ",
+      "\\epsilon": "ε", "\\theta": "θ", "\\lambda": "λ", "\\mu": "μ",
+      "\\pi": "π", "\\rho": "ρ", "\\sigma": "σ", "\\phi": "φ",
+      "\\omega": "ω", "\\times": "×", "\\cdot": "·", "\\leq": "≤",
+      "\\geq": "≥", "\\neq": "≠", "\\approx": "≈", "\\infty": "∞",
+      "\\sum": "∑", "\\prod": "∏", "\\int": "∫",
+      "\\rightarrow": "→", "\\Rightarrow": "⇒"
+    };
+
+    let katexLoadPromise = null;
+    const katexRuntimeUrls = [
+      "https://unpkg.com/katex@0.16.9/dist/katex.min.js",
+      "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js",
+      "https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"
+    ];
+
+    function loadScriptSequentially(urls, index = 0) {
+      if (window.katex && typeof window.katex.renderToString === "function") return Promise.resolve();
+      if (index >= urls.length) return Promise.reject(new Error("KaTeX runtime unavailable"));
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = urls[index];
+        script.async = true;
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      }).catch(() => loadScriptSequentially(urls, index + 1));
+    }
+
+    function ensureKatexRuntime() {
+      if (window.katex && typeof window.katex.renderToString === "function") return Promise.resolve();
+      if (!katexLoadPromise) katexLoadPromise = loadScriptSequentially(katexRuntimeUrls);
+      return katexLoadPromise;
+    }
+
+    function stripMathDelimiters(token) {
+      const text = String(token || "").trim();
+      if (text.startsWith("$$") && text.endsWith("$$")) return text.slice(2, -2);
+      if (text.startsWith("\\begin{align}") && text.endsWith("\\end{align}")) {
+        return "\\begin{aligned}" + text.slice("\\begin{align}".length, -"\\end{align}".length) + "\\end{aligned}";
+      }
+      if (text.startsWith("\\begin{align*}") && text.endsWith("\\end{align*}")) {
+        return "\\begin{aligned}" + text.slice("\\begin{align*}".length, -"\\end{align*}".length) + "\\end{aligned}";
+      }
+      if (text.startsWith("\\begin{gather}") && text.endsWith("\\end{gather}")) {
+        return "\\begin{gathered}" + text.slice("\\begin{gather}".length, -"\\end{gather}".length) + "\\end{gathered}";
+      }
+      if (text.startsWith("\\begin{gather*}") && text.endsWith("\\end{gather*}")) {
+        return "\\begin{gathered}" + text.slice("\\begin{gather*}".length, -"\\end{gather*}".length) + "\\end{gathered}";
+      }
+      if (text.startsWith("\\begin{equation}") && text.endsWith("\\end{equation}")) {
+        return text.slice("\\begin{equation}".length, -"\\end{equation}".length);
+      }
+      if (text.startsWith("\\begin{equation*}") && text.endsWith("\\end{equation*}")) {
+        return text.slice("\\begin{equation*}".length, -"\\end{equation*}".length);
+      }
+      if (text.startsWith("\\begin{")) return text.replace(/^\\begin\{[^}]+\}/, "").replace(/\\end\{[^}]+\}$/, "");
+      if ((text.startsWith("\\[") && text.endsWith("\\]")) || (text.startsWith("\\(") && text.endsWith("\\)"))) {
+        return text.slice(2, -2);
+      }
+      if (text.startsWith("$") && text.endsWith("$")) return text.slice(1, -1);
+      return text;
+    }
+
+    function looksLikeBareLatexBlock(value) {
+      const text = String(value || "").trim();
+      if (!text) return false;
+      if (/\$\$|\\\[|\\\(|\\begin\{(equation|align|gather)/.test(text)) return false;
+      return /\\(bar|overline|hat|frac|sqrt|sum|prod|int|begin|sigma|Delta|delta|partial|left|right|cdot|times)\b|[_^]\s*\{/.test(text);
+    }
+
+    function isPureLatexExpression(value) {
+      const text = String(value || "").trim();
+      if (!text) return false;
+      if (text.startsWith("$$") || text.startsWith("\\[") || text.startsWith("\\(") || text.startsWith("\\begin{")) return true;
+      if (/[\u4e00-\u9fff]/.test(text)) return false;
+      if (/[.!?。！？]\s+\S/.test(text)) return false;
+      if (/\b(the|and|or|is|are|was|were|this|that|where|because|therefore|means|called|defined)\b/i.test(text)) return false;
+      return /\\[A-Za-z]+|[_^]\s*\{?|[=<>+\-*/]/.test(text);
+    }
+
+    function simplifyLatex(token) {
+      let text = stripMathDelimiters(token);
+      text = text.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, "($1)/($2)");
+      text = text.replace(/\\sqrt\s*\{([^{}]+)\}/g, "√($1)");
+      text = text.replace(/\\text\s*\{([^{}]+)\}/g, "$1");
+      text = text.replace(/\\operatorname\s*\{([^{}]+)\}/g, "$1");
+      Object.keys(latexCommandMap).forEach(command => {
+        text = text.split(command).join(latexCommandMap[command]);
+      });
+      return text.replace(/\s+/g, " ").trim() || token;
+    }
+
+    function renderMiniLatexBody(latex) {
+      let text = String(latex || "").trim()
+        .replace(/\\begin\{(?:array|aligned|gathered|matrix|pmatrix)\}(?:\{[^}]*\})?/g, "")
+        .replace(/\\end\{(?:array|aligned|gathered|matrix|pmatrix)\}/g, "")
+        .replace(/\\left/g, "")
+        .replace(/\\right/g, "")
+        .replace(/\\,/g, " ")
+        .replace(/\\;/g, " ")
+        .replace(/\\quad/g, " ")
+        .replace(/\\qquad/g, " ");
+
+      text = text.replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, function (_match, top, bottom) {
+        return `<span class="mini-frac"><span>${renderMiniLatexBody(top)}</span><span>${renderMiniLatexBody(bottom)}</span></span>`;
+      });
+      text = text.replace(/\\sqrt\s*\{([^{}]+)\}/g, function (_match, body) {
+        return `<span class="mini-sqrt">√<span class="radicand">${renderMiniLatexBody(body)}</span></span>`;
+      });
+      text = text.replace(/\\(?:bar|overline|hat)\s*\{([^{}]+)\}/g, function (_match, body) {
+        return `<span class="mini-overline">${renderMiniLatexBody(body)}</span>`;
+      });
+      text = text.replace(/\\text\s*\{([^{}]+)\}/g, function (_match, body) { return esc(body); });
+      text = text.replace(/\\operatorname\s*\{([^{}]+)\}/g, function (_match, body) { return esc(body); });
+
+      Object.keys(latexCommandMap).forEach(command => {
+        text = text.split(command).join(esc(latexCommandMap[command]));
+      });
+      return esc(text)
+        .replace(/&lt;span class=&quot;mini-frac&quot;&gt;/g, '<span class="mini-frac">')
+        .replace(/&lt;span class=&quot;mini-sqrt&quot;&gt;/g, '<span class="mini-sqrt">')
+        .replace(/&lt;span class=&quot;mini-overline&quot;&gt;/g, '<span class="mini-overline">')
+        .replace(/&lt;span class=&quot;radicand&quot;&gt;/g, '<span class="radicand">')
+        .replace(/&lt;\/span&gt;/g, '</span>')
+        .replace(/\^\\?\{([^{}]+)\}/g, "<sup>$1</sup>")
+        .replace(/_\\?\{([^{}]+)\}/g, "<sub>$1</sub>")
+        .replace(/\^([A-Za-z0-9+\-]+)/g, "<sup>$1</sup>")
+        .replace(/_([A-Za-z0-9+\-]+)/g, "<sub>$1</sub>")
+        .replace(/\\\\/g, "<br>")
+        .replace(/&amp;/g, "&nbsp;&nbsp;");
+    }
+
+    function renderMiniLatex(token, display) {
+      return `<span class="mini-katex${display ? " mini-katex-display" : ""}" title="${esc(token)}">${renderMiniLatexBody(stripMathDelimiters(token))}</span>`;
+    }
+
+    function renderLatexToken(token) {
+      const raw = String(token || "");
+      const display = raw.startsWith("$$") || raw.startsWith("\\[") || raw.startsWith("\\begin{");
+      const latex = stripMathDelimiters(raw);
+      if (window.katex && typeof window.katex.renderToString === "function") {
+        try {
+          return window.katex.renderToString(latex, {
+            displayMode: display,
+            throwOnError: false,
+            strict: "ignore",
+            trust: false
+          });
+        } catch (error) {
+          console.warn("LaTeX preview failed:", error);
+        }
+      }
+      return renderMiniLatex(raw, display);
+    }
+
+    function renderInlineRichText(value) {
+      const text = String(value || "")
+        .replace(/\\\\([()[\]])/g, "\\$1")
+        .replace(/\\\\begin\{/g, "\\begin{")
+        .replace(/\\\\end\{/g, "\\end{");
+      const regex = /\\begin\{(equation\*?|align\*?|gather\*?)\}[\s\S]*?\\end\{\1\}|\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(^|[^\\])\$[^$\n]+?\$|\\(?:frac\s*\{[^{}]+\}\s*\{[^{}]+\}|sqrt\s*\{[^{}]+\}|(?:bar|overline|hat|vec|tilde|text|operatorname|mathbb|mathcal|mathbf|mathrm)\s*\{[^{}]+\}|(?:alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|rho|sigma|phi|omega|Gamma|Delta|Theta|Lambda|Pi|Sigma|Phi|Omega|partial|nabla|times|cdot|leq|geq|neq|approx|infty|sum|prod|int|rightarrow|Rightarrow)\b)(?:\s*[_^]\s*(?:\{[^{}]+\}|[A-Za-z0-9+\-]+))*/g;
+      let html = "";
+      let lastIndex = 0;
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        const raw = match[0];
+        const tokenOffset = raw.startsWith("$") || raw.startsWith("\\") ? 0 : 1;
+        const tokenStart = match.index + tokenOffset;
+        if (tokenStart > lastIndex) html += esc(text.slice(lastIndex, tokenStart));
+        html += renderLatexToken(text.slice(tokenStart, match.index + raw.length));
+        lastIndex = match.index + raw.length;
+      }
+      if (lastIndex < text.length) html += esc(text.slice(lastIndex));
+      return html
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    }
+
+    function renderContentPreview(value, forceMath = false) {
+      const raw = String(value || "").trim();
+      if (raw && (forceMath || looksLikeBareLatexBlock(raw)) && isPureLatexExpression(raw)) {
+        return `<div class="formula-preview">${renderLatexToken(`\\[${raw}\\]`)}</div>`;
+      }
+      const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");
+      let html = "";
+      let listType = "";
+      function closeList() {
+        if (listType) {
+          html += `</${listType}>`;
+          listType = "";
+        }
+      }
+      lines.forEach(line => {
+        if (!line.trim()) {
+          closeList();
+          return;
+        }
+        const heading = line.match(/^\s{0,3}(#{1,3})\s+(.+)$/);
+        if (heading) {
+          closeList();
+          const level = heading[1].length;
+          html += `<h${level}>${renderInlineRichText(heading[2])}</h${level}>`;
+          return;
+        }
+        const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
+        if (unordered) {
+          if (listType !== "ul") {
+            closeList();
+            html += "<ul>";
+            listType = "ul";
+          }
+          html += `<li>${renderInlineRichText(unordered[1])}</li>`;
+          return;
+        }
+        const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+        if (ordered) {
+          if (listType !== "ol") {
+            closeList();
+            html += "<ol>";
+            listType = "ol";
+          }
+          html += `<li>${renderInlineRichText(ordered[1])}</li>`;
+          return;
+        }
+        closeList();
+        html += `<p>${renderInlineRichText(line)}</p>`;
+      });
+      closeList();
+      return html || '<span class="muted">暂无可预览内容</span>';
+    }
+
+    function renderRichLabel(value) {
+      return renderInlineRichText(value);
+    }
+
+    function plainLatexLabel(value) {
+      return String(value || "")
+        .replace(/\\\\([()[\]])/g, "\\$1")
+        .replace(/\\begin\{(equation\*?|align\*?|gather\*?)\}([\s\S]*?)\\end\{\1\}/g, function (_match, _env, body) {
+          return simplifyLatex(body);
+        })
+        .replace(/\$\$([\s\S]*?)\$\$/g, function (_match, body) { return simplifyLatex(body); })
+        .replace(/\\\[([\s\S]*?)\\\]/g, function (_match, body) { return simplifyLatex(body); })
+        .replace(/\\\(([\s\S]*?)\\\)/g, function (_match, body) { return simplifyLatex(body); })
+        .replace(/(^|[^\\])\$([^$\n]+?)\$/g, function (_match, prefix, body) { return prefix + simplifyLatex(body); });
+    }
+
+    function updateNodeContentPreview() {
+      const textarea = document.getElementById("node-content");
+      const preview = document.getElementById("node-content-preview");
+      if (!textarea || !preview) return;
+      const forceMath = textarea.dataset.nodeType === "formula";
+      preview.innerHTML = renderContentPreview(textarea.value, forceMath);
+    }
+
+    function updateNodeLabelPreview() {
+      const input = document.getElementById("node-label");
+      const preview = document.getElementById("node-label-preview");
+      if (!input || !preview) return;
+      preview.innerHTML = renderRichLabel(input.value);
+    }
+
+    function updateRelationDescriptionPreview() {
+      const textarea = document.getElementById("rel-description");
+      const preview = document.getElementById("rel-description-preview");
+      if (!textarea || !preview) return;
+      preview.innerHTML = renderContentPreview(textarea.value);
+    }
+
+    function refreshDetailPreviews(renderOnly = false) {
+      updateNodeLabelPreview();
+      updateNodeContentPreview();
+      updateRelationDescriptionPreview();
+      if (!renderOnly && !(window.katex && typeof window.katex.renderToString === "function")) {
+        ensureKatexRuntime()
+          .then(() => refreshDetailPreviews(true))
+          .catch(error => console.warn("KaTeX runtime unavailable:", error));
+      }
+    }
+    window.refreshDetailPreviews = refreshDetailPreviews;
+
+    function scheduleRender() {
+      window.clearTimeout(renderTimer);
+      renderTimer = window.setTimeout(render, 90);
+    }
+
+    function labelOf(nodeOrId) {
+      const node = typeof nodeOrId === "string" ? graph.nodes.find(item => item.id === nodeOrId) : nodeOrId;
+      if (!node) return nodeOrId || "";
+      return (node.metadata && node.metadata.label) || node.label || node.id;
+    }
+
+    function endpointId(value) {
+      if (value && typeof value === "object") {
+        return String(value.id || value.node_id || value.nodeId || value.value || "").trim();
+      }
+      return value == null ? "" : String(value).trim();
+    }
+
+    function firstEndpoint(...values) {
+      for (const value of values) {
+        const id = endpointId(value);
+        if (id && id !== "undefined" && id !== "null") return id;
+      }
+      return "";
+    }
+
+    function relationMetadata(relation) {
+      const raw = relation && (relation.metadata || relation.properties);
+      if (!raw) return {};
+      if (typeof raw === "string") {
+        try {
+          const parsed = JSON.parse(raw);
+          return parsed && typeof parsed === "object" ? parsed : {};
+        } catch (_error) {
+          return {};
+        }
+      }
+      return typeof raw === "object" ? raw : {};
+    }
+
+    function relationSourceId(relation) {
+      const metadata = relationMetadata(relation);
+      return firstEndpoint(
+        relation && relation.source_id,
+        relation && relation.source_node,
+        relation && relation.source,
+        relation && relation.from,
+        metadata.source_id,
+        metadata.source_node,
+        metadata.source,
+        metadata.from
+      );
+    }
+
+    function relationTargetId(relation) {
+      const metadata = relationMetadata(relation);
+      return firstEndpoint(
+        relation && relation.target_id,
+        relation && relation.target_node,
+        relation && relation.target,
+        relation && relation.to,
+        metadata.target_id,
+        metadata.target_node,
+        metadata.target,
+        metadata.to
+      );
+    }
+
+    function relationTypeOf(relation) {
+      const metadata = relationMetadata(relation);
+      return firstEndpoint(
+        relation && relation.relation_type,
+        relation && relation.type,
+        relation && relation.label,
+        metadata.relation_type,
+        metadata.type,
+        metadata.label
+      ) || "related";
+    }
+
+    function normalizeRelation(relation) {
+      const metadata = relationMetadata(relation);
+      const sourceId = relationSourceId(relation);
+      const targetId = relationTargetId(relation);
+      const relationType = relationTypeOf(relation);
+      return {
+        ...(relation || {}),
+        source_id: sourceId,
+        target_id: targetId,
+        source_node: sourceId,
+        target_node: targetId,
+        source: sourceId,
+        target: targetId,
+        relation_type: relationType,
+        type: relationType,
+        metadata
+      };
+    }
+
+    function normalizeGraph(data) {
+      const payload = data || {};
+      const nodes = (payload.nodes || [])
+        .map(node => ({ ...node, id: String(node.id || "") }))
+        .filter(node => node.id);
+      const nodeIds = new Set(nodes.map(node => String(node.id || "")));
+      const rawRelations = payload.relations || payload.edges || [];
+      const endpointRelations = rawRelations
+        .map(normalizeRelation)
+        .filter(relation => relation.source_id && relation.target_id);
+      const relations = endpointRelations
+        .filter(relation => nodeIds.has(relation.source_id) && nodeIds.has(relation.target_id));
+      graphDiagnostics = {
+        rawRelations: rawRelations.length,
+        missingEndpoint: rawRelations.length - endpointRelations.length,
+        missingNode: endpointRelations.length - relations.length
+      };
+      return {
+        ...payload,
+        nodes,
+        relations,
+        edges: relations
+      };
+    }
+
+    function relationKey(relation) {
+      return relation.id || `${relationSourceId(relation)}\u0000${relationTypeOf(relation)}\u0000${relationTargetId(relation)}`;
+    }
+
+    function mergeRelations(primary, secondary) {
+      const seen = new Set();
+      const merged = [];
+      primary.concat(secondary).forEach(relation => {
+        const key = relationKey(relation);
+        if (seen.has(key)) return;
+        seen.add(key);
+        merged.push(relation);
+      });
+      return merged;
+    }
+
+    function relationMatchesActiveType(relation) {
+      const relType = document.getElementById("relation-filter").value;
+      return !relType || relationTypeOf(relation) === relType;
+    }
+
+    function relationTouchesNode(relation, nodeId) {
+      return relationSourceId(relation) === nodeId || relationTargetId(relation) === nodeId;
+    }
+
+    function directRelationsFor(nodeId) {
+      if (!nodeId) return [];
+      return graph.relations.filter(relation => relationTouchesNode(relation, nodeId) && relationMatchesActiveType(relation));
+    }
+
+    async function loadGraph() {
+      document.getElementById("status").textContent = "正在加载图谱";
+      const [graphResponse, auditResponse] = await Promise.all([
+        fetch("/api/graph"),
+        fetch("/api/relation-audit")
+      ]);
+      const result = await graphResponse.json();
+      const auditResult = await auditResponse.json();
+      if (!result.success) throw new Error(result.error || "load failed");
+      graph = normalizeGraph(result.data || { nodes: [], relations: [] });
+      audit = auditResult.audit || null;
+      document.getElementById("node-count").textContent = graph.nodes.length;
+      document.getElementById("edge-count").textContent = graph.relations.length;
+      fillFilters();
+      renderAudit();
+      render();
+      const dropped = graphDiagnostics.missingEndpoint + graphDiagnostics.missingNode;
+      document.getElementById("status").textContent = `已加载 ${graph.nodes.length} 个节点 / ${graph.relations.length} 条关系${dropped ? `，已跳过 ${dropped} 条异常关系` : ""}`;
+    }
+
+    function renderAudit() {
+      const el = document.getElementById("audit");
+      if (!audit) {
+        el.textContent = "暂无审计数据";
+        return;
+      }
+      const semantic = audit.semantic_count || 0;
+      const structural = audit.structural_count || 0;
+      const candidates = audit.semantic_candidate_count || 0;
+      el.innerHTML = `
+        <div style="border:1px solid var(--line);border-radius:6px;padding:9px;background:#fafafa;">
+          <div><b>关系审计</b></div>
+          <div>结构/引用关系: ${structural}</div>
+          <div>语义/候选关系: ${semantic}（生成 ${candidates} 条）</div>
+          <div>平均度: ${audit.avg_degree}，孤立节点: ${audit.isolated_count}</div>
+          <div>前端有效关系: ${graph.relations.length} / ${graphDiagnostics.rawRelations}，跳过端点缺失 ${graphDiagnostics.missingEndpoint}，节点缺失 ${graphDiagnostics.missingNode}</div>
+          <div style="margin-top:5px;">${Object.entries(audit.type_counts || {}).map(([k, v]) => `<span class="badge">${esc(k)} ${v}</span>`).join("")}</div>
+        </div>`;
+    }
+
+    function fillFilters() {
+      const typeSelect = document.getElementById("type-filter");
+      const relationSelect = document.getElementById("relation-filter");
+      const currentType = typeSelect.value;
+      const currentRel = relationSelect.value;
+      const types = Array.from(new Set(graph.nodes.map(n => n.type || "concept"))).sort();
+      const relations = Array.from(new Set(graph.relations.map(r => r.relation_type || "related"))).sort();
+      typeSelect.innerHTML = '<option value="">全部</option>' + types.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+      relationSelect.innerHTML = '<option value="">全部</option>' + relations.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+      if (types.includes(currentType)) typeSelect.value = currentType;
+      if (relations.includes(currentRel)) relationSelect.value = currentRel;
+    }
+
+    function setView(mode) {
+      viewMode = mode;
+      ["network", "focus", "table"].forEach(name => {
+        document.getElementById(`view-${name}`).classList.toggle("active", name === mode);
+      });
+      render();
+    }
+
+    function filteredNodesBase() {
+      const term = document.getElementById("search").value.trim().toLowerCase();
+      const type = document.getElementById("type-filter").value;
+      const maxValue = document.getElementById("max-nodes").value || "140";
+      const max = maxValue === "all"
+        ? (viewMode === "table" ? graph.nodes.length : Math.min(graph.nodes.length, networkNodeHardLimit))
+        : Number(maxValue);
+      let nodes = graph.nodes.filter(node => {
+        const metadata = node.metadata || {};
+        const text = [node.id, node.label, node.type, node.content, metadata.label, metadata.chapter].join(" ").toLowerCase();
+        return (!type || node.type === type) && (!term || text.includes(term));
+      });
+      const nodeById = new Map(graph.nodes.map(node => [node.id, node]));
+      if (selectedId && nodeById.has(selectedId) && viewMode !== "table") {
+        const connected = new Set([selectedId]);
+        directRelationsFor(selectedId).forEach(rel => {
+          connected.add(relationSourceId(rel));
+          connected.add(relationTargetId(rel));
+        });
+        const selectedNodes = Array.from(connected)
+          .map(id => nodeById.get(id))
+          .filter(Boolean)
+          .filter(node => node.id === selectedId || !type || node.type === type);
+        const selectedNodeIds = new Set(selectedNodes.map(node => node.id));
+        if (viewMode === "focus") {
+          nodes = selectedNodes;
+        } else {
+          nodes = selectedNodes.concat(nodes.filter(node => !selectedNodeIds.has(node.id)));
+        }
+      }
+      return nodes.slice(0, max);
+    }
+
+    function filteredRelations(nodes) {
+      const ids = new Set(nodes.map(n => n.id));
+      const visibleRelations = graph.relations
+        .filter(r => ids.has(relationSourceId(r)) && ids.has(relationTargetId(r)))
+        .filter(relationMatchesActiveType);
+      const selectedRelations = selectedId && ids.has(selectedId)
+        ? directRelationsFor(selectedId).filter(r => ids.has(relationSourceId(r)) && ids.has(relationTargetId(r)))
+        : [];
+      const limit = document.getElementById("relation-filter").value ? 1200 : (viewMode === "focus" ? 500 : 360);
+      return mergeRelations(selectedRelations, visibleRelations).slice(0, limit);
+    }
+
+    function render() {
+      window.clearTimeout(renderTimer);
+      const nodes = filteredNodesBase();
+      const relations = filteredRelations(nodes);
+      visible = { nodes, relations };
+      renderList(nodes);
+      if (viewMode === "table") {
+        renderTable(relations);
+      } else {
+        renderSvg(nodes, relations, true);
+      }
+    }
+
+    function renderList(nodes) {
+      document.getElementById("node-list").innerHTML = nodes.slice(0, 70).map(node => {
+        const chapter = (node.metadata && node.metadata.chapter) || "";
+        return `<div class="item" onclick="showNode('${js(node.id)}')">
+          <div class="item-title">${renderRichLabel(labelOf(node))}</div>
+          <div class="item-meta">${esc(node.type || "concept")}${chapter ? " / " + esc(chapter) : ""}</div>
+        </div>`;
+      }).join("");
+    }
+
+    function renderTable(relations) {
+      const svg = document.getElementById("graph-svg");
+      svg.innerHTML = `<foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:16px;height:100%;overflow:auto;">
+        <div class="table">${relations.map(rel => `<div class="row" onclick="showRelation('${js(rel.id)}')">
+          <div>${renderRichLabel(labelOf(relationSourceId(rel)))}</div>
+          <div><b>${esc(relationTypeOf(rel))}</b></div>
+          <div>${renderRichLabel(labelOf(relationTargetId(rel)))}</div>
+        </div>`).join("") || '<div class="row"><div>暂无关系</div><div></div><div></div></div>'}</div>
+      </div></foreignObject>`;
+    }
+
+    function initialPosition(node, index, count, width, height) {
+      const saved = positions.get(node.id);
+      if (saved) return saved;
+      const angle = (Math.PI * 2 * index) / Math.max(count, 1);
+      const radius = node.type === "chapter" ? 0 : Math.max(130, Math.min(width, height) * (0.25 + (index % 4) * 0.045));
+      const p = { x: width / 2 + Math.cos(angle) * radius, y: height / 2 + Math.sin(angle) * radius, vx: 0, vy: 0, fixed: false };
+      positions.set(node.id, p);
+      return p;
+    }
+
+    function layout(nodes, relations, width, height) {
+      const map = new Map(nodes.map((node, index) => [node.id, initialPosition(node, index, nodes.length, width, height)]));
+      const steps = nodes.length > 240 ? 32 : nodes.length > 160 ? 45 : nodes.length > 100 ? 65 : 90;
+      const pairStride = nodes.length > 240 ? 4 : nodes.length > 160 ? 3 : nodes.length > 100 ? 2 : 1;
+      for (let step = 0; step < steps; step++) {
+        for (let i = 0; i < nodes.length; i++) {
+          for (let j = i + 1; j < nodes.length; j += pairStride) {
+            const a = map.get(nodes[i].id);
+            const b = map.get(nodes[j].id);
+            let dx = b.x - a.x;
+            let dy = b.y - a.y;
+            let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const force = Math.min(900 / (dist * dist), 0.7);
+            dx /= dist; dy /= dist;
+            if (!a.fixed) { a.vx -= dx * force; a.vy -= dy * force; }
+            if (!b.fixed) { b.vx += dx * force; b.vy += dy * force; }
+          }
+        }
+        relations.forEach(rel => {
+          const a = map.get(relationSourceId(rel));
+          const b = map.get(relationTargetId(rel));
+          if (!a || !b) return;
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const target = relationTypeOf(rel) === "contains" ? 110 : 145;
+          const force = (dist - target) * 0.012;
+          dx /= dist; dy /= dist;
+          if (!a.fixed) { a.vx += dx * force; a.vy += dy * force; }
+          if (!b.fixed) { b.vx -= dx * force; b.vy -= dy * force; }
+        });
+        map.forEach(p => {
+          if (p.fixed) return;
+          p.vx += (width / 2 - p.x) * 0.0009;
+          p.vy += (height / 2 - p.y) * 0.0009;
+          p.vx *= 0.82; p.vy *= 0.82;
+          p.x = Math.max(24, Math.min(width - 24, p.x + p.vx));
+          p.y = Math.max(24, Math.min(height - 24, p.y + p.vy));
+        });
+      }
+    }
+
+    function renderSvg(nodes, relations, allowLayout = false) {
+      const svg = document.getElementById("graph-svg");
+      const box = svg.getBoundingClientRect();
+      const width = Math.max(box.width, 680);
+      const height = Math.max(box.height, 560);
+      svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      const signature = `${viewMode}|${nodes.map(n => n.id).join("|")}|${relations.map(r => r.id).join("|")}|${width}|${height}`;
+      if (signature !== layoutSignature || positions.size === 0) {
+        layout(nodes, relations, width, height);
+        layoutSignature = signature;
+      }
+      svg.innerHTML = "";
+
+      const background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      background.setAttribute("x", 0);
+      background.setAttribute("y", 0);
+      background.setAttribute("width", width);
+      background.setAttribute("height", height);
+      background.setAttribute("fill", "transparent");
+      background.onpointerdown = event => startPan(event);
+      svg.appendChild(background);
+
+      const root = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      root.setAttribute("transform", `translate(${viewport.x},${viewport.y}) scale(${viewport.scale})`);
+      svg.appendChild(root);
+
+      relations.forEach(rel => {
+        const a = positions.get(relationSourceId(rel));
+        const b = positions.get(relationTargetId(rel));
+        if (!a || !b) return;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("class", "edge");
+        line.setAttribute("x1", a.x); line.setAttribute("y1", a.y);
+        line.setAttribute("x2", b.x); line.setAttribute("y2", b.y);
+        line.setAttribute("stroke-width", relationTypeOf(rel) === "contains" ? 1.4 : 1.8);
+        line.onclick = event => { event.stopPropagation(); showRelation(rel.id); };
+        root.appendChild(line);
+        if (document.getElementById("relation-filter").value || viewMode === "focus" || relations.length < 120) {
+          const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          text.setAttribute("class", "edge-label");
+          text.setAttribute("x", (a.x + b.x) / 2);
+          text.setAttribute("y", (a.y + b.y) / 2);
+          text.textContent = relationTypeOf(rel).slice(0, 22);
+          root.appendChild(text);
+        }
+      });
+
+      nodes.forEach(node => {
+        const p = positions.get(node.id);
+        const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        group.setAttribute("class", "node" + (selectedId === node.id ? " selected" : ""));
+        group.setAttribute("transform", `translate(${p.x},${p.y})`);
+        group.onpointerdown = event => startNodeDrag(event, node.id);
+        group.onclick = event => {
+          event.stopPropagation();
+          if (Date.now() < suppressNodeClickUntil) return;
+          showNode(node.id);
+        };
+        const hitArea = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+        hitArea.setAttribute("x", -22);
+        hitArea.setAttribute("y", -18);
+        hitArea.setAttribute("width", Math.max(58, plainLatexLabel(labelOf(node)).slice(0, viewMode === "focus" ? 48 : 30).length * 6 + 42));
+        hitArea.setAttribute("height", 34);
+        hitArea.setAttribute("fill", "transparent");
+        hitArea.setAttribute("pointer-events", "all");
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        const degree = relations.filter(r => relationTouchesNode(r, node.id)).length;
+        circle.setAttribute("r", node.type === "chapter" ? 18 : Math.min(18, 8 + degree * 0.8));
+        circle.setAttribute("fill", colors[node.type] || colors.default);
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", 14);
+        text.setAttribute("y", 4);
+        text.textContent = plainLatexLabel(labelOf(node)).slice(0, viewMode === "focus" ? 48 : 30);
+        group.appendChild(hitArea);
+        group.appendChild(circle);
+        group.appendChild(text);
+        root.appendChild(group);
+      });
+
+      svg.onwheel = event => {
+        event.preventDefault();
+        zoomBy(event.deltaY < 0 ? 1.12 : 0.88, event);
+      };
+    }
+
+    function scheduleSvgRender() {
+      if (svgFrameRequested) return;
+      svgFrameRequested = true;
+      requestAnimationFrame(() => {
+        svgFrameRequested = false;
+        renderSvg(visible.nodes, visible.relations);
+      });
+    }
+
+    function startNodeDrag(event, nodeId) {
+      event.preventDefault();
+      event.stopPropagation();
+      const p = positions.get(nodeId);
+      p.fixed = true;
+      dragState = { nodeId, startX: event.clientX, startY: event.clientY, x: p.x, y: p.y, moved: false };
+      window.onpointermove = moveNodeDrag;
+      window.onpointerup = stopNodeDrag;
+    }
+
+    function moveNodeDrag(event) {
+      if (!dragState) return;
+      const dx = event.clientX - dragState.startX;
+      const dy = event.clientY - dragState.startY;
+      if (Math.hypot(dx, dy) > clickMoveTolerance) dragState.moved = true;
+      const p = positions.get(dragState.nodeId);
+      p.x = dragState.x + dx / viewport.scale;
+      p.y = dragState.y + dy / viewport.scale;
+      scheduleSvgRender();
+    }
+
+    function stopNodeDrag(event) {
+      if (!dragState) return;
+      const finishedDrag = dragState;
+      const dx = event ? event.clientX - finishedDrag.startX : 0;
+      const dy = event ? event.clientY - finishedDrag.startY : 0;
+      const moved = finishedDrag.moved || Math.hypot(dx, dy) > clickMoveTolerance;
+      dragState = null;
+      window.onpointermove = null;
+      window.onpointerup = null;
+      if (moved) {
+        suppressNodeClickUntil = Date.now() + 250;
+      } else {
+        showNode(finishedDrag.nodeId);
+      }
+    }
+
+    function startPan(event) {
+      if (viewMode === "table") return;
+      event.preventDefault();
+      panState = {
+        startX: event.clientX,
+        startY: event.clientY,
+        x: viewport.x,
+        y: viewport.y
+      };
+      window.onpointermove = movePan;
+      window.onpointerup = stopPan;
+    }
+
+    function movePan(event) {
+      if (!panState) return;
+      viewport.x = panState.x + event.clientX - panState.startX;
+      viewport.y = panState.y + event.clientY - panState.startY;
+      scheduleSvgRender();
+    }
+
+    function stopPan() {
+      panState = null;
+      window.onpointermove = null;
+      window.onpointerup = null;
+    }
+
+    function zoomBy(multiplier, event = null) {
+      const svg = document.getElementById("graph-svg");
+      const box = svg.getBoundingClientRect();
+      const oldScale = viewport.scale;
+      const nextScale = Math.max(0.25, Math.min(4.0, oldScale * multiplier));
+      const cx = event ? event.clientX - box.left : box.width / 2;
+      const cy = event ? event.clientY - box.top : box.height / 2;
+      const graphX = (cx - viewport.x) / oldScale;
+      const graphY = (cy - viewport.y) / oldScale;
+      viewport.scale = nextScale;
+      viewport.x = cx - graphX * nextScale;
+      viewport.y = cy - graphY * nextScale;
+      scheduleSvgRender();
+    }
+
+    function forceRelayout() {
+      positions.clear();
+      layoutSignature = "";
+      render();
+    }
+
+    function showFormulaRelations() {
+      document.getElementById("search").value = "";
+      document.getElementById("type-filter").value = "";
+      document.getElementById("relation-filter").value = "references_formula";
+      document.getElementById("max-nodes").value = "220";
+      positions.clear();
+      layoutSignature = "";
+      setView("network");
+    }
+
+    function resetView() {
+      viewport = { scale: 1, x: 0, y: 0 };
+      positions.clear();
+      layoutSignature = "";
+      render();
+    }
+
+    async function showNode(nodeId) {
+      selectedId = nodeId;
+      render();
+      const response = await fetch(`/api/node?node_id=${encodeURIComponent(nodeId)}`);
+      const result = await response.json();
+      const node = result.node || {};
+      const metadata = node.metadata || {};
+      const relResponse = await fetch(`/api/relations?node_id=${encodeURIComponent(nodeId)}`);
+      const relResult = await relResponse.json();
+      const relations = (relResult.relations || []).map(normalizeRelation);
+      document.getElementById("detail-content").innerHTML = `
+        <div class="muted">${esc(node.id)}</div>
+        <label>节点名称</label>
+        <input id="node-label" value="${esc(metadata.label || node.label || node.id)}" oninput="updateNodeLabelPreview()">
+        <div class="preview-heading"><span>名称预览（LaTeX）</span></div>
+        <div id="node-label-preview" class="math-preview">${renderRichLabel(metadata.label || node.label || node.id)}</div>
+        <label>节点内容</label>
+        <textarea id="node-content" data-node-type="${esc(node.type || "")}" oninput="updateNodeContentPreview()">${esc(node.content || "")}</textarea>
+        <div class="preview-heading"><span>内容预览（Markdown / LaTeX）</span><span class="muted">编辑时实时更新</span></div>
+        <div id="node-content-preview" class="math-preview"></div>
+        <button class="primary" onclick="saveNode('${js(node.id)}')">保存节点</button>
+        <label>关联关系</label>
+        <div>${relations.map(r => relationRow(nodeId, r)).join("") || '<div class="muted">暂无关系</div>'}</div>
+      `;
+      refreshDetailPreviews();
+      renderSvg(visible.nodes, visible.relations);
+    }
+
+    function relationRow(nodeId, relation) {
+      const sourceId = relationSourceId(relation);
+      const targetId = relationTargetId(relation);
+      const other = sourceId === nodeId ? targetId : sourceId;
+      const sourceMark = (relation.metadata && relation.metadata.relation_source) ? ` / ${relation.metadata.relation_source}` : "";
+      return `<div class="relation-row">
+        <div><b>${esc(relationTypeOf(relation))}${esc(sourceMark)}</b><br><span class="muted">${renderRichLabel(labelOf(other))}</span></div>
+        <button onclick="showRelation('${js(relation.id)}')">编辑</button>
+      </div>`;
+    }
+
+    function showRelation(relationId) {
+      const relation = graph.relations.find(r => r.id === relationId);
+      if (!relation) return;
+      selectedId = relationId;
+      const metadata = relation.metadata || {};
+      document.getElementById("detail-content").innerHTML = `
+        <div class="muted">${esc(relation.id)}</div>
+        <label>源节点</label><input id="rel-source" value="${esc(relationSourceId(relation))}">
+        <label>目标节点</label><input id="rel-target" value="${esc(relationTargetId(relation))}">
+        <label>关系类型</label><input id="rel-type" value="${esc(relationTypeOf(relation))}">
+        <label>关系说明</label><textarea id="rel-description" oninput="updateRelationDescriptionPreview()">${esc(metadata.description || "")}</textarea>
+        <div class="preview-heading"><span>关系说明预览（Markdown / LaTeX）</span></div>
+        <div id="rel-description-preview" class="math-preview">${renderContentPreview(metadata.description || "")}</div>
+        <button class="primary" onclick="saveRelation('${js(relation.id)}')">保存关系</button>
+      `;
+      refreshDetailPreviews();
+    }
+
+    async function saveNode(nodeId) {
+      const node = graph.nodes.find(n => n.id === nodeId);
+      const metadata = Object.assign({}, node && node.metadata || {}, { label: document.getElementById("node-label").value });
+      const response = await fetch("/api/update-node", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ node_id: nodeId, content: document.getElementById("node-content").value, metadata })
+      });
+      const result = await response.json();
+      document.getElementById("status").textContent = result.success ? "节点已保存" : result.error;
+      await loadGraph();
+      showNode(nodeId);
+    }
+
+    async function saveRelation(relationId) {
+      const response = await fetch("/api/update-relation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          relation_id: relationId,
+          source_id: document.getElementById("rel-source").value,
+          target_id: document.getElementById("rel-target").value,
+          relation_type: document.getElementById("rel-type").value,
+          metadata: { description: document.getElementById("rel-description").value }
+        })
+      });
+      const result = await response.json();
+      document.getElementById("status").textContent = result.success ? "关系已保存" : result.error;
+      await loadGraph();
+      showRelation(relationId);
+    }
+
+    window.addEventListener("resize", scheduleRender);
+    window.addEventListener("load", refreshDetailPreviews);
+    loadGraph().catch(error => {
+      document.getElementById("status").textContent = error.message;
+    });
+  </script>
+</body>
+</html>

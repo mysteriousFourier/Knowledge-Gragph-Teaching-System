@@ -1,0 +1,277 @@
+{
+  "id": "chapter6_004",
+  "metadata": {
+    "chapter": "chapter6",
+    "section": "Chapter 6: Theorems of Natural Selection",
+    "subsections": [
+      "Price's Theorem, $R_{z} = \\sigma(w_{i}, z_{i}) + E(w_{i}\\bar{\\delta}_{i})$"
+    ],
+    "source_file": "chapter6原文.json",
+    "source_title": "Evolution and Selection of Quantitative Traits",
+    "formula_references": [
+      "6.1",
+      "6.10",
+      "6.2a",
+      "6.2b",
+      "6.38",
+      "6.3a",
+      "6.3b",
+      "6.4",
+      "6.5a",
+      "6.5b",
+      "6.6",
+      "6.7a",
+      "6.7b",
+      "6.7c",
+      "6.8",
+      "6.9a",
+      "6.9b"
+    ],
+    "table_references": [
+      "6.1",
+      "inline_1"
+    ]
+  },
+  "blocks": [
+    {
+      "type": "proposition",
+      "content": "Price's theorem expresses the expected selection response in a trait in general terms of covariances, rather than relying on any explicit model of transmission, and as such is a completely general description of any evolutionary response. As succinctly stated by Rice (2004a, p.170), \"it is an exact characterization of a relationship that must hold between phenotype, fitness, selection, and evolution.\" The key to Price's equation is to first consider the effect of selection on specific categories (measured by how many descendants each leaves) and then consider how trait values may differ between an ancestral category and its descendants. This is an extremely subtle shift in focus, one that is easy to miss and misinterpret. However, this perspective nicely decomposes the evolutionary change $ ( R_{z} ) $ into a selection term and a remainder term due to all other forces, such as (but not limited to) imperfect transmission."
+    },
+    {
+      "type": "derivation",
+      "content": "Consider selection first. Suppose there are N categories in the population, where $ q_{i} $ and $ z_{i} $ , respectively, denote the frequency of category i and the mean value for the trait of interest over all members of this category. Note that z can be any trait measure. For example, if x denotes the value of a trait, taking $ z=(x-\\mu_{x})^{2} $ or $ z=(x-\\mu_{x})^{4} $ gives the response in the variance and the fourth moment, respectively. Averaging over all categories, the mean trait value is"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.1]]"
+    },
+    {
+      "type": "proposition",
+      "content": "Suppose that the members of category i leave a total of $ n_{i} $ descendants (the absolute fitness, $ W_{i} $ for that category). The average number of descendants over categories (the mean fitness) is"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.2a]]"
+    },
+    {
+      "type": "proposition",
+      "content": "The relative fitness of category $i$ is $w_{i} = W_{i} / \\overline{W}$."
+    },
+    {
+      "type": "proposition",
+      "content": "Price's key idea was to define $ q_{i}^{\\prime} $ as the frequency of all descendants that have category i as their ancestor"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.2b]]"
+    },
+    {
+      "type": "proposition",
+      "content": "Note, in particular, that $ q_{i}^{\\prime} $ is not the frequency of descendants in category i, but rather the fraction of all descendants that are from ancestors in category i. The focus is entirely on the categories of ancestors, not on which categories the descendants are in. As an example of this shift in focus, suppose our three categories of interest are the genotypes AA, Aa, and aa at a diallelic locus. In a traditional population-genetics analysis (Chapter 5), we would write equations to describe how the frequency of each category changes. Price used a different focus, considering instead the frequency of the descendants that come from each category. Suppose category i = 2 corresponds to Aa and imagine an extreme case where only Aa individuals survive. Here $ q_{2}^{\\prime}=1 $ , as all offspring have Aa parents. However, in the next generation (before selection), segregation results in the genotypes AA, Aa, and aa at the frequencies 0.25, 0.5, and 0.25, i.e., all three categories are present in the offspring, but all have only Aa parents."
+    },
+    {
+      "type": "proposition",
+      "content": "Now consider the transmission phase (which more generally includes everything other than selection). Let $ \\overline{z}_{i} $ denote the mean value of the descendants from category i, which we can decompose as"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.3a]]"
+    },
+    {
+      "type": "proposition",
+      "content": "namely, the mean value, $ z_{i} $ of their ancestors plus a deviation, $ \\overline{\\delta}_{i} $ , due to imperfect transmission. Taking the average over all ancestral categories, the average trait value over all the descendants becomes"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.3b]]"
+    },
+    {
+      "type": "derivation",
+      "content": "Recalling Equations [[SEE_FORMULA:6.1]], [[SEE_FORMULA:6.2b]], and [[SEE_FORMULA:6.3b]], the response in trait value, $ R_{z}=\\overline{z}^{\\prime}-\\overline{z} $ ,becomes"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.4]]"
+    },
+    {
+      "type": "proposition",
+      "content": "The second line follows by adding and subtracting $ \\sum q_{i}^{\\prime} z_{i} $ , and the third by suitably gathering terms. This version of the Price equation is based on Frank (1997, 2012). The first term (containing $ \\Delta q_{i} z_{i} $ ) represents the change due to selection based entirely on ancestral values, or the partial evolutionary change caused by natural selection (Price 1972b; Ewens 1989; Frank 2012). The second term (containing $ q_{i}^{\\prime} \\overline{\\delta}_{i} $ ) is the part of total change caused by imperfect transmission of ancestral values to their descendants. Equation [[SEE_FORMULA:6.4]] is conceptually very powerful, as it decomposes the response into two separate components, one strictly based on the nature of selection $ (\\Delta q_{i}) $ and the other on transmission $ (\\overline{\\delta}_{i}). $"
+    },
+    {
+      "type": "proposition",
+      "content": "Both these terms can be expressed in a more transparent form. For the first term,"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.5a]]"
+    },
+    {
+      "type": "proposition",
+      "content": "Note that to obtain this result, we use the identity $ E(w)=1 $ . For the second term,"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.5b]]"
+    },
+    {
+      "type": "derivation",
+      "content": "Substituting Equations [[SEE_FORMULA:6.5a]] and [[SEE_FORMULA:6.5b]] into Equation [[SEE_FORMULA:6.4]] yields the more traditional form of the Price equation,"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.6]]"
+    },
+    {
+      "type": "proposition",
+      "content": "(Price 1970, 1972a). Note that all expectations are computed with respect to the pre-selection frequencies of the ancestral categories $ ( q_{i} ) $ . The first term is the covariance between phenotype and fitness (the within-generation change, S, in the mean of ancestral values), while the second is the fitness-weighted transmission of any changes between the value of an ancestor and the mean of its descendants."
+    },
+    {
+      "type": "proposition",
+      "content": "Several equivalent expressions for the Price equation are useful in that they emphasize different features. For example, using the definition of a covariance"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.7a]]"
+    },
+    {
+      "type": "derivation",
+      "content": "and substituting this result into Equation [[SEE_FORMULA:6.6]] yields"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.7b]]"
+    },
+    {
+      "type": "derivation",
+      "content": "Using Equation [[SEE_FORMULA:6.3a]] to combine the first two covariances in Equation [[SEE_FORMULA:6.7b]] gives"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.7c]]"
+    },
+    {
+      "type": "proposition",
+      "content": "Equation [[SEE_FORMULA:6.7c]] relates the selection response to the covariance between the fitness, $ w_{i} $ of an ancestor and the mean value, $ \\overline{z}_{i} $ of its descendants. The second term, $ E(\\overline{\\delta}_{i}) $ , is often thought"
+    },
+    {
+      "type": "proposition",
+      "content": "of as the expected change in mean value from ancestor to descendant in the absence of selection. As we will see at the end of the chapter, this interpretation is not quite correct, as this last term does contain a contribution from selection (Equation [[SEE_FORMULA:6.38]])."
+    },
+    {
+      "type": "proposition",
+      "content": "To summarize, if $ z_{i} $ denotes the average value in category i, which has a frequency of $ q_{i} $ before selection and a frequency of $ q_{i}^{\\prime} $ after selection, and whose offspring have average value $ \\overline{z}_{i}=z_{i}+\\overline{\\delta}_{i} $ , then equivalent forms of Price's theorem are"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.8]]"
+    },
+    {
+      "type": "derivation",
+      "content": "As noted in [[SEE_TABLE:6.1]], and as will be shown shortly (Equation [[SEE_FORMULA:6.10]]), the selection differential, S, can be substituted for $ \\sigma(w_{i}, z_{i}) $ in the middle two expressions of Equation [[SEE_FORMULA:6.8]]. As is further shown below, many of the standard approximations for evolutionary response (e.g., the breeder's equation, Fisher's fundamental theorem, Robertson's secondary theorem) follow directly from the $ \\sigma(w_{i}, z_{i}) $ selection term under the assumption that the residual term $ E(w_{i}\\overline{\\delta}_{i}) $ is zero. Hence, these approximations fail when this term is significant."
+    },
+    {
+      "type": "proposition",
+      "content": "While a discussion of Price's theorem often assumes the ancestor to be a parent or midparent and the descendants to be their offspring in the next generation, the theorem holds for any time interval and for any set of ancestors (such as a group of individuals; Chapter 22) that one wishes to consider. In this sense, Price's theorem is completely general and makes absolutely no assumptions about the mechanism of transmission of trait values from ancestors to their descendants, although it does make the assumption that all descendants have ancestors. This may seem trivial, but it is violated by migration, wherein an individual appears in the next generation from ancestors not considered. Kerr and Godfrey-Smith (2008) generalized the Price equation to accommodate missing ancestors and more general causal connections between ancestors and descendants."
+    },
+    {
+      "type": "proposition",
+      "content": "Example 6.1. Let the ancestor (i) be the midparent (the average value of the two parents) with a phenotypic value of $ z_{i} $ and the descendants be the offspring in the next generation. If the average value of offspring, $ \\overline{z}_{i} $ is exactly the same as the value, $ z_{i} $ of their ancestral midparent, then $ \\overline{\\delta}_{i}=0 $ for all i and, from Equation [[SEE_FORMULA:6.6]], the response is simply $ R=\\sigma(w_{i},z_{i}) $ . From the Robertson-Price identity ([[SEE_TABLE:6.1]], Equation [[SEE_FORMULA:6.10]]), $ \\sigma(w_{i},z_{i})=S $ , the selection differential, so that $ R=S $ in this case of perfect transmission. However, the mean value of offspring generally differs from the average value of their parents, in which case the second term in Equation [[SEE_FORMULA:6.6]] is nonzero. The simplest transmission model is a linear midparent-offspring regression, $ z_{ij}=\\mu+b(z_{i}-\\mu)+e_{ij} $ . Here $ z_{ij} $ is the trait value for the jth offspring from midparent i, giving the mean value of offspring from i as $ \\overline{z}_{i}=\\mu+b(z_{i}-\\mu)+e_{i} $ . The expected deviation then becomes"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.9a]]"
+    },
+    {
+      "type": "derivation",
+      "content": "Hence,"
+    },
+    {
+      "type": "derivation",
+      "content": "$$ \\begin{array}{l} E \\left(w _ {i} \\bar {\\delta} _ {i}\\right) = E \\left\\{w _ {i} \\left[ (b - 1) \\left(z _ {i} - \\mu\\right) + e _ {i} \\right] \\right\\} \\\\ = (b - 1) \\left[ E \\left(w _ {i} z _ {i}\\right) - \\mu E \\left(w _ {i}\\right) \\right] + E \\left(w _ {i} e _ {i}\\right) \\\\ \\end{array} $$"
+    },
+    {
+      "type": "derivation",
+      "content": "Recalling that $ E ( w_{i} )=1 $ gives"
+    },
+    {
+      "type": "derivation",
+      "content": "$$ E \\left(w _ {i} \\bar {\\delta} _ {i}\\right) = (b - 1) \\left[ E \\left(w _ {i} z _ {i}\\right) - \\mu \\right] + E \\left(w _ {i} e _ {i}\\right) $$"
+    },
+    {
+      "type": "derivation",
+      "content": "From the definition of a covariance"
+    },
+    {
+      "type": "derivation",
+      "content": "$$ E \\left(w _ {i} z _ {i}\\right) = \\sigma \\left(w _ {i}, z _ {i}\\right) + E \\left(w _ {i}\\right) E \\left(z _ {i}\\right) = S + 1 \\cdot \\mu $$"
+    },
+    {
+      "type": "derivation",
+      "content": "$$ E \\left(w _ {i} e _ {i}\\right) = \\sigma \\left(w _ {i}, e _ {i}\\right) + E \\left(w _ {i}\\right) E \\left(e _ {i}\\right) = \\sigma \\left(w _ {i}, e _ {i}\\right) + 1 \\cdot 0 $$"
+    },
+    {
+      "type": "derivation",
+      "content": "Putting these results together into Equation [[SEE_FORMULA:6.6]] yields"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.9b]]"
+    },
+    {
+      "type": "proposition",
+      "content": "Provided that the residual, $ e_{i} $ of the midparent-offspring regression and the fitness, $ w_{i} $ of the midparent are uncorrelated, $ R=bS $ . When these are uncorrelated and the midparent-offspring slope equals the heritability, $ b=h^{2} $ , we recover the breeder's equation. While at first blush Equation [[SEE_FORMULA:6.9b]] appears to be a rather general statement about the accuracy of the breeder's equation, we made a few subtle assumptions (besides the obvious one of linearity) about the parent-offspring relationship, although we will defer discussion of these until later sections of this chapter."
+    },
+    {
+      "type": "proposition",
+      "content": "Example 6.2. Consider the change in allele frequency when a single diallelic locus (alleles A and a) determines fitness. Assume random mating among the survivors, with $ p=\\mathrm{freq}(A) $ , and"
+    },
+    {
+      "type": "proposition",
+      "content": "To apply Price's theorem, we need to specify the categories to be followed, which we take as the alleles A and a. We index these by i=1 and i=2, respectively, and code their associated values as $ z_{1}=1 $ and $ z_{2}=0 $ , which implies a mean value of $ \\overline{z}=(1\\cdot p)+(0\\cdot[1-p])=p $ so $ R_{z} $ represents the change in p. In the absence of mutation, transmission is perfect, as the descendant allele from an A allele is always A, resulting in $ \\overline{\\delta}_{i}=0 $ . Putting these together, Equation [[SEE_FORMULA:6.6]] becomes"
+    },
+    {
+      "type": "derivation",
+      "content": "$$ \\Delta p = R _ {z} = \\sigma \\left(w _ {i}, z _ {i}\\right) + E \\left(w _ {i} \\cdot 0\\right) = \\sigma \\left(w _ {i}, z _ {i}\\right) $$"
+    },
+    {
+      "type": "derivation",
+      "content": "Under random mating, the fitness $ W_{1} $ of an A allele is simply its marginal fitness (Equation 5.7b), $ W_{1}=pW_{AA}+(1-p)W_{Aa} $ . Similarly, $ W_{2}=pW_{Aa}+(1-p)W_{aa} $ and $ E(W_{i})= $ $ \\overline{W}=pW_{1}+(1-p)W_{2} $ . Recalling that $ w_{i}=W_{i} / \\overline{W} $ and the definition of a covariance, we have"
+    },
+    {
+      "type": "derivation",
+      "content": "$$ \\Delta p = \\sigma \\left(w _ {i}, z _ {i}\\right) = \\frac {\\sigma \\left(W _ {i} , z _ {i}\\right)}{\\overline {{W}}} = \\frac {1}{\\overline {{W}}} \\left(E \\left(W _ {i} z _ {i}\\right) - E \\left(W _ {i}\\right) E \\left(z _ {i}\\right)\\right) $$"
+    },
+    {
+      "type": "proposition",
+      "content": "To show that this recovers the standard population-genetic equation for allele-frequency change, note that"
+    },
+    {
+      "type": "derivation",
+      "content": "$$ E \\left(W _ {i} z _ {i}\\right) = \\sum_ {i = 1} ^ {2} W _ {i} z _ {i} \\operatorname {f r e q} (\\operatorname {c a t e g o r y} i) = \\left[ W _ {1} \\cdot 1 \\cdot p \\right] + \\left[ W _ {2} \\cdot 0 \\cdot (1 - p) \\right] = p \\cdot W _ {1} $$"
+    },
+    {
+      "type": "proposition",
+      "content": "Using this result along with $ E ( W_{i} )=\\overline{W} $ and $ E ( z_{i} )=p $"
+    },
+    {
+      "type": "derivation",
+      "content": "$$ \\Delta p = \\frac {1}{\\overline {{W}}} \\left(p W _ {1} - \\overline {{W}} p\\right) = p \\frac {\\left(W _ {1} - \\overline {{W}}\\right)}{\\overline {{W}}} $$"
+    },
+    {
+      "type": "proposition",
+      "content": "which recovers Equation 5.7c."
+    },
+    {
+      "type": "proposition",
+      "content": "$ \\mu_{z}^{*} $ and the overall mean before selection, $ \\mu_{z} $ , which is the selection differential S (Chapter 13). Because the within-generation change is not influenced by cross-generation transmission, any terms involving $ \\bar{\\delta} $ in Equation [[SEE_FORMULA:6.6]] are zero, and we recover the Robertson-Price identity"
+    },
+    {
+      "type": "derivation",
+      "content": "[[FORMULA:6.10]]"
+    },
+    {
+      "type": "proposition",
+      "content": "as first obtained by Robertson (1966a) and Price (1970). We derive this result by another route in Chapter 13, where we use this identity extensively in selection-response theory. The critical insight from Equation [[SEE_FORMULA:6.10]] is that no matter how complex the relationship between phenotype z and fitness w, the within-generation change in the mean only depends on the covariance between these measures."
+    }
+  ]
+}

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LaTeX Beamer 演示文稿生成器</title>
+  <link rel="stylesheet" href="/beamer-generator/static/style.css?v=20260522-ppt-edit-fix-v12">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+</head>
+<body>
+
+<div class="container">
+  <div class="panel panel-input">
+    <div class="form-row">
+      <div class="form-group">
+        <label for="style">风格</label>
+        <select id="style">
+          <option value="academic" selected>学术报告</option>
+          <option value="business">商务汇报</option>
+          <option value="minimal">极简风格</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="slideCount">目标页数</label>
+        <input type="number" id="slideCount" value="0" min="0" max="50" />
+        <small>0 = 自动</small>
+      </div>
+      <div class="form-group">
+        <label for="language">语言</label>
+        <select id="language">
+          <option value="auto" selected>自动检测</option>
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="customRequirements">自定义要求（可选）</label>
+      <textarea id="customRequirements" rows="4"
+        placeholder="输入演示文稿生成要求，例如页数节奏、公式展示方式、重点概念等。"></textarea>
+      <small>要求会和导入的 Markdown 知识图谱一起发送给 AI。</small>
+    </div>
+
+    <div class="form-group">
+      <label>Markdown 知识图谱内容</label>
+      <div class="saved-lecture-picker">
+        <select id="savedLectureSelect" style="display:none;">
+          <option value=""></option>
+        </select>
+        <button id="btnRefreshSavedLectures" type="button" class="btn-secondary" style="display:none;">刷新</button>
+        <button id="btnImportMarkdown" type="button" class="btn-secondary">导入 MD 知识图谱</button>
+        <button id="btnImportGraphPackage" type="button" class="btn-secondary">上传图片包</button>
+      </div>
+      <textarea id="content" class="source-content-store" aria-hidden="true" tabindex="-1"></textarea>
+      <div class="lecture-preview-box">
+        <div class="lecture-preview-title-row">
+          <div class="lecture-preview-title">Markdown 预览</div>
+          <button id="btnTogglePackageImages" type="button" class="btn-secondary" disabled>展开图片</button>
+      </div>
+      <div id="contentPreview" class="math-preview muted">导入 .md/.markdown 知识图谱文件后，内容会显示在这里。</div>
+      <div id="packageImagePanel" class="package-image-panel" style="display:none;">
+        <button type="button" class="package-image-panel-close" data-action="close-package-image-panel" aria-label="关闭图片预览">×</button>
+        <div id="packageImageGrid" class="package-image-grid"></div>
+      </div>
+    </div>
+  </div>
+
+    <button id="btnGenerate" class="btn-primary">生成演示文稿</button>
+  </div>
+
+  <div class="resize-handle" id="mainResizeHandle" title="拖拽调整左右区域宽度" aria-label="拖拽调整左右区域宽度">
+    <span class="resize-handle-grip"></span>
+    <button id="btnToggleInputPanel" type="button" class="input-collapse-toggle" aria-label="Collapse left panel" title="Collapse left panel">&lt;&lt;</button>
+  </div>
+
+  <div class="panel panel-output">
+    <div class="output-header">
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="latex">LaTeX 代码</button>
+        <button class="tab-btn" data-tab="ppt" id="tabPpt" disabled>PPT 编辑</button>
+      </div>
+      <div class="output-actions">
+        <div class="latex-actions">
+          <button id="btnCopy" class="btn-secondary" disabled>复制代码</button>
+          <button id="btnDownloadTex" class="btn-secondary" disabled>下载 .tex</button>
+          <button id="btnConvertPpt" class="btn-accent" disabled>转换为 PPT</button>
+        </div>
+        <div class="ppt-actions" style="display:none;">
+          <button id="btnAddSlide" class="btn-secondary">添加页面</button>
+          <button id="btnDownloadPptx" class="btn-accent">下载 .pptx</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="viewLatex" class="view-panel active">
+      <div id="status" class="status latex-status"></div>
+      <div id="editorWrapper">
+        <textarea id="editor"></textarea>
+      </div>
+    </div>
+
+    <div class="inner-resize-handle" id="innerResizeHandle" title="拖动调整左右板块宽度" aria-label="拖动调整左右板块宽度" style="display:none;">
+      <span class="resize-handle-grip"></span>
+    </div>
+
+    <div id="viewPpt" class="view-panel" style="display:none;">
+      <div class="ppt-editor">
+        <div class="slide-list" id="slideList"></div>
+        <div class="slide-editor" id="slideEditor">
+          <div class="slide-canvas" id="slideCanvas">
+            <div class="slide-placeholder">点击左侧幻灯片或点击“转换为 PPT”开始编辑</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="imageUploader" accept="image/*" style="display:none;" />
+<input type="file" id="markdownImporter" accept=".md,.markdown,text/markdown,text/x-markdown" style="display:none;" />
+<input type="file" id="graphPackageImporter" accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.bmp" webkitdirectory multiple style="display:none;" />
+
+<div id="packageImageViewer" class="package-image-viewer" style="display:none;" role="dialog" aria-modal="true" aria-label="图片预览">
+  <div class="package-image-viewer-backdrop"></div>
+  <div class="package-image-viewer-dialog">
+    <button type="button" class="package-image-viewer-close" data-action="close-package-image-viewer" aria-label="关闭">×</button>
+    <img id="packageImageViewerImage" class="package-image-viewer-image" alt="" />
+    <div id="packageImageViewerCaption" class="package-image-viewer-caption"></div>
+  </div>
+</div>
+
+<div id="figureHoverPreview" class="figure-hover-preview" style="display:none;" aria-hidden="true">
+  <div class="figure-hover-preview-inner">
+    <img id="figureHoverPreviewImage" class="figure-hover-preview-image" alt="" />
+    <div class="figure-hover-preview-meta">
+      <div id="figureHoverPreviewLabel" class="figure-hover-preview-label"></div>
+      <div id="figureHoverPreviewCaption" class="figure-hover-preview-caption"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/stex/stex.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script src="/beamer-generator/static/app.js?v=20260522-ppt-edit-fix-v12"></script>
+
+</body>
+</html>

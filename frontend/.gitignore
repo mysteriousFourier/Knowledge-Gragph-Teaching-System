@@ -1,0 +1,119 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+*.secret
+*.secrets
+*secret*.json
+*secret*.yaml
+*secret*.yml
+*credentials*.json
+*credentials*.yaml
+*credentials*.yml
+*.token
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+
+# Runtime/generated state
+.runtime/
+logs/
+*.log
+*.db
+*.db-shm
+*.db-wal
+*.faiss
+*.index
+*.pkl
+*.pickle
+*.graphml
+
+# Large local models and data
+models/
+memory_systems/
+vector_index/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+~$*
+
+# AI/coding assistants and local tool state
+.claude/
+.claude.json
+.claude.local.json
+.codex/
+.cursor/
+.continue/
+.windsurf/
+.aider*
+.roo/
+.cline/
+.gemini/
+.qwen/
+.kilo/
+.augment/
+.mcp.json
+mcp.json
+claude_desktop_config.json
+
+# IDE and OS files
+.history/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Research papers and local-only reference documents
+*.pdf
