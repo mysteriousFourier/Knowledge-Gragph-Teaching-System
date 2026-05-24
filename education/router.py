@@ -47,6 +47,7 @@ from KGTS.education.kg_constraints import (
     evidence_from_graph,
     format_evidence,
     expand_formula_references,
+    graph_paths_for_evidence,
 )
 from KGTS.config import load_root_env
 from KGTS.education.exercise_helpers import _normalize_exercise_bank
@@ -68,6 +69,62 @@ from KGTS.education.beamer_conversion import (
 load_root_env()
 
 router = APIRouter(prefix="/api", tags=["education"])
+
+
+def _build_ppt_learning_plan(
+    *,
+    chapter_title: str = "",
+    chapter_content: str = "",
+    graph_data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build a compact KG plan for PPT slide/chapter content."""
+    graph_data = graph_data if isinstance(graph_data, dict) else {"nodes": [], "relations": []}
+    slide_text = " ".join(part for part in [chapter_title, chapter_content] if part).strip()
+    evidence: List[Dict[str, Any]] = []
+    if slide_text:
+        evidence.append(
+            {
+                "id": "ppt_slide::current",
+                "name": chapter_title or "PPT slide",
+                "type": "ppt_slide",
+                "content": chapter_content,
+                "source": "ppt",
+            }
+        )
+
+    graph_evidence = evidence_from_graph(
+        graph_data,
+        query=slide_text,
+        chapter_data={"title": chapter_title, "content": chapter_content},
+        limit=8,
+    )
+    evidence.extend(graph_evidence)
+    paths = graph_paths_for_evidence(graph_data, evidence)
+    return {
+        "task": "ppt_learning_plan",
+        "allowed_concepts": [
+            {
+                "id": item.get("id"),
+                "name": item.get("name") or item.get("label") or item.get("title") or item.get("id"),
+                "type": item.get("type"),
+            }
+            for item in evidence
+            if item.get("id") and item.get("type") != "ppt_slide"
+        ],
+        "evidence": evidence,
+        "learning_intent_graph": {
+            "nodes": [
+                {
+                    "id": item.get("id"),
+                    "label": item.get("name") or item.get("label") or item.get("id"),
+                    "type": item.get("type"),
+                }
+                for item in evidence
+                if item.get("id")
+            ],
+            "edges": paths,
+        },
+    }
 
 
 def _read_env_file_values() -> dict[str, str]:

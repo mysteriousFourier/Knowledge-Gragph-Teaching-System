@@ -1,4 +1,4 @@
-$(function () {
+﻿$(function () {
   "use strict";
 
   var editor = CodeMirror.fromTextArea(document.getElementById("editor"), {
@@ -26,7 +26,52 @@ $(function () {
   var redoStack = [];
   var historyLock = false;
   var HISTORY_LIMIT = 4;
+  var REVIEW_BACKGROUND_LATEX_PREFIX = [
+    "{",
+    "% 设置全页背景：灰色 + 中心白色渐变矩形",
+    "\\setbeamertemplate{background}{%",
+    "  \\begin{tikzpicture}[remember picture, overlay]",
+    "    \\def\\topheight{1cm}             %顶部灰色块保留高度",
+    "    \\def\\height{2cm}               % 梯形高度",
+    "    \\def\\backcolor{gray!30}",
+    "    \\def\\frontcolor{white}",
+    "    \\fill[\\backcolor] (current page.south west) rectangle (current page.north east);",
+    "        %\\shade[shading=radial, inner color=white, outer color=red]",
+    "      %({0.5\\paperwidth-7cm}, {0.5\\paperheight-13cm}) rectangle + (14cm,7cm);",
+    "    \\fill[\\frontcolor] ([xshift=0.5\\height, yshift=0.5\\height] current page.south west)",
+    "             rectangle ([xshift=-0.5\\height, yshift=-0.5\\height-\\topheight] current page.north east);",
+    "    % 上底两端：页面左、右边界，距离页面顶部向下 5cm",
+    "    \\coordinate (UL1) at ([yshift=-\\topheight] current page.north west);",
+    "    \\coordinate (UR1) at ([yshift=-\\topheight] current page.north east);",
+    "",
+    "    % 下底两端：从上底两端垂直向下 \\height，再向内缩 \\offset",
+    "    \\coordinate (DL1) at ([xshift=\\height,yshift=-\\height] UL1);",
+    "    \\coordinate (DR1) at ([xshift=-\\height,yshift=-\\height] UR1);",
+    "",
+    "    \\coordinate (DL2) at (current page.south west);                     % 下底左端",
+    "    \\coordinate (DR2) at (current page.south east);           % 下底右端",
+    "    \\coordinate (UL2) at ([xshift=\\height, yshift=\\height] DL2); % 上底左端（向右向上各移 \\h）",
+    "    \\coordinate (UR2) at ([xshift=-\\height, yshift=\\height] DR2);% 上底右端（向左向上各移 \\h）",
+    "    ",
+    "    % 绘制渐变梯形",
+    "    \\shade[top color=\\backcolor, bottom color=\\frontcolor]",
+    "       (UL1) -- (UR1) -- (DR1) -- (DL1) -- cycle;",
+    "    \\shade[top color=\\frontcolor, bottom color=\\backcolor]",
+    "      (UL2) -- (UR2) -- (DR2) -- (DL2) -- cycle;",
+    "    \\shade[left color=\\backcolor, right color=\\frontcolor]",
+    "      (DL2) -- (UL1) -- (DL1) -- (UL2) -- cycle; %左下 -- 左上 -- 右上 -- 右下",
+    "    \\shade[left color=\\frontcolor, right color=\\backcolor]",
+    "      (UR2) -- (DR1) -- (UR1) -- (DR2) -- cycle; %左下 -- 左上 -- 右上 -- 右下",
+    "  \\end{tikzpicture}%",
+    "}",
+    "",
+    "% 复习内容空白幻灯",
+  ].join("\n");
   var savedLectureChapters = [];
+  var savedPptProjects = [];
+  var savedSlideDragPayload = null;
+  var savedPptGalleryManualPosition = null;
+  var slideThumbDragIndex = null;
   var inputCollapsed = localStorage.getItem("bg_input_panel_collapsed") === "1";
   var latexSyncMap = {};
   var latexSyncMarks = [];
@@ -149,12 +194,13 @@ $(function () {
       var rawName = String((img && img.name) || "").toLowerCase();
       var stem = normalizeAssetStem(rawName);
       if (!stem) continue;
-      if (dotted && rawName.indexOf(dotted) !== -1) return img.url;
-      if (dashed && rawName.indexOf(dashed) !== -1) return img.url;
-      if (underscored && rawName.indexOf(underscored) !== -1) return img.url;
-      if (digits && stem.indexOf(digits) !== -1) return img.url;
-      if (compact && stem.indexOf(compact) !== -1) return img.url;
-      if (!best && digits && stem.replace(/figure/g, "").indexOf(digits) !== -1) {
+      var figureNamedFile = rawName.indexOf("figure") !== -1 || rawName.indexOf("fig") !== -1;
+      if (figureNamedFile && dotted && rawName.indexOf(dotted) !== -1) return img.url;
+      if (figureNamedFile && dashed && rawName.indexOf(dashed) !== -1) return img.url;
+      if (figureNamedFile && underscored && rawName.indexOf(underscored) !== -1) return img.url;
+      if (figureNamedFile && digits && stem.indexOf(digits) !== -1) return img.url;
+      if (figureNamedFile && compact && stem.indexOf(compact) !== -1) return img.url;
+      if (!best && figureNamedFile && digits && stem.replace(/figure/g, "").indexOf(digits) !== -1) {
         best = img.url;
       }
     }
@@ -191,20 +237,6 @@ $(function () {
       };
     }
 
-    var refs = collectFigureReferences(source);
-    for (var k = 0; k < refs.length; k++) {
-      var ref = refs[k];
-      var refKey = normalizeFigureLabel(ref);
-      if (figurePreviewMap[refKey]) continue;
-      var matchedUrl = pickPackageImageForFigure(ref);
-      if (!matchedUrl) continue;
-      figurePreviewMap[refKey] = {
-        label: ref,
-        url: matchedUrl,
-        assetUrl: "",
-        caption: ref,
-      };
-    }
   }
 
   function buildFigureAssetPayload() {
@@ -311,7 +343,7 @@ $(function () {
   }
 
   function renderMathText($target, text, options) {
-    var source = String(text || "");
+    var source = repairPptLatexArtifacts(text);
     var opts = options || {};
     $target.empty();
     $target.toggleClass("muted", !source.trim());
@@ -832,17 +864,345 @@ $(function () {
     setStatus("Imported " + files.length + " file(s), " + (data.char_count || content.length) + " chars", "success");
   }
 
+  function buildProjectSavePayload() {
+    if (!slidesData) return null;
+    saveCurrentSlide();
+    syncLatexFromSlides();
+    ensureAllSlideFigurePlaceholders(slidesData);
+    var enteredTitle = ($("#pptChapterTitleInput").val() || "").trim();
+    var chapterTitle = enteredTitle || slidesData.chapter_title || slidesData.title || "未命名章节";
+    slidesData.chapter_title = chapterTitle;
+    return {
+      chapter_id: String(enteredTitle || slidesData.chapter_id || slidesData.id || slidesData.title || "presentation"),
+      chapter_title: String(chapterTitle),
+      title: enteredTitle || slidesData.title,
+      subtitle: slidesData.subtitle,
+      author: slidesData.author,
+      date: slidesData.date,
+      slides: slidesData.slides,
+      figure_assets: buildFigureAssetPayload(),
+      latex: fullLatex || "",
+    };
+  }
+
+  function renderSavedPptProjects() {
+    var $chapter = $("#savedPptChapterSelect");
+    var $slide = $("#savedPptSlideSelect");
+    $chapter.empty().append('<option value="">选择章节</option>');
+    for (var i = 0; i < savedPptProjects.length; i++) {
+      var project = savedPptProjects[i] || {};
+      var label = project.chapter_title || project.title || project.chapter_id || ("章节 " + (i + 1));
+      $chapter.append('<option value="' + i + '">' + escHtml(label) + '</option>');
+    }
+    $slide.empty().append('<option value="">选择页面</option>').prop("disabled", true);
+    $("#btnLoadSavedSlide").prop("disabled", true);
+    $("#savedPptSlideGallery").empty().hide();
+  }
+
+  function loadSavedPptProjects() {
+    $("#btnRefreshSavedPpt").prop("disabled", true).text("读取中...");
+    return fetch("/beamer-generator/api/saved-projects", { headers: { "Accept": "application/json" } })
+      .then(function (resp) {
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        return resp.json();
+      })
+      .then(function (data) {
+        savedPptProjects = Array.isArray(data.projects) ? data.projects : [];
+        renderSavedPptProjects();
+        setStatus("已读取保存内容，共 " + savedPptProjects.length + " 个章节", "success");
+      })
+      .catch(function (err) {
+        savedPptProjects = [];
+        renderSavedPptProjects();
+        setStatus("读取保存内容失败: " + err.message, "error");
+      })
+      .finally(function () {
+        $("#btnRefreshSavedPpt").prop("disabled", false).text("查找已保存内容");
+      });
+  }
+
+  function savedPptProjectData(projectIndex) {
+    var project = savedPptProjects[projectIndex];
+    if (!project || !project.chapter_id) return Promise.reject(new Error("未选择保存章节"));
+    if (project.fullData && Array.isArray(project.fullData.slides)) return Promise.resolve(project.fullData);
+    return fetch("/beamer-generator/api/saved-projects/" + encodeURIComponent(project.chapter_id), {
+      headers: { "Accept": "application/json" },
+    })
+      .then(function (resp) {
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        return resp.json();
+      })
+      .then(function (data) {
+        project.fullData = data || {};
+        project.slides = Array.isArray(project.fullData.slides)
+          ? project.fullData.slides.map(function (slide, idx) {
+              return {
+                page_index: idx,
+                title: (slide || {}).title || ("页面 " + (idx + 1)),
+                type: (slide || {}).type || "content",
+              };
+            })
+          : project.slides;
+        return project.fullData;
+      });
+  }
+
+  function renderSavedSlideMini(slide, pageIndex, className) {
+    slide = slide || {};
+    var items = Array.isArray(slide.items) ? slide.items.slice(0, 4) : [];
+    var equations = Array.isArray(slide.equations) ? slide.equations.slice(0, 2) : [];
+    var callouts = Array.isArray(slide.callouts) ? slide.callouts.slice(0, 3) : [];
+    var images = [];
+    (slide.images || []).forEach(function (img) {
+      var url = (img && (img.url || img.path || img.src)) || "";
+      if (url) images.push(url);
+    });
+    (slide.placeholders || []).forEach(function (ph) {
+      var url = (ph && (ph.asset || ph.url || ph.path)) || "";
+      if (url) images.push(url);
+    });
+    var html = '<div class="saved-slide-mini ' + (slide.reviewBackground ? "review-background " : "") + (className || "") + '">' +
+      '<div class="saved-slide-mini-page">第 ' + (pageIndex + 1) + ' 页</div>' +
+      '<div class="saved-slide-mini-title">' + escHtml(slide.title || "未命名页面") + '</div>' +
+      '<div class="saved-slide-mini-body">';
+    if (images.length) {
+      html += '<div class="saved-slide-mini-images">';
+      images.slice(0, 2).forEach(function (url) {
+        html += '<img src="' + escAttr(url) + '" alt="" />';
+      });
+      html += '</div>';
+    }
+    if (items.length) {
+      html += '<ul>';
+      items.forEach(function (item) {
+        html += '<li>' + escHtml(String(item || "").replace(/\s+/g, " ").slice(0, 80)) + '</li>';
+      });
+      html += '</ul>';
+    }
+    if (equations.length) {
+      html += '<div class="saved-slide-mini-equations">';
+      equations.forEach(function (eq) {
+        html += '<div>' + escHtml(String(eq || "").slice(0, 80)) + '</div>';
+      });
+      html += '</div>';
+    }
+    callouts.forEach(function (callout) {
+      callout = callout || {};
+      var x = Math.max(0, Math.min(100, (Number(callout.x) || 130) / SLIDE_DESIGN_WIDTH * 100));
+      var y = Math.max(0, Math.min(100, (Number(callout.y) || 178) / SLIDE_DESIGN_HEIGHT * 100));
+      var w = Math.max(14, Math.min(70, (Number(callout.width) || 250) / SLIDE_DESIGN_WIDTH * 100));
+      var h = Math.max(8, Math.min(35, (Number(callout.height) || 92) / SLIDE_DESIGN_HEIGHT * 100));
+      html += '<div class="saved-slide-mini-callout" style="left:' + x.toFixed(2) + '%;top:' + y.toFixed(2) + '%;width:' + w.toFixed(2) + '%;height:' + h.toFixed(2) + '%;">' +
+        escHtml(String(callout.text || "").slice(0, 40)) + '</div>';
+    });
+    if (!images.length && !items.length && !equations.length && !callouts.length) {
+      html += '<div class="saved-slide-mini-empty">空白页</div>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  function renderSavedPptGalleryShell($gallery, title) {
+    $gallery.empty().append(
+      '<div class="saved-ppt-gallery-header">' +
+        '<span class="saved-ppt-gallery-title">' + escHtml(title || "已保存章节页面") + '</span>' +
+        '<button type="button" class="saved-ppt-gallery-close" data-action="close-saved-ppt-gallery" title="关闭">×</button>' +
+      '</div>' +
+      '<div class="saved-ppt-gallery-content"></div>'
+    );
+    return $gallery.find(".saved-ppt-gallery-content");
+  }
+
+  function showSavedPptGalleryMessage(message, title) {
+    var $gallery = $("#savedPptSlideGallery").show();
+    var $content = renderSavedPptGalleryShell($gallery, title);
+    $content.html('<div class="saved-ppt-gallery-empty">' + escHtml(message) + '</div>');
+    positionSavedPptGallery();
+  }
+
+  function renderSavedPptGallery(projectIndex, projectData) {
+    var project = savedPptProjects[projectIndex] || {};
+    var title = projectData && (projectData.chapter_title || projectData.title || projectData.chapter_id);
+    title = title || project.chapter_title || project.title || project.chapter_id || "已保存章节页面";
+    var $gallery = $("#savedPptSlideGallery").show();
+    var $content = renderSavedPptGalleryShell($gallery, title);
+    var slides = projectData && Array.isArray(projectData.slides) ? projectData.slides : [];
+    if (!slides.length) {
+      $content.html('<div class="saved-ppt-gallery-empty">该章节暂无页面</div>');
+      positionSavedPptGallery();
+      return;
+    }
+    slides.forEach(function (slide, idx) {
+      var $card = $(
+        '<button type="button" class="saved-ppt-slide-card" draggable="true" data-page-index="' + idx + '">' +
+          renderSavedSlideMini(slide, idx, "") +
+        '</button>'
+      );
+      $card.on("click", function () {
+        openSavedSlidePreview(slide, idx);
+      });
+      $card.on("dragstart", function (e) {
+        savedSlideDragPayload = { projectIndex: projectIndex, pageIndex: idx };
+        if (e.originalEvent && e.originalEvent.dataTransfer) {
+          e.originalEvent.dataTransfer.effectAllowed = "copy";
+          e.originalEvent.dataTransfer.setData("text/plain", JSON.stringify(savedSlideDragPayload));
+        }
+      });
+      $card.on("dragend", function () {
+        savedSlideDragPayload = null;
+        $(".slide-insert-dropzone").removeClass("active");
+      });
+      $content.append($card);
+    });
+    positionSavedPptGallery();
+  }
+
+  function savedPptGalleryDragBounds($gallery) {
+    var margin = 12;
+    var editor = $("#viewPpt:visible .ppt-editor")[0] || $("#viewPpt:visible")[0];
+    var editorRect = editor ? editor.getBoundingClientRect() : null;
+    var width = $gallery.outerWidth() || 360;
+    var height = $gallery.outerHeight() || 148;
+    var maxLeft = Math.max(margin, window.innerWidth - width - margin);
+    var bottomLimit = editorRect ? editorRect.top - margin : window.innerHeight - margin;
+    var maxTop = Math.max(margin, bottomLimit - height);
+    return { margin: margin, maxLeft: maxLeft, maxTop: maxTop };
+  }
+
+  function clampSavedPptGalleryPosition(left, top) {
+    var $gallery = $("#savedPptSlideGallery");
+    var bounds = savedPptGalleryDragBounds($gallery);
+    return {
+      left: Math.min(Math.max(bounds.margin, left), bounds.maxLeft),
+      top: Math.min(Math.max(bounds.margin, top), bounds.maxTop),
+    };
+  }
+
+  function positionSavedPptGallery() {
+    var $gallery = $("#savedPptSlideGallery");
+    if (!$gallery.length || !$gallery.is(":visible") || !$gallery.children().length) return;
+    var anchor = $("#btnSaveProject")[0] || $("#savedPptChapterSelect")[0];
+    if (!anchor) return;
+    var rect = anchor.getBoundingClientRect();
+    var editor = $("#viewPpt:visible .ppt-editor")[0] || $("#viewPpt:visible")[0];
+    var editorRect = editor ? editor.getBoundingClientRect() : null;
+    var margin = 12;
+    var width = Math.min(920, window.innerWidth - margin * 2);
+    width = Math.max(360, width);
+    var left = Math.min(Math.max(margin, rect.right - width), window.innerWidth - width - margin);
+    $gallery.css({ left: left + "px", width: width + "px", maxHeight: "" });
+    var galleryHeight = $gallery.outerHeight() || 148;
+    var topLimit = editorRect ? editorRect.top - margin : rect.top - margin;
+    var availableHeight = Math.max(96, topLimit - margin);
+    if (galleryHeight > availableHeight) {
+      $gallery.css("max-height", availableHeight + "px");
+      galleryHeight = $gallery.outerHeight() || availableHeight;
+    }
+    if (savedPptGalleryManualPosition) {
+      var manual = clampSavedPptGalleryPosition(savedPptGalleryManualPosition.left, savedPptGalleryManualPosition.top);
+      savedPptGalleryManualPosition = manual;
+      $gallery.css({ left: manual.left + "px", top: manual.top + "px" });
+      return;
+    }
+    var top = editorRect ? editorRect.top - galleryHeight - margin : rect.top - galleryHeight - margin;
+    if (top < margin) top = margin;
+    $gallery.css({ top: top + "px" });
+  }
+
+  function openSavedSlidePreview(slide, pageIndex) {
+    $("#savedSlidePreviewContent").html(renderSavedSlideMini(slide, pageIndex, "saved-slide-mini-large"));
+    $("#savedSlidePreviewModal").show();
+    $("body").addClass("modal-open");
+  }
+
+  function closeSavedSlidePreview() {
+    $("#savedSlidePreviewModal").hide();
+    $("#savedSlidePreviewContent").empty();
+    $("body").removeClass("modal-open");
+  }
+
+  function renderSavedPptSlides(projectIndex) {
+    var $slide = $("#savedPptSlideSelect");
+    $slide.empty().append('<option value="">选择页面</option>');
+    var project = savedPptProjects[projectIndex];
+    if (!project || !Array.isArray(project.slides) || !project.slides.length) {
+      $slide.prop("disabled", true);
+      $("#btnLoadSavedSlide").prop("disabled", true);
+      $("#savedPptSlideGallery").empty().hide();
+      return;
+    }
+    project.slides.forEach(function (slide) {
+      var label = slide.title || ("页面 " + (slide.page_index + 1));
+      $slide.append('<option value="' + slide.page_index + '">' + escHtml((slide.page_index + 1) + ". " + label) + '</option>');
+    });
+    $slide.prop("disabled", false);
+    $("#btnLoadSavedSlide").prop("disabled", false);
+  }
+
+  function loadSavedSlideFromProject(projectIndex, pageIndex) {
+    return savedPptProjectData(projectIndex).then(function (projectData) {
+      var slides = Array.isArray(projectData.slides) ? projectData.slides : [];
+      if (pageIndex < 0 || pageIndex >= slides.length) throw new Error("未找到页面内容");
+      return slides[pageIndex];
+    });
+  }
+
+  function insertSavedSlideIntoCurrentProject(slideData, insertIndex) {
+    if (!slidesData || !slideData) return;
+    if (!Array.isArray(slidesData.slides)) slidesData.slides = [];
+    saveCurrentSlide();
+    var slide = deepClone(slideData);
+    if (!slide.images) slide.images = [];
+    if (!slide.textboxes) slide.textboxes = [];
+    if (!slide.callouts) slide.callouts = [];
+    slide.placeholders = normalizePlaceholders(slide.placeholders);
+    if (slide.table) slide.table = normalizeTable(slide.table);
+    var targetIndex = insertIndex;
+    if (typeof targetIndex !== "number" || isNaN(targetIndex)) targetIndex = currentSlideIdx + 1;
+    targetIndex = Math.max(0, Math.min(slidesData.slides.length, targetIndex));
+    slidesData.slides.splice(targetIndex, 0, slide);
+    for (var i = 0; i < slidesData.slides.length; i++) {
+      slidesData.slides[i].id = i;
+    }
+    currentSlideIdx = targetIndex;
+    renderSlideList();
+    renderSlideEditor(slidesData.slides[targetIndex]);
+    selectLatexSyncForSlide(targetIndex);
+    syncLatexFromSlides();
+    scheduleLatexSync();
+    commitHistorySnapshot(false);
+    setStatus("已插入保存页面", "success");
+  }
+
+  function replaceCurrentSlideWithSaved(slideData) {
+    if (!slidesData || currentSlideIdx < 0 || !slideData) return;
+    saveCurrentSlide();
+    var slide = deepClone(slideData);
+    if (!slide.images) slide.images = [];
+    if (!slide.textboxes) slide.textboxes = [];
+    if (!slide.callouts) slide.callouts = [];
+    slide.placeholders = normalizePlaceholders(slide.placeholders);
+    if (slide.table) slide.table = normalizeTable(slide.table);
+    slidesData.slides[currentSlideIdx] = slide;
+    renderSlideEditor(slide);
+    renderSlideList();
+    selectSlide(currentSlideIdx);
+    syncLatexFromSlides();
+    scheduleLatexSync();
+    setStatus("已替换当前页面", "success");
+  }
+
   function renderSavedLectureOptions() {
     var $select = $("#savedLectureSelect");
     $select.empty();
     if (!savedLectureChapters.length) {
-      $select.append('<option value="">暂无已保存授课文档</option>');
+      $select.append('<option value="">暂无已保存授课文稿</option>');
       return;
     }
-    $select.append('<option value="">选择已保存章节文档...</option>');
+    $select.append('<option value="">选择已保存章节文稿...</option>');
     for (var i = 0; i < savedLectureChapters.length; i++) {
       var chapter = savedLectureChapters[i];
-      var title = chapter.title || chapter.id || ("绔犺妭 " + (i + 1));
+      var title = chapter.title || chapter.id || ("章节 " + (i + 1));
       $select.append(
         '<option value="' + i + '">' + escHtml(title) + '</option>'
       );
@@ -873,13 +1233,6 @@ $(function () {
       });
   }
 
-  if (!$("#btnUndoPpt").length) {
-    $(".ppt-actions").prepend(
-      '<button id="btnUndoPpt" class="btn-secondary" disabled>撤销</button>' +
-      '<button id="btnRedoPpt" class="btn-secondary" disabled>重做</button>'
-    );
-  }
-
   function setStatus(msg, type) {
     var $s = $("#status");
     if (type === "info" && isGenerating) {
@@ -901,6 +1254,10 @@ $(function () {
     if (msg) setStatus(msg, "info");
   }
 
+  function updateDownloadPptxButton() {
+    $("#btnDownloadPptx").prop("disabled", !slidesData || !slidesData.slides || !slidesData.slides.length);
+  }
+
   function setGenerating(state) {
     isGenerating = state;
     if (state) latexGenerateProgress = 0;
@@ -909,9 +1266,10 @@ $(function () {
     if (!state) {
       var has = !!fullLatex;
       $("#btnCopy, #btnDownloadTex, #btnConvertPpt").prop("disabled", !has);
+      updateDownloadPptxButton();
       updateHistoryButtons();
     } else {
-      $("#btnCopy, #btnDownloadTex, #btnConvertPpt").prop("disabled", true);
+      $("#btnCopy, #btnDownloadTex, #btnConvertPpt, #btnDownloadPptx").prop("disabled", true);
       $("#btnUndoPpt, #btnRedoPpt").prop("disabled", true);
     }
   }
@@ -923,11 +1281,119 @@ $(function () {
     }
     var chapter = savedLectureChapters[index];
     applyLectureSource(chapter.title || chapter.id || "", chapter.lecture_content || "");
-    setStatus("已载入章节：" + (chapter.title || chapter.id || ""), "success");
+    setStatus("已加载章节：" + (chapter.title || chapter.id || ""), "success");
   });
 
   $("#btnRefreshSavedLectures").on("click", function () {
     loadSavedLectureChapters();
+  });
+
+  $("#btnRefreshSavedPpt").on("click", function () {
+    loadSavedPptProjects();
+  });
+
+  $("#savedPptChapterSelect").on("change", function () {
+    var index = parseInt($(this).val(), 10);
+    if (Number.isNaN(index) || !savedPptProjects[index]) {
+      $("#savedPptSlideSelect").empty().append('<option value="">选择页面</option>').prop("disabled", true);
+      $("#btnLoadSavedSlide").prop("disabled", true);
+      $("#savedPptSlideGallery").empty().hide();
+      return;
+    }
+    renderSavedPptSlides(index);
+    showSavedPptGalleryMessage("正在加载页面...", "已保存章节页面");
+    savedPptProjectData(index)
+      .then(function (projectData) {
+        renderSavedPptSlides(index);
+        renderSavedPptGallery(index, projectData);
+      })
+      .catch(function (err) {
+        showSavedPptGalleryMessage("加载页面失败：" + err.message, "已保存章节页面");
+      });
+  });
+
+  $("#btnLoadSavedSlide").on("click", function () {
+    var chapterIndex = parseInt($("#savedPptChapterSelect").val(), 10);
+    var slideIndex = parseInt($("#savedPptSlideSelect").val(), 10);
+    if (Number.isNaN(chapterIndex) || Number.isNaN(slideIndex)) return;
+    var project = savedPptProjects[chapterIndex];
+    if (!project || !project.chapter_id) return;
+    var $button = $(this);
+    $button.prop("disabled", true).text("读取中...");
+    loadSavedSlideFromProject(chapterIndex, slideIndex)
+      .then(function (slide) {
+        if (!slidesData) throw new Error("当前没有可编辑的 PPT");
+        replaceCurrentSlideWithSaved(slide);
+      })
+      .catch(function (err) {
+        setStatus("调用保存页面失败: " + err.message, "error");
+      })
+      .finally(function () {
+        $button.prop("disabled", false).text("调用此页");
+      });
+  });
+
+  $("#savedSlidePreviewModal").on("click", "[data-action='close-saved-slide-preview']", function () {
+    closeSavedSlidePreview();
+  });
+
+  $("#savedPptSlideGallery").on("click", "[data-action='close-saved-ppt-gallery']", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    $("#savedPptSlideGallery").hide();
+  });
+
+  $("#savedPptSlideGallery").on("mousedown", function (e) {
+    if (e.button !== 0) return;
+    var $target = $(e.target);
+    if ($target.closest(".saved-ppt-slide-card, .saved-ppt-gallery-close, button, select, input, textarea, a").length) return;
+    if (!$target.closest(".saved-ppt-gallery-header, .saved-ppt-gallery-content, .saved-ppt-gallery-empty").length && e.target !== this) return;
+
+    e.preventDefault();
+    var $gallery = $(this);
+    var startX = e.clientX;
+    var startY = e.clientY;
+    var startLeft = parseFloat($gallery.css("left")) || 0;
+    var startTop = parseFloat($gallery.css("top")) || 0;
+    $("body").addClass("moving-saved-ppt-gallery");
+
+    $(document).on("mousemove.savedPptGalleryMove", function (moveEvent) {
+      var next = clampSavedPptGalleryPosition(startLeft + moveEvent.clientX - startX, startTop + moveEvent.clientY - startY);
+      savedPptGalleryManualPosition = next;
+      $gallery.css({ left: next.left + "px", top: next.top + "px" });
+    });
+
+    $(document).on("mouseup.savedPptGalleryMove", function () {
+      $("body").removeClass("moving-saved-ppt-gallery");
+      $(document).off("mousemove.savedPptGalleryMove mouseup.savedPptGalleryMove");
+    });
+  });
+
+  $(window).on("resize.savedPptGallery scroll.savedPptGallery", positionSavedPptGallery);
+
+  $("#slideCanvas, .ppt-editor").on("dragover", function (e) {
+    if (!savedSlideDragPayload) return;
+    if ($(e.target).closest("#slideList").length) return;
+    e.preventDefault();
+    if (e.originalEvent && e.originalEvent.dataTransfer) {
+      e.originalEvent.dataTransfer.dropEffect = "copy";
+    }
+  });
+
+  $("#slideCanvas, .ppt-editor").on("drop", function (e) {
+    if (!savedSlideDragPayload) return;
+    if ($(e.target).closest("#slideList").length) return;
+    e.preventDefault();
+    var payload = savedSlideDragPayload;
+    savedSlideDragPayload = null;
+    loadSavedSlideFromProject(payload.projectIndex, payload.pageIndex)
+      .then(function (slide) {
+        if (!slidesData) throw new Error("当前没有可编辑的 PPT");
+        insertSavedSlideIntoCurrentProject(slide);
+      })
+      .catch(function (err) {
+        setStatus("拖拽插入失败: " + err.message, "error");
+      });
   });
 
   $("#btnImportMarkdown").on("click", function () {
@@ -1058,7 +1524,7 @@ $(function () {
         setPackageImages((data.result && data.result.asset_urls) || {});
         packageImagePanelOpen = false;
         renderPackageImages();
-        setStatus("已上传图片包，共 " + imageFiles.length + " 张图片", "success");
+        setStatus("图片包上传完成，共 " + imageFiles.length + " 张图片", "success");
       },
       error: function (xhr) {
         var msg = "请检查图片包格式";
@@ -1130,6 +1596,66 @@ $(function () {
       .replace(/~/g, "\\textasciitilde{}")
       .replace(/\^/g, "\\textasciicircum{}")
       .replace(/\r?\n/g, " ");
+  }
+
+  function repairPptLatexArtifacts(text) {
+    var s = String(text == null ? "" : text);
+    if (!s) return "";
+    if (s.indexOf("textbackslash") !== -1 || /\\[$_{}]/.test(s)) {
+      s = s
+        .replace(/\\textbackslash\\?\{\\?\}/g, "\\")
+        .replace(/\\\$/g, "$")
+        .replace(/\\_/g, "_")
+        .replace(/\\\{/g, "{")
+        .replace(/\\\}/g, "}");
+    }
+    return s;
+  }
+
+  function escapeLatexTextPreservingMath(text) {
+    var source = repairPptLatexArtifacts(text);
+    var out = "";
+    var pattern = /\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)|\$\$([\s\S]*?)\$\$|(^|[^\\])\$([^$\n]+?)\$/g;
+    var lastIndex = 0;
+    var match;
+    while ((match = pattern.exec(source)) !== null) {
+      var prefix = match[4] || "";
+      var matchStart = match.index + prefix.length;
+      out += escapeLatexText(source.slice(lastIndex, matchStart));
+      out += source.slice(matchStart, pattern.lastIndex);
+      lastIndex = pattern.lastIndex;
+    }
+    out += escapeLatexText(source.slice(lastIndex));
+    return out;
+  }
+
+  function normalizeSlideEditableText(slide) {
+    if (!slide) return;
+    slide.title = repairPptLatexArtifacts(slide.title || "");
+    slide.subtitle = repairPptLatexArtifacts(slide.subtitle || "");
+    slide.notes = repairPptLatexArtifacts(slide.notes || "");
+    if (Array.isArray(slide.items)) {
+      slide.items = slide.items.map(function (item) { return repairPptLatexArtifacts(item); });
+    }
+    if (slide.table) {
+      if (Array.isArray(slide.table.headers)) {
+        slide.table.headers = slide.table.headers.map(function (h) { return repairPptLatexArtifacts(h); });
+      }
+      if (Array.isArray(slide.table.rows)) {
+        slide.table.rows = slide.table.rows.map(function (row) {
+          return Array.isArray(row) ? row.map(function (cell) { return repairPptLatexArtifacts(cell); }) : row;
+        });
+      }
+    }
+    if (Array.isArray(slide.textboxes)) {
+      slide.textboxes.forEach(function (tb) {
+        if (tb) tb.text = repairPptLatexArtifacts(tb.text || "");
+      });
+    }
+    if (!Array.isArray(slide.callouts)) slide.callouts = [];
+    slide.callouts.forEach(function (callout) {
+      if (callout) callout.text = repairPptLatexArtifacts(callout.text || "");
+    });
   }
 
   function syncKey(slideIdx, part, a, b) {
@@ -1479,7 +2005,7 @@ $(function () {
   function normalizeTable(table) {
     if (!table || !table.headers || !table.headers.length) {
       return {
-        headers: ["列1", "列2", "列3"],
+        headers: ["列 1", "列 2", "列 3"],
         rows: [
           ["", "", ""],
           ["", "", ""],
@@ -1566,12 +2092,15 @@ $(function () {
       var ref = refs[i];
       var key = normalizeFigureLabel(ref);
       if (!key || existing[key]) continue;
+      var figure = figurePreviewMap[key] || null;
+      var assetUrl = (figure && figure.url) || pickPackageImageForFigure(ref);
+      if (!assetUrl) continue;
       var offset = slide.placeholders.length;
       slide.placeholders.push({
         type: "image",
         label: ref,
         figure: ref,
-        asset: (figurePreviewMap[key] && figurePreviewMap[key].url) || pickPackageImageForFigure(ref),
+        asset: assetUrl,
         position: "right",
         x: 500,
         y: Math.min(260, 120 + offset * 18),
@@ -1644,13 +2173,15 @@ $(function () {
     }, 250);
   }
 
-  function restoreHistorySnapshot(snapshot) {
+  function restoreHistorySnapshot(snapshot, options) {
     if (!snapshot) return;
+    var opts = options || {};
+    var restoredSlideIdx = opts.keepCurrentSlide ? currentSlideIdx : snapshot.currentSlideIdx;
     historyLock = true;
     try {
       slidesData = deepClone(snapshot.slidesData);
       sourceLatex = snapshot.sourceLatex || sourceLatex;
-      currentSlideIdx = snapshot.currentSlideIdx;
+      currentSlideIdx = restoredSlideIdx;
 
       if (!slidesData.slides) slidesData.slides = [];
       if (currentSlideIdx < 0 && slidesData.slides.length) currentSlideIdx = 0;
@@ -1681,7 +2212,7 @@ $(function () {
     var current = undoStack.pop();
     redoStack.push(current);
     if (redoStack.length > 3) redoStack.shift();
-    restoreHistorySnapshot(undoStack[undoStack.length - 1]);
+    restoreHistorySnapshot(undoStack[undoStack.length - 1], { keepCurrentSlide: true });
     setStatus("操作完成", "success");
   }
 
@@ -1690,7 +2221,7 @@ $(function () {
     var snap = redoStack.pop();
     undoStack.push(snap);
     if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
-    restoreHistorySnapshot(snap);
+    restoreHistorySnapshot(snap, { keepCurrentSlide: true });
     setStatus("操作完成", "success");
   }
 
@@ -1960,11 +2491,11 @@ $(function () {
     out.push("    \\centering");
     out.push("    \\begin{tabular}{" + cols.join("") + "}");
     out.push("      \\toprule");
-    out.push("      " + headers.map(function (h) { return escapeLatexText(h || ""); }).join(" & ") + " \\\\");
+    out.push("      " + headers.map(function (h) { return escapeLatexTextPreservingMath(h || ""); }).join(" & ") + " \\\\");
     out.push("      \\midrule");
     for (var r = 0; r < rows.length; r++) {
       var row = rows[r] || [];
-      out.push("      " + row.map(function (c) { return escapeLatexText(c || ""); }).join(" & ") + " \\\\");
+      out.push("      " + row.map(function (c) { return escapeLatexTextPreservingMath(c || ""); }).join(" & ") + " \\\\");
     }
     out.push("      \\bottomrule");
     out.push("    \\end{tabular}");
@@ -1973,7 +2504,7 @@ $(function () {
   }
 
   function buildTrackedLatexLine(prefix, rawText, suffix, key, map, slideIdx) {
-    var escaped = escapeLatexText(rawText || "");
+    var escaped = escapeLatexTextPreservingMath(rawText || "");
     var line = prefix + escaped + (suffix || "");
     if (map && key) {
       map[key] = {
@@ -2103,6 +2634,31 @@ $(function () {
       "px,keepaspectratio,x=" + x + ",y=" + y + "]{" + imgPath + "}";
   }
 
+  function slidePxToCm(value, totalPx, totalCm) {
+    return (Number(value) || 0) / totalPx * totalCm;
+  }
+
+  function buildCalloutLatex(callout) {
+    callout = callout || {};
+    var text = repairPptLatexArtifacts(callout.text || "");
+    if (!text.trim()) return "";
+    var width = clampNumber(callout.width, 120, SLIDE_DESIGN_WIDTH, 250);
+    var height = clampNumber(callout.height, 50, SLIDE_DESIGN_HEIGHT, 90);
+    var x = clampNumber(callout.x, 0, SLIDE_DESIGN_WIDTH - width, 130);
+    var y = clampNumber(callout.y, 0, SLIDE_DESIGN_HEIGHT - height, 180);
+    var centerX = slidePxToCm(x + width / 2, SLIDE_DESIGN_WIDTH, 16);
+    var centerY = slidePxToCm(y + height / 2, SLIDE_DESIGN_HEIGHT, 9);
+    var textWidth = Math.max(2.2, slidePxToCm(width - 24, SLIDE_DESIGN_WIDTH, 16));
+    var fontSize = clampNumber(callout.fontSize, 8, 28, 12);
+    var align = /^(left|right|center)$/.test(callout.align || "") ? callout.align : "center";
+    return [
+      "  \\begin{tikzpicture}[remember picture, overlay]",
+      "    \\node[rectangle callout, callout relative pointer={(-0.45cm,-0.35cm)}, draw=blue, fill=white, rounded corners, text width=" + textWidth.toFixed(2) + "cm, align=" + align + ", font=\\fontsize{" + fontSize + "}{" + Math.round(fontSize * 1.2) + "}\\selectfont] at ([xshift=" + centerX.toFixed(2) + "cm,yshift=-" + centerY.toFixed(2) + "cm] current page.north west)",
+      "      {" + escapeLatexTextPreservingMath(text) + "};",
+      "  \\end{tikzpicture}"
+    ].join("\n");
+  }
+
   function cleanEquationForPpt(eq) {
     var s = String(eq || "").trim();
     if (!s) return "";
@@ -2213,7 +2769,7 @@ $(function () {
   function buildTocSlideLatex(slide) {
     var items = slide.items || [];
     var out = [];
-    out.push("\\begin{frame}{" + escapeLatexText(slide.title || "Contents") + "}");
+    out.push("\\begin{frame}{" + escapeLatexTextPreservingMath(slide.title || "Contents") + "}");
     out.push("  \\vfill");
     out.push("  \\begin{center}");
     out.push("    \\begin{minipage}{0.7\\textwidth}");
@@ -2222,7 +2778,7 @@ $(function () {
     for (var i = 0; i < items.length; i++) {
       out.push(
         "        \\item[\\textcolor{black}{\\textbf{" + (i + 1) + ".}}] " +
-        "\\textcolor{black}{" + escapeLatexText(items[i] || "") + "}"
+        "\\textcolor{black}{" + escapeLatexTextPreservingMath(items[i] || "") + "}"
       );
     }
     out.push("      \\end{itemize}");
@@ -2291,10 +2847,10 @@ $(function () {
 
   function buildContentSlideLatex(slide) {
     var out = [];
-    out.push("\\begin{frame}{" + escapeLatexText(slide.title || "") + "}");
+    out.push("\\begin{frame}{" + escapeLatexTextPreservingMath(slide.title || "") + "}");
 
     if (slide.subtitle) {
-      out.push("  \\textit{" + escapeLatexText(slide.subtitle) + "}");
+      out.push("  \\textit{" + escapeLatexTextPreservingMath(slide.subtitle) + "}");
       out.push("  \\vspace{0.3cm}");
     }
 
@@ -2311,7 +2867,7 @@ $(function () {
     if (slide.items && slide.items.length) {
       out.push("  \\begin{itemize}");
       for (var i = 0; i < slide.items.length; i++) {
-        out.push("    \\item " + escapeLatexText(slide.items[i] || ""));
+        out.push("    \\item " + escapeLatexTextPreservingMath(slide.items[i] || ""));
       }
       out.push("  \\end{itemize}");
     }
@@ -2328,7 +2884,7 @@ $(function () {
       for (var k = 0; k < slide.textboxes.length; k++) {
         var tb = slide.textboxes[k] || {};
         if (!tb.text) continue;
-        var boxText = escapeLatexText(tb.text);
+        var boxText = escapeLatexTextPreservingMath(tb.text);
         if (tb.fontSize) {
           boxText = "{\\fontsize{" + tb.fontSize + "}{" + Math.round(tb.fontSize * 1.2) + "}\\selectfont " + boxText + "}";
         }
@@ -2346,6 +2902,13 @@ $(function () {
         out.push("  \\begin{center}");
         out.push(imgLatex);
         out.push("  \\end{center}");
+      }
+    }
+
+    if (slide.callouts && slide.callouts.length) {
+      for (var c = 0; c < slide.callouts.length; c++) {
+        var calloutLatex = buildCalloutLatex(slide.callouts[c]);
+        if (calloutLatex) out.push(calloutLatex);
       }
     }
 
@@ -2470,6 +3033,27 @@ $(function () {
       }
     }
 
+    if (slide.callouts && slide.callouts.length) {
+      for (var c = 0; c < slide.callouts.length; c++) {
+        var callout = slide.callouts[c] || {};
+        var text = repairPptLatexArtifacts(callout.text || "");
+        if (!text.trim()) continue;
+        var width = clampNumber(callout.width, 120, SLIDE_DESIGN_WIDTH, 250);
+        var height = clampNumber(callout.height, 50, SLIDE_DESIGN_HEIGHT, 90);
+        var x = clampNumber(callout.x, 0, SLIDE_DESIGN_WIDTH - width, 130);
+        var y = clampNumber(callout.y, 0, SLIDE_DESIGN_HEIGHT - height, 180);
+        var centerX = slidePxToCm(x + width / 2, SLIDE_DESIGN_WIDTH, 16);
+        var centerY = slidePxToCm(y + height / 2, SLIDE_DESIGN_HEIGHT, 9);
+        var textWidth = Math.max(2.2, slidePxToCm(width - 24, SLIDE_DESIGN_WIDTH, 16));
+        var fontSize = clampNumber(callout.fontSize, 8, 28, 12);
+        var align = /^(left|right|center)$/.test(callout.align || "") ? callout.align : "center";
+        addLine("  \\begin{tikzpicture}[remember picture, overlay]");
+        addLine("    \\node[rectangle callout, callout relative pointer={(-0.45cm,-0.35cm)}, draw=blue, fill=white, rounded corners, text width=" + textWidth.toFixed(2) + "cm, align=" + align + ", font=\\fontsize{" + fontSize + "}{" + Math.round(fontSize * 1.2) + "}\\selectfont] at ([xshift=" + centerX.toFixed(2) + "cm,yshift=-" + centerY.toFixed(2) + "cm] current page.north west)");
+        addTrackedLine("      {", text, "};", syncKey(slideIdx, "callout", c));
+        addLine("  \\end{tikzpicture}");
+      }
+    }
+
     if (slide.notes) {
       var noteLines = String(slide.notes || "").split(/\r?\n/);
       for (var n = 0; n < noteLines.length; n++) {
@@ -2495,6 +3079,28 @@ $(function () {
     return text;
   }
 
+  function wrapReviewBackgroundLatex(slideText) {
+    var prefix = REVIEW_BACKGROUND_LATEX_PREFIX + "\n";
+    return {
+      text: prefix + slideText + "\n\n}",
+      offset: prefix.length,
+    };
+  }
+
+  function ensureReviewBackgroundPreamble(preamble, slides) {
+    var needsReviewBackground = (slides || []).some(function (slide) {
+      return slide && slide.reviewBackground;
+    });
+    if (!needsReviewBackground) return preamble;
+    if (!/\\usepackage(?:\[[^\]]*\])?\{tikz\}/.test(preamble)) {
+      preamble = preamble.replace(/(\\usetheme\{[^}]+\}\s*)/, "$1\n\\usepackage{tikz}\n");
+    }
+    if (preamble.indexOf("\\usetikzlibrary{shapes, positioning}") === -1) {
+      preamble = preamble.replace(/(\\usepackage(?:\[[^\]]*\])?\{tikz\}\s*)/, "$1\\usetikzlibrary{shapes, positioning}\n");
+    }
+    return preamble;
+  }
+
   function buildLatexFromSlides(data) {
     var trackedMap = {};
     var source = sourceLatex || fullLatex || "";
@@ -2504,6 +3110,7 @@ $(function () {
     preamble = upsertLatexCommand(preamble, "author", escapeLatexText(data.author || ""));
     preamble = upsertLatexCommand(preamble, "date", escapeLatexText(data.date || ""));
     preamble = ensurePlaceholderMacro(preamble, data.slides || []);
+    preamble = ensureReviewBackgroundPreamble(preamble, data.slides || []);
 
     var preambleTitleRange = findLatexCommandValueRange(preamble, "title");
     if (preambleTitleRange) {
@@ -2531,6 +3138,14 @@ $(function () {
       if (slide.type === "title") slideText = buildTitleSlideLatex();
       else if (slide.type === "toc") slideText = buildTocSlideLatexTracked(slide, i, slideMap);
       else slideText = buildContentSlideLatexTracked(slide, i, slideMap);
+      if (slide.reviewBackground) {
+        var wrappedSlide = wrapReviewBackgroundLatex(slideText);
+        slideText = wrappedSlide.text;
+        Object.keys(slideMap).forEach(function (key) {
+          slideMap[key].start += wrappedSlide.offset;
+          slideMap[key].end += wrappedSlide.offset;
+        });
+      }
       slideMap[syncKey(i, "frame")] = {
         start: 0,
         end: slideText.length,
@@ -2685,6 +3300,7 @@ $(function () {
     fullLatex = tex || "";
     sourceLatex = fullLatex;
     $("#btnCopy, #btnDownloadTex, #btnConvertPpt").prop("disabled", !fullLatex);
+    updateDownloadPptxButton();
     if (!fullLatex.trim()) return;
 
     var seq = ++latexManualSyncSeq;
@@ -2699,6 +3315,8 @@ $(function () {
         for (var i = 0; i < data.slides.length; i++) {
           if (!data.slides[i].images) data.slides[i].images = [];
           if (!data.slides[i].textboxes) data.slides[i].textboxes = [];
+          if (!data.slides[i].callouts) data.slides[i].callouts = [];
+          normalizeSlideEditableText(data.slides[i]);
           data.slides[i].placeholders = normalizePlaceholders(data.slides[i].placeholders);
           if (data.slides[i].table) data.slides[i].table = normalizeTable(data.slides[i].table);
         }
@@ -2853,17 +3471,17 @@ $(function () {
       content: content,
       style: $("#style").val(),
       custom_requirements: currentCustomRequirements,
-      slide_count: parseInt($("#slideCount").val(), 10) || 0,
+      slide_count: Math.max(25, parseInt($("#slideCount").val(), 10) || 25),
       language: $("#language").val(),
       figure_assets: buildFigureAssetPayload(),
     };
 
-    var generateTimeoutMs = 120000;
+    var generateTimeoutMs = 300000;
     var abortCtrl = new AbortController();
     var timeoutId = setTimeout(function () {
       abortCtrl.abort();
       setGenerating(false);
-      setStatus("生成超时，120 秒无新数据", "error");
+      setStatus("生成超时，5 分钟无新数据", "error");
     }, generateTimeoutMs);
 
     function resetTimeout() {
@@ -2871,7 +3489,7 @@ $(function () {
       timeoutId = setTimeout(function () {
         abortCtrl.abort();
         setGenerating(false);
-        setStatus("生成超时，120 秒无新数据", "error");
+      setStatus("生成超时，5 分钟无新数据", "error");
       }, generateTimeoutMs);
     }
 
@@ -3013,11 +3631,11 @@ $(function () {
     setStatus("操作完成", "success");
   });
 
-  $("#btnUndoPpt").on("click", function () {
+  $(document).on("click", "#btnUndoPpt", function () {
     undoPptEdit();
   });
 
-  $("#btnRedoPpt").on("click", function () {
+  $(document).on("click", "#btnRedoPpt", function () {
     redoPptEdit();
   });
 
@@ -3043,12 +3661,15 @@ $(function () {
         for (var i = 0; i < data.slides.length; i++) {
           if (!data.slides[i].images) data.slides[i].images = [];
           if (!data.slides[i].textboxes) data.slides[i].textboxes = [];
+          if (!data.slides[i].callouts) data.slides[i].callouts = [];
+          normalizeSlideEditableText(data.slides[i]);
           data.slides[i].placeholders = normalizePlaceholders(data.slides[i].placeholders);
           if (data.slides[i].table) data.slides[i].table = normalizeTable(data.slides[i].table);
         }
         ensureAllSlideFigurePlaceholders(data);
 
         slidesData = data;
+        $("#pptChapterTitleInput").val("");
         sourceLatex = fullLatex;
         fullLatex = buildLatexFromSlides(slidesData);
         sourceLatex = fullLatex;
@@ -3056,6 +3677,7 @@ $(function () {
         currentSlideIdx = data.slides.length > 0 ? 0 : -1;
         resetHistory();
         $("#tabPpt").prop("disabled", false);
+        updateDownloadPptxButton();
         setStatus("解析完成，共 " + data.slides.length + " 页幻灯片", "success");
         setActiveTab("ppt");
         renderSlideList();
@@ -3071,12 +3693,53 @@ $(function () {
     var $list = $("#slideList").empty();
     if (!slidesData || !slidesData.slides) return;
 
+    function appendSavedSlideDropzone(insertIndex) {
+      var $zone = $(
+        '<div class="slide-insert-dropzone" data-insert-index="' + insertIndex + '" title="拖拽已保存页面到这里插入"></div>'
+      );
+
+      $zone.on("dragover", function (e) {
+        if (!savedSlideDragPayload) return;
+        e.preventDefault();
+        e.stopPropagation();
+        $zone.addClass("active");
+        if (e.originalEvent && e.originalEvent.dataTransfer) {
+          e.originalEvent.dataTransfer.dropEffect = "copy";
+        }
+      });
+
+      $zone.on("dragleave", function () {
+        $zone.removeClass("active");
+      });
+
+      $zone.on("drop", function (e) {
+        if (!savedSlideDragPayload) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var payload = savedSlideDragPayload;
+        var targetIndex = parseInt($zone.attr("data-insert-index"), 10);
+        savedSlideDragPayload = null;
+        $(".slide-insert-dropzone").removeClass("active");
+        loadSavedSlideFromProject(payload.projectIndex, payload.pageIndex)
+          .then(function (slide) {
+            if (!slidesData) throw new Error("当前没有可编辑的 PPT");
+            insertSavedSlideIntoCurrentProject(slide, targetIndex);
+          })
+          .catch(function (err) {
+            setStatus("拖拽插入失败: " + err.message, "error");
+          });
+      });
+
+      $list.append($zone);
+    }
+
     var typeNames = { title: "Title", toc: "TOC", content: "Content" };
     for (var i = 0; i < slidesData.slides.length; i++) {
       (function (idx) {
+        appendSavedSlideDropzone(idx);
         var s = slidesData.slides[idx];
         var $thumb = $(
-          '<div class="slide-thumb" data-idx="' + idx + '">' +
+          '<div class="slide-thumb" draggable="true" data-idx="' + idx + '" title="按住拖动可调整页面顺序">' +
             '<button class="slide-thumb-delete" title="Delete">&times;</button>' +
             '<div class="slide-thumb-number">Page ' + (idx + 1) + '</div>' +
             '<div class="slide-thumb-title">' + escHtml(s.title || "(Untitled)") + '</div>' +
@@ -3094,13 +3757,81 @@ $(function () {
           deleteSlide(idx);
         });
 
+        $thumb.on("dragstart", function (e) {
+          if ($(e.target).hasClass("slide-thumb-delete")) {
+            e.preventDefault();
+            return;
+          }
+          slideThumbDragIndex = idx;
+          $thumb.addClass("dragging");
+          if (e.originalEvent && e.originalEvent.dataTransfer) {
+            e.originalEvent.dataTransfer.effectAllowed = "move";
+            e.originalEvent.dataTransfer.setData("text/plain", "slide-thumb:" + idx);
+          }
+        });
+
+        $thumb.on("dragover", function (e) {
+          if (slideThumbDragIndex === null || slideThumbDragIndex === idx) return;
+          e.preventDefault();
+          $thumb.addClass("drag-over");
+          if (e.originalEvent && e.originalEvent.dataTransfer) {
+            e.originalEvent.dataTransfer.dropEffect = "move";
+          }
+        });
+
+        $thumb.on("dragleave", function () {
+          $thumb.removeClass("drag-over");
+        });
+
+        $thumb.on("drop", function (e) {
+          if (slideThumbDragIndex === null) return;
+          e.preventDefault();
+          e.stopPropagation();
+          reorderSlides(slideThumbDragIndex, idx);
+          slideThumbDragIndex = null;
+        });
+
+        $thumb.on("dragend", function () {
+          slideThumbDragIndex = null;
+          $(".slide-thumb").removeClass("dragging drag-over");
+        });
+
         $list.append($thumb);
       })(i);
     }
+    appendSavedSlideDropzone(slidesData.slides.length);
 
     if (currentSlideIdx >= 0) {
       $list.find(".slide-thumb").eq(currentSlideIdx).addClass("active");
     }
+  }
+
+  function reorderSlides(fromIdx, toIdx) {
+    if (!slidesData || !Array.isArray(slidesData.slides)) return;
+    if (fromIdx === toIdx) return;
+    if (fromIdx < 0 || fromIdx >= slidesData.slides.length) return;
+    if (toIdx < 0 || toIdx >= slidesData.slides.length) return;
+    saveCurrentSlide();
+    var moved = slidesData.slides.splice(fromIdx, 1)[0];
+    slidesData.slides.splice(toIdx, 0, moved);
+    for (var i = 0; i < slidesData.slides.length; i++) {
+      slidesData.slides[i].id = i;
+    }
+    if (currentSlideIdx === fromIdx) {
+      currentSlideIdx = toIdx;
+    } else if (fromIdx < currentSlideIdx && toIdx >= currentSlideIdx) {
+      currentSlideIdx -= 1;
+    } else if (fromIdx > currentSlideIdx && toIdx <= currentSlideIdx) {
+      currentSlideIdx += 1;
+    }
+    renderSlideList();
+    if (currentSlideIdx >= 0 && slidesData.slides[currentSlideIdx]) {
+      renderSlideEditor(slidesData.slides[currentSlideIdx]);
+      selectLatexSyncForSlide(currentSlideIdx);
+    }
+    syncLatexFromSlides();
+    commitHistorySnapshot(false);
+    setStatus("页面顺序已调整，点击保存后会按新顺序保存", "success");
   }
 
   function selectSlide(idx) {
@@ -3116,15 +3847,17 @@ $(function () {
   function renderSlideEditor(slide) {
     var $canvas = $("#slideCanvas").empty();
     applyEditedGeometryToSlide(slide, currentSlideIdx);
+    normalizeSlideEditableText(slide);
     if (!slide.textboxes) slide.textboxes = [];
     if (!slide.images) slide.images = [];
+    if (!slide.callouts) slide.callouts = [];
     normalizeSlideEquations(slide);
     slide.placeholders = normalizePlaceholders(slide.placeholders);
     ensureSlideFigurePlaceholders(slide);
     if (slide.table) slide.table = normalizeTable(slide.table);
 
     var $left = $('<div class="slide-main-area"></div>');
-    var $render = $('<div class="slide-render" data-sync-key="' + escAttr(syncKey(currentSlideIdx, "frame")) + '"></div>');
+    var $render = $('<div class="slide-render' + (slide.reviewBackground ? " review-background" : "") + '" data-sync-key="' + escAttr(syncKey(currentSlideIdx, "frame")) + '"></div>');
     $render.append('<div class="slide-topline"></div>');
 
     $render.append(
@@ -3174,7 +3907,7 @@ $(function () {
         $eqs.append(
           '<div class="slide-equation-row" data-math-row data-sync-key="' + escAttr(key) + '">' +
             '<input class="slide-eq-input slide-hidden-math-source" data-sync-key="' + escAttr(key) + '" data-eq="' + j +
-            '" value="' + escAttr(eq) + '" placeholder="LaTeX 公式..." />' +
+        '" value="' + escAttr(eq) + '" placeholder="LaTeX 公式..." />' +
             '<div class="slide-math-preview" data-sync-key="' + escAttr(key) + '" data-math-source=".slide-eq-input" data-math-display="true"></div>' +
           '</div>'
         );
@@ -3192,6 +3925,9 @@ $(function () {
     });
     $.each(slide.textboxes, function (j, tb) {
       $textboxes.append(createTextbox(j, tb));
+    });
+    $.each(slide.callouts, function (j, callout) {
+      $textboxes.append(createCallout(j, callout));
     });
     $render.append($textboxes);
 
@@ -3225,11 +3961,16 @@ $(function () {
 
     $canvas.append(
         '<div class="slide-toolbar">' +
+        '<div class="toolbar-label">操作</div>' +
+        '<button id="btnUndoPpt" class="toolbar-btn ppt-history-btn" disabled>撤销</button>' +
+        '<button id="btnRedoPpt" class="toolbar-btn ppt-history-btn" disabled>重做</button>' +
+        '<div class="toolbar-sep"></div>' +
         '<div class="toolbar-label">插入</div>' +
         '<button class="toolbar-btn" data-action="add-item">+ 要点</button>' +
-        '<button class="toolbar-btn" data-action="add-table">+ 表格</button>' +
         '<button class="toolbar-btn" data-action="add-textbox">+ 文本框</button>' +
+        '<button class="toolbar-btn" data-action="add-callout">蓝色箭头框</button>' +
         '<button class="toolbar-btn" data-action="insert-image">+ 图片</button>' +
+        '<button class="toolbar-btn review-background-tool" data-action="apply-review-background"><span>复习页面背景</span><span class="review-background-popover" aria-hidden="true"></span></button>' +
         '<div class="toolbar-sep"></div>' +
         '<div class="toolbar-label">文字</div>' +
         '<div class="toolbar-color">' +
@@ -3264,6 +4005,7 @@ $(function () {
 
     bindToolbarEvents($canvas);
     bindSlideEvents($canvas);
+    updateHistoryButtons();
     updateScopedMathPreviews($canvas);
   }
 
@@ -3540,6 +4282,82 @@ $(function () {
     return $box;
   }
 
+  function createCallout(idx, callout) {
+    callout = callout || {};
+    var key = syncKey(currentSlideIdx, "callout", idx);
+    var width = clampNumber(callout.width, 120, 760, 250);
+    var height = clampNumber(callout.height, 50, 320, 92);
+    var x = clampNumber(callout.x, 0, 760, 130 + idx * 18);
+    var y = clampNumber(callout.y, 0, 420, 178 + idx * 18);
+    var fontSize = clampNumber(callout.fontSize, 8, 28, 12);
+    var align = callout.align || "center";
+    var $box = $(
+      '<div class="slide-callout" data-sync-key="' + escAttr(key) + '" data-callout="' + idx + '" style="left:' + x + 'px;top:' + y + 'px;width:' + width + 'px;height:' + height + 'px;">' +
+        '<div class="slide-callout-drag" title="拖动蓝色箭头框">::</div>' +
+        '<textarea class="slide-callout-content" data-sync-key="' + escAttr(key) + '" data-callout-content="' + idx + '" style="font-size:' + fontSize + 'px;text-align:' + escAttr(align) + ';" placeholder="输入标注文字...">' +
+          escHtml(repairPptLatexArtifacts(callout.text || "蓝色箭头框")) + '</textarea>' +
+        '<button class="slide-callout-remove" data-action="remove-callout" data-callout="' + idx + '">&times;</button>' +
+        '<div class="slide-callout-resize-handle"></div>' +
+      '</div>'
+    );
+    $box.find(".slide-callout-content").css("height", Math.max(28, height - 18) + "px");
+
+    $box.find(".slide-callout-drag").on("mousedown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var startX = e.clientX;
+      var startY = e.clientY;
+      var origX = parseFloat($box.css("left")) || 0;
+      var origY = parseFloat($box.css("top")) || 0;
+      $box.addClass("dragging");
+
+      $(document).on("mousemove.calloutdrag", function (e2) {
+        var parentW = $box.parent().width() || 860;
+        var parentH = $box.parent().height() || 484;
+        var boxW = cssPx($box, "width", $box.outerWidth());
+        var boxH = cssPx($box, "height", $box.outerHeight());
+        var nextX = clampNumber(origX + (e2.clientX - startX), 0, parentW - boxW, 0);
+        var nextY = clampNumber(origY + (e2.clientY - startY), 0, parentH - boxH, 0);
+        $box.css({ left: nextX + "px", top: nextY + "px" });
+      });
+      $(document).on("mouseup.calloutdrag", function () {
+        $box.removeClass("dragging");
+        $(document).off("mousemove.calloutdrag mouseup.calloutdrag");
+        saveCurrentSlide();
+        commitHistorySnapshot(false);
+        scheduleLatexSync();
+      });
+    });
+
+    $box.find(".slide-callout-resize-handle").on("mousedown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var startX = e.clientX;
+      var startY = e.clientY;
+      var origW = cssPx($box, "width", $box.outerWidth());
+      var origH = cssPx($box, "height", $box.outerHeight());
+
+      $(document).on("mousemove.calloutresize", function (e2) {
+        var parentW = $box.parent().width() || 860;
+        var parentH = $box.parent().height() || 484;
+        var left = parseFloat($box.css("left")) || 0;
+        var top = parseFloat($box.css("top")) || 0;
+        var newW = Math.min(parentW - left, Math.max(120, origW + (e2.clientX - startX)));
+        var newH = Math.min(parentH - top, Math.max(50, origH + (e2.clientY - startY)));
+        $box.css({ width: newW + "px", height: newH + "px" });
+        $box.find(".slide-callout-content").css("height", (newH - 18) + "px");
+      });
+      $(document).on("mouseup.calloutresize", function () {
+        $(document).off("mousemove.calloutresize mouseup.calloutresize");
+        saveCurrentSlide();
+        commitHistorySnapshot(false);
+        scheduleLatexSync();
+      });
+    });
+
+    return $box;
+  }
+
   function createImageItem(idx, img) {
     img = img || {};
     var scale = slideScale($("#slideCanvas .slide-render").first());
@@ -3653,9 +4471,9 @@ $(function () {
   function bindSlideEvents($ctx) {
     $ctx.off("click.slide dblclick.slide mousedown.slide focus.slide blur.slide input.slide change.slide select.sync mouseup.sync keyup.sync");
 
-    $ctx.on("focus.slide", ".slide-item-input, .slide-textbox-content, .slide-eq-input, .slide-title-input, .slide-subtitle-input, .slide-notes-input", function () {
+    $ctx.on("focus.slide", ".slide-item-input, .slide-textbox-content, .slide-callout-content, .slide-eq-input, .slide-title-input, .slide-subtitle-input, .slide-notes-input", function () {
       lastFocusedInput = this;
-      lastFocusedTextbox = $(this).closest(".slide-textbox")[0] || null;
+      lastFocusedTextbox = $(this).closest(".slide-textbox, .slide-callout")[0] || null;
       $(this).closest("[data-math-row]").addClass("is-editing");
       $("#toolbarFontSize").val(parseInt($(this).css("font-size"), 10) || 14);
       $("#toolbarTextAlign").val($(this).css("text-align") || "left");
@@ -3663,17 +4481,17 @@ $(function () {
 
     $ctx.on("focus.slide mouseup.slide keyup.slide", ".slide-rich-text-preview", function () {
       lastFocusedInput = this;
-      lastFocusedTextbox = $(this).closest(".slide-textbox")[0] || null;
+      lastFocusedTextbox = $(this).closest(".slide-textbox, .slide-callout")[0] || null;
       rememberRichTextSelection(this);
       $("#toolbarFontSize").val(parseInt($(this).css("font-size"), 10) || 14);
       $("#toolbarTextAlign").val($(this).css("text-align") || "left");
     });
 
-    $ctx.on("mousedown.slide", ".slide-item-input, .slide-textbox-content, .slide-eq-input, .slide-title-input, .slide-subtitle-input, .slide-notes-input, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function (e) {
+    $ctx.on("mousedown.slide", ".slide-item-input, .slide-textbox-content, .slide-callout-content, .slide-eq-input, .slide-title-input, .slide-subtitle-input, .slide-notes-input, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function (e) {
       e.stopPropagation();
     });
 
-    $ctx.on("blur.slide", ".slide-item-input, .slide-textbox-content, .slide-eq-input", function () {
+    $ctx.on("blur.slide", ".slide-item-input, .slide-textbox-content, .slide-callout-content, .slide-eq-input", function () {
       var $row = $(this).closest("[data-math-row]");
       setTimeout(function () {
         if (!$row.find(":focus").length) exitMathEdit($row);
@@ -3702,7 +4520,7 @@ $(function () {
       e.stopPropagation();
     });
 
-    $ctx.on("click.slide", ".slide-title-input, .slide-subtitle-input, .slide-item-input, .slide-eq-input, .slide-notes-input, .slide-textbox-content, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function (e) {
+    $ctx.on("click.slide", ".slide-title-input, .slide-subtitle-input, .slide-item-input, .slide-eq-input, .slide-notes-input, .slide-textbox-content, .slide-callout-content, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function (e) {
       e.stopPropagation();
     });
 
@@ -3726,7 +4544,7 @@ $(function () {
       if (key) applyCrossSync(key, "ppt");
     });
 
-    $ctx.on("input.slide change.slide", ".slide-title-input, .slide-subtitle-input, .slide-item-input, .slide-eq-input, .slide-notes-input, .slide-textbox-content, .slide-rich-text-preview, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function () {
+    $ctx.on("input.slide change.slide", ".slide-title-input, .slide-subtitle-input, .slide-item-input, .slide-eq-input, .slide-notes-input, .slide-textbox-content, .slide-callout-content, .slide-rich-text-preview, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function () {
       if ($(this).hasClass("slide-rich-text-preview")) {
         syncSingleRichText($(this));
         rememberRichTextSelection(this);
@@ -3771,17 +4589,6 @@ $(function () {
       scheduleLatexSync();
     });
 
-    $ctx.on("click.slide", '[data-action="add-table"]', function (e) {
-      e.stopImmediatePropagation();
-      saveCurrentSlide();
-      var slide = slidesData.slides[currentSlideIdx];
-      slide.table = normalizeTable(slide.table);
-      renderSlideEditor(slide);
-      renderSlideList();
-      commitHistorySnapshot(false);
-      scheduleLatexSync();
-    });
-
     $ctx.on("click.slide", '[data-action="add-table-row"]', function (e) {
       e.stopImmediatePropagation();
       saveCurrentSlide();
@@ -3798,7 +4605,7 @@ $(function () {
       saveCurrentSlide();
       var slide = slidesData.slides[currentSlideIdx];
       slide.table = normalizeTable(slide.table);
-      slide.table.headers.push("列" + (slide.table.headers.length + 1));
+      slide.table.headers.push("列 " + (slide.table.headers.length + 1));
       $.each(slide.table.rows, function (_i, row) { row.push(""); });
       renderSlideEditor(slide);
       commitHistorySnapshot(false);
@@ -3875,6 +4682,18 @@ $(function () {
       scheduleLatexSync();
     });
 
+    $ctx.on("click.slide", '[data-action="apply-review-background"]', function (e) {
+      e.stopImmediatePropagation();
+      saveCurrentSlide();
+      var slide = slidesData.slides[currentSlideIdx];
+      slide.reviewBackground = true;
+      renderSlideEditor(slide);
+      renderSlideList();
+      commitHistorySnapshot(false);
+      scheduleLatexSync();
+      setStatus("已应用复习页面背景", "success");
+    });
+
     $ctx.on("click.slide", '[data-action="insert-image"]', function (e) {
       e.stopImmediatePropagation();
       $("#imageUploader").val("").trigger("click");
@@ -3896,6 +4715,7 @@ $(function () {
       e.stopImmediatePropagation();
       saveCurrentSlide();
       var slide = slidesData.slides[currentSlideIdx];
+      if (!slide.textboxes) slide.textboxes = [];
       var fontSize = parseInt($("#toolbarFontSize").val(), 10) || 14;
       var color = $("#toolbarFontColor").val() || "#333333";
       slide.textboxes.push({
@@ -3918,12 +4738,47 @@ $(function () {
       enterMathEdit($("#slideCanvas").find(".slide-textbox-content").last().closest("[data-math-row]"));
     });
 
+    $ctx.on("click.slide", '[data-action="add-callout"]', function (e) {
+      e.stopImmediatePropagation();
+      saveCurrentSlide();
+      var slide = slidesData.slides[currentSlideIdx];
+      if (!slide.callouts) slide.callouts = [];
+      var idx = slide.callouts.length;
+      slide.callouts.push({
+        text: "蓝色箭头框",
+        x: 130 + idx * 18,
+        y: 178 + idx * 18,
+        width: 250,
+        height: 92,
+        fontSize: parseInt($("#toolbarFontSize").val(), 10) || 12,
+        align: "center",
+      });
+      renderSlideEditor(slide);
+      renderSlideList();
+      commitHistorySnapshot(false);
+      scheduleLatexSync();
+      $("#slideCanvas").find(".slide-callout-content").last().focus().select();
+    });
+
     $ctx.on("click.slide", '[data-action="remove-textbox"]', function (e) {
       e.stopImmediatePropagation();
       var idx = parseInt($(this).data("tb"), 10);
       saveCurrentSlide();
       var slide = slidesData.slides[currentSlideIdx];
       slide.textboxes.splice(idx, 1);
+      renderSlideEditor(slide);
+      renderSlideList();
+      commitHistorySnapshot(false);
+      scheduleLatexSync();
+    });
+
+    $ctx.on("click.slide", '[data-action="remove-callout"]', function (e) {
+      e.stopImmediatePropagation();
+      var idx = parseInt($(this).data("callout"), 10);
+      saveCurrentSlide();
+      var slide = slidesData.slides[currentSlideIdx];
+      if (!slide.callouts) slide.callouts = [];
+      slide.callouts.splice(idx, 1);
       renderSlideEditor(slide);
       renderSlideList();
       commitHistorySnapshot(false);
@@ -4206,6 +5061,22 @@ $(function () {
     });
     slide.textboxes = tbs;
 
+    var callouts = [];
+    $canvas.find(".slide-callout").each(function () {
+      var $callout = $(this);
+      var $content = $callout.find(".slide-callout-content");
+      callouts.push({
+        text: repairPptLatexArtifacts($content.val()),
+        fontSize: parseInt($content.css("font-size"), 10) || 12,
+        width: fromSlidePx(cssPx($callout, "width", 250), renderScale),
+        height: fromSlidePx(cssPx($callout, "height", 92), renderScale),
+        x: fromSlidePx(parseFloat($callout.css("left")) || 0, renderScale),
+        y: fromSlidePx(parseFloat($callout.css("top")) || 0, renderScale),
+        align: $content.css("text-align") || "center",
+      });
+    });
+    slide.callouts = callouts;
+
     if (slide.images && slide.images.length) {
       $canvas.find(".slide-image-item").each(function () {
         var idx = parseInt($(this).data("img"), 10);
@@ -4256,6 +5127,7 @@ $(function () {
       images: [],
       placeholders: [],
       textboxes: [],
+      callouts: [],
     };
     slidesData.slides.push(newSlide);
     renderSlideList();
@@ -4264,30 +5136,89 @@ $(function () {
     setStatus("操作完成", "success");
   });
 
+  function postProjectBlob(paths, payload) {
+    var index = 0;
+    function tryNext(lastError) {
+      if (index >= paths.length) return Promise.reject(lastError || new Error("请求失败"));
+      var url = paths[index++];
+      return fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(function (resp) {
+        if (!resp.ok) {
+          var err = new Error("HTTP " + resp.status);
+          if ((resp.status === 404 || resp.status === 405) && index < paths.length) return tryNext(err);
+          throw err;
+        }
+        return resp.blob();
+      }).catch(function (err) {
+        if (index < paths.length) return tryNext(err);
+        throw err;
+      });
+    }
+    return tryNext();
+  }
+
+  function postProjectJson(paths, payload) {
+    var index = 0;
+    function tryNext(lastError) {
+      if (index >= paths.length) return Promise.reject(lastError || new Error("请求失败"));
+      var url = paths[index++];
+      return fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(function (resp) {
+        if (!resp.ok) {
+          var err = new Error("HTTP " + resp.status);
+          if ((resp.status === 404 || resp.status === 405) && index < paths.length) return tryNext(err);
+          throw err;
+        }
+        return resp.json();
+      }).catch(function (err) {
+        if (index < paths.length) return tryNext(err);
+        throw err;
+      });
+    }
+    return tryNext();
+  }
+
+  $("#btnSaveProject").on("click", function () {
+    var enteredTitle = ($("#pptChapterTitleInput").val() || "").trim();
+    if (!enteredTitle) {
+      setStatus("请输入 PPT 保存名称", "error");
+      $("#pptChapterTitleInput").focus();
+      return;
+    }
+    var payload = buildProjectSavePayload();
+    if (!payload) return;
+    var $button = $(this);
+    $button.prop("disabled", true).text("保存中...");
+    setStatus("正在保存到网页端已保存内容...", "info");
+
+    postProjectJson(["/beamer-generator/api/save-project", "/beamer-generator/api/save-project/", "/api/save-project"], payload)
+      .then(function (data) {
+        return loadSavedPptProjects().then(function () {
+          setStatus("保存完成：已保存到网页端“查找已保存内容”中（" + (data.chapter_title || enteredTitle) + "）", "success");
+        });
+      })
+      .catch(function (err) {
+        setStatus("保存失败: " + err.message, "error");
+      })
+      .finally(function () {
+        $button.prop("disabled", false).text("保存");
+      });
+  });
+
   $("#btnDownloadPptx").on("click", function () {
     if (!slidesData) return;
-    saveCurrentSlide();
-    ensureAllSlideFigurePlaceholders(slidesData);
+    var payload = buildProjectSavePayload();
+    if (!payload) return;
     setStatus("正在生成 PPTX 文件...", "info");
+    delete payload.latex;
 
-    var payload = {
-      title: slidesData.title,
-      subtitle: slidesData.subtitle,
-      author: slidesData.author,
-      date: slidesData.date,
-      slides: slidesData.slides,
-      figure_assets: buildFigureAssetPayload(),
-    };
-
-    fetch("/beamer-generator/api/export-pptx", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    })
-      .then(function (resp) {
-        if (!resp.ok) throw new Error("HTTP " + resp.status);
-        return resp.blob();
-      })
+    postProjectBlob(["/beamer-generator/api/export-pptx", "/beamer-generator/api/export-pptx/", "/api/export-pptx"], payload)
       .then(function (blob) {
         downloadFile(blob, "presentation_" + today() + ".pptx",
           "application/vnd.openxmlformats-officedocument.presentationml.presentation");
@@ -4307,10 +5238,13 @@ $(function () {
 
   $("#savedLectureSelect, #btnRefreshSavedLectures").hide();
   $("#btnImportMarkdown").text("导入 MD 知识图谱");
+  loadSavedPptProjects();
   setupColumnResize();
   collapsedPaneResize = setupCollapsedPaneResize();
   updateContentPreview();
   setActiveTab("latex");
   applyInputCollapsedState();
   setGenerating(false);
+  updateDownloadPptxButton();
 });
+

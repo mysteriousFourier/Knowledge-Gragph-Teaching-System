@@ -1,4 +1,4 @@
-"""Prompt engine for Beamer generation."""
+﻿"""Prompt engine for Beamer generation."""
 
 from __future__ import annotations
 
@@ -25,17 +25,24 @@ class PromptEngine:
             "minimal": "使用极简风格，减少装饰，突出重点内容和关键信息。",
         }
         language_map = {
-            "zh": "所有幻灯片内容使用中文。",
-            "en": "所有幻灯片内容使用英文。",
-            "auto": "根据输入内容自动选择语言，默认以中文输出。",
+            "zh": "按中英混排规则输出：每页顶部标题使用英文，正文说明使用中文，专业词汇保留英文。",
+            "en": "按中英混排规则输出：每页顶部标题、人名和专业词汇使用英文，正文说明使用中文。",
+            "auto": "根据输入内容自动识别专业词汇，默认按中英混排规则输出，且每页顶部标题使用英文。",
         }
 
         prompt = self._base_system_prompt.rstrip() + "\n\n"
         prompt += "## 本次生成要求\n"
         prompt += f"- 风格：{style_instructions.get(style, style_instructions['academic'])}\n"
         prompt += f"- 语言：{language_map.get(language, language_map['auto'])}\n"
+        prompt += "- 中英混排规则：PPT 与 LaTeX 中每一页最上方的标题（包括 \\title{}、\\frametitle{}、目录页标题、总结页标题）必须使用英文；人名、英文文献作者名、专业术语和学科关键词必须使用英文；正文要点、页面说明、例题解释、课堂提问、总结文字和其他具体内容必须使用中文。\n"
+        prompt += "- 不要把专业术语强行翻译成中文；首次出现时可写成“中文解释（English Term）”，之后优先保留英文术语。\n"
+        prompt += "- \\title{}、\\frametitle{}、关键概念词、变量名、模型名、方法名、定理名、算法名、图表中的专业列名优先使用英文；普通 bullet 内容、解释句、课堂引导语使用中文，必要的专业词汇保留英文。\n"
         if slide_count > 0:
             prompt += f"- 页数：必须生成 {slide_count} 页幻灯片，包含封面/目录时也计入总数。\n"
+            if slide_count >= 25:
+                prompt += "- 详细程度：按“每章至少 25 页”的教学标准展开，不要把多个核心知识点压缩到同一页；知识图谱内容不够时，允许并要求结合通识知识补充背景、定义、推导、例子与复习总结。\n"
+                prompt += "- 页面结构：优先仿照 BIMSA 课程讲义的节奏组织页面，包含 Review 页、本章目录页、背景/动机页、定义页、公式解释页、推导步骤页、图示解读页、表格解读页、例题页、实验或数据解释页、回顾总结页。\n"
+                prompt += "- 单页内容：每页需要 3-6 个清晰要点；公式页必须包含公式含义、变量解释和使用条件。\n"
 
         if custom_requirements.strip():
             prompt += "\n## 用户额外要求\n"
@@ -131,18 +138,25 @@ class PromptEngine:
         density = self._estimate_content_density(content)
         sparse_for_target = slide_count >= 8 and density < slide_count * 55
         very_sparse_for_target = slide_count >= 12 and density < slide_count * 35
+        detailed_chapter_mode = slide_count >= 25
         if not sparse_for_target:
-            return ""
+            if not detailed_chapter_mode:
+                return ""
 
         min_expansion_slides = max(2, min(slide_count - 3, slide_count // 3))
+        if detailed_chapter_mode:
+            min_expansion_slides = max(min_expansion_slides, min(slide_count - 3, 8))
         if very_sparse_for_target:
             min_expansion_slides = max(min_expansion_slides, min(slide_count - 3, slide_count // 2))
 
         return (
             "## 内容扩展模式\n"
-            f"- 目标页数为 {slide_count} 页，但原始材料偏少，必须围绕主题主动扩展相关知识。\n"
+            f"- 目标页数为 {slide_count} 页，必须围绕本章主题主动扩展相关知识，保证每章至少 25 页且内容详细；若知识图谱内容不足，优先用 DeepSeek 自身知识补充背景、定义、推导、例子和总结。\n"
             f"- 至少生成 {min_expansion_slides} 页“知识扩展/教学补充”内容，不要重复原文。\n"
-            "- 扩展内容可包括：背景、定义、原理、推导、示例、对比、常见错误、课堂提问、应用场景、总结回顾。\n"
+            "- 扩展内容可包括：背景、定义、原理、推导、示例、对比、常见错误、课堂提问、应用场景、图示解读、表格解读、实验结果解释、总结回顾。\n"
+            "- 每个核心概念、关键公式、重要图表、例题步骤和结论总结都优先单独成页。\n"
+            "- 不要用一页承载过多内容；如果一个知识点包含多个公式或推导步骤，应拆分为多页讲解。\n"
+            "- 仿照 BIMSA 课程风格：先用 Review 或章节导航页建立结构，再用动机页、图页、表页、推导页和实验页逐步展开，不要直接从头到尾只写 bullet 列表。\n"
             "- 所有扩展必须与原主题强相关，不要编造无法验证的具体事实、年份、统计数字或案例来源。\n"
             "- 每一页都要有明确标题和 3-6 个要点。\n"
         )

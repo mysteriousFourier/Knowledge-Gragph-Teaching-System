@@ -5,7 +5,6 @@ import { usePreviewPpt } from "@/api/education"
 import { useTeacherChapters } from "@/api/teacher"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
 import { RichTextContent } from "@/components/renderers/RichTextContent"
-import type { Chapter } from "@/types/chapter"
 import type { PptSlideDetail } from "@/types/education"
 
 export const Route = createFileRoute("/teacher/ppt")({
@@ -64,7 +63,7 @@ function TeacherPptPage() {
         <div className="overflow-hidden">
           <iframe
             title="LaTeX Beamer 生成器"
-            src="/beamer-generator/index.html?v=20260522-ppt-edit-fix-v12"
+            src="/beamer-generator/index.html?v=20260524-callout-math-fix-v31"
             className="h-[calc(100vh-120px)] min-h-[900px] w-full border-0"
           />
         </div>

@@ -58,7 +58,9 @@ def _load_formula_index() -> Dict[str, Dict[str, str]]:
     if _FORMULA_INDEX is not None:
         return _FORMULA_INDEX
 
-    formula_path = Path(__file__).resolve().parents[2] / "structured" / "formula_library.json"
+    formula_path = Path(__file__).resolve().parents[1] / "structured" / "formula_library.json"
+    if not formula_path.exists():
+        formula_path = Path(__file__).resolve().parents[2] / "structured" / "formula_library.json"
     index: Dict[str, Dict[str, str]] = {}
     try:
         payload = json.loads(formula_path.read_text(encoding="utf-8"))
@@ -77,6 +79,9 @@ def _load_formula_index() -> Dict[str, Dict[str, str]]:
             "id": formula_id,
             "label": str(item.get("label_format") or f"Equation {formula_id}").strip(),
             "latex": latex,
+            "source": item.get("source") or {},
+            "context": str(item.get("context") or ""),
+            "description": str(item.get("description") or ""),
         }
 
     _FORMULA_INDEX = index
@@ -120,6 +125,118 @@ def expand_formula_references(value: Any, *, display: bool = True, expand_labels
 
         expanded = EQUATION_LABEL_PATTERN.sub(replace_label, expanded)
     return expanded
+
+
+def graph_paths_for_evidence(
+    graph_data: Optional[Dict[str, Any]],
+    evidence: Sequence[Dict[str, Any]],
+    limit: int = 12,
+) -> List[Dict[str, Any]]:
+    """Return direct graph relations connecting evidence nodes."""
+    if not graph_data or not evidence:
+        return []
+    evidence_ids = {str(item.get("id") or "") for item in evidence if isinstance(item, dict)}
+    if not evidence_ids:
+        return []
+    nodes = graph_data.get("nodes") or []
+    labels = {
+        str(node.get("id") or ""): _node_label(node) or str(node.get("id") or "")
+        for node in nodes
+        if isinstance(node, dict)
+    }
+    paths: List[Dict[str, Any]] = []
+    for rel in graph_data.get("relations") or graph_data.get("edges") or []:
+        if not isinstance(rel, dict):
+            continue
+        source_id = str(rel.get("source_id") or rel.get("source") or rel.get("source_node") or "")
+        target_id = str(rel.get("target_id") or rel.get("target") or rel.get("target_node") or "")
+        if source_id in evidence_ids and target_id in evidence_ids:
+            paths.append(
+                {
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "source_label": labels.get(source_id, source_id),
+                    "target_label": labels.get(target_id, target_id),
+                    "type": str(rel.get("relation_type") or rel.get("type") or ""),
+                    "description": str(rel.get("description") or (rel.get("metadata") or {}).get("description") or ""),
+                }
+            )
+            if len(paths) >= limit:
+                break
+    return paths
+
+
+def formula_context_for_text(text: str, limit: int = 3) -> List[Dict[str, Any]]:
+    """Find formula records referenced by text and attach nearby derivation/symbol context."""
+    index = _load_formula_index()
+    if not index:
+        return []
+    requested = [match.group(1).strip() for match in EQUATION_LABEL_PATTERN.finditer(str(text or ""))]
+    requested += [match.group(2).strip() for match in FORMULA_REFERENCE_PATTERN.finditer(str(text or ""))]
+    if not requested:
+        tokens = _tokenize(text)
+        scored = []
+        for record in index.values():
+            haystack = " ".join([record.get("label", ""), record.get("context", ""), record.get("latex", "")])
+            scored.append((_overlap_score(tokens, haystack), record["id"]))
+        requested = [formula_id for score, formula_id in sorted(scored, reverse=True) if score > 0]
+
+    results: List[Dict[str, Any]] = []
+    seen = set()
+    for formula_id in requested:
+        record = index.get(str(formula_id).lower())
+        if not record or record["id"] in seen:
+            continue
+        seen.add(record["id"])
+        source = record.get("source") if isinstance(record.get("source"), dict) else {}
+        results.append(
+            {
+                "id": record["id"],
+                "label": record.get("label") or f"Equation {record['id']}",
+                "latex": record.get("latex") or "",
+                "unit_id": source.get("unit_id") or "",
+                "chapter": source.get("chapter") or "",
+                "context": record.get("context") or "",
+                "derives_from": _formula_derives_from(record, index),
+                "symbols": _formula_symbols(record),
+            }
+        )
+        if len(results) >= limit:
+            break
+    return results
+
+
+def _formula_derives_from(record: Dict[str, Any], index: Dict[str, Dict[str, str]]) -> List[str]:
+    source = record.get("source") if isinstance(record.get("source"), dict) else {}
+    unit_id = source.get("unit_id")
+    formula_id = str(record.get("id") or "")
+    refs = set(re.findall(r"\b(?:Equation|Eq\.)\s+([0-9]+(?:\.[0-9]+[a-z]?)?)\b", record.get("context", ""), flags=re.I))
+    same_unit = [
+        item["id"]
+        for item in index.values()
+        if isinstance(item.get("source"), dict) and item["source"].get("unit_id") == unit_id
+    ]
+    if formula_id in same_unit:
+        pos = same_unit.index(formula_id)
+        refs.update(same_unit[max(0, pos - 1):pos])
+    refs.discard(formula_id)
+    return sorted(ref for ref in refs if ref.lower() in index)
+
+
+def _formula_symbols(record: Dict[str, Any]) -> List[Dict[str, str]]:
+    latex = str(record.get("latex") or "")
+    source = record.get("source") if isinstance(record.get("source"), dict) else {}
+    unit_id = str(source.get("unit_id") or "")
+    symbols = []
+    for symbol in sorted(set(re.findall(r"(?<![A-Za-z\\])([A-Za-z])(?:\s*[_^]|\b)", latex))):
+        symbols.append(
+            {
+                "symbol": symbol,
+                "unit_id": unit_id,
+                "meaning": f"{symbol} is used within the local formula scope of {unit_id}.",
+            }
+        )
+    return symbols
 
 
 INTENT_KEYWORDS = [

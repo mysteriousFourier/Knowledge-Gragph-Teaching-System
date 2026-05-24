@@ -1,0 +1,539 @@
+{
+  "title": "2",
+  "subtitle": "暂无内容。",
+  "author": "BIMSA Instructor",
+  "date": "",
+  "slides": [
+    {
+      "id": 0,
+      "type": "title",
+      "title": "暂无内容。",
+      "subtitle": "暂无内容。",
+      "reviewBackground": false,
+      "items": [],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 1,
+      "type": "content",
+      "title": "Review of Previous Concepts",
+      "subtitle": "",
+      "reviewBackground": false,
+      "items": [
+        "Robertson's theory: selection limit is $2N_e R(1)$, where $R(1)$ is first generation response.",
+        "The limit depends on initial additive variance $\\sigma_A^2(0)$ and effective population size $N_e$.",
+        "Drift and selection jointly determine long-term response; increasing $N_e$ preserves more variation.",
+        "Equation (26.15b) expressed the limit as $2N_e R(1) = N_e \\bar{\\imath} (2\\sigma_A^2(0)/\\sigma_z)$.",
+        "Today we examine optimal selection intensity, population structure, and mutational input."
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 2,
+      "type": "toc",
+      "title": "Outline Contents",
+      "subtitle": "暂无内容。",
+      "reviewBackground": false,
+      "items": [
+        "Optimal Selection Intensities [2.]",
+        "Founder Effects and Bottlenecks [3.]",
+        "Population Subdivision [4.]",
+        "Within-family Selection [5.]",
+        "Asymptotic Response from Mutation [6.]",
+        "Optimizing Asymptotic Response"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 3,
+      "type": "content",
+      "title": "Optimal Selection Intensities: Motivation",
+      "subtitle": "暂无内容。",
+      "reviewBackground": false,
+      "items": [
+        "固定测量个体数 $M$，选择比例 $p = N/M$。",
+        "减小 $p$ 增加选择强度 $\\bar{\\imath}$，但也减小有效种群大小 $N_e$。",
+        "Robertson (1960a) 提出长期极限响应正比于 $N_e \\bar{\\imath}$。",
+        "因此必须权衡：某个中间 $p$ 会使 $N_e \\bar{\\imath}$ 最大化。",
+        "我们首先从正态分布性状的截断选择出发推导最优比例。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 4,
+      "type": "content",
+      "title": "Derivation of the Key Formula",
+      "subtitle": "暂无内容。",
+      "reviewBackground": false,
+      "items": [
+        "Robertson's selection limit (Equation 26.15b):",
+        "其中 $R(1)$ 是第一代响应，取决于初始遗传方差 $\\sigma_A^2(0)$。",
+        "注意到乘积 $N_e \\bar{\\imath}$ 决定了最终响应：它随 $p$ 变化。",
+        "对于截断选择，$\\bar{\\imath} = \\varphi(x_{[1-p]})/p$（忽略有限总体校正）。",
+        "因为 $N = pM$，代入得到："
+      ],
+      "equations": [
+        "R(t) &\\simeq M p \\left(1 - e^{-t/2N_e}\\right) \\frac{\\varphi(x_{[1-p]}) \\sigma_A^2(0)}{p\\,\\sigma_z} \\\\ &= \\varphi(x_{[1-p]}) \\left[ \\frac{M\\sigma_A^2(0)}{\\sigma_z} (1 - e^{-t/2N_e}) \\right] \\tag{26.23}"
+      ],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 5,
+      "type": "content",
+      "title": "Optimal Proportion",
+      "subtitle": "暂无内容。",
+      "reviewBackground": false,
+      "items": [
+        "式 (26.23) 中括号项与 $p$ 无关，因此响应随 $\\varphi(x_{[1-p]})$ 变化。",
+        "正态密度 $\\varphi(x)$ 在 $x=0$ 处最大，对应截断点 $x_{[1-p]}=0$，即 $p=0.5$。",
+        "因此，对于加性基因和正态表型，保存一半个体使长期响应最大。",
+        "Figure 26.5A 展示了随 $p$ 变化的极限响应：$M$ 增大时曲线变得非常平坦。",
+        "当 $p$ 偏离 0.5 相当远时，极限几乎不变；但极端 $p$ 会明显降低极限。",
+        "Hill & Robertson 发现连锁时最优比例略高于 0.5，因连锁不平衡产生偏斜。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [
+        {
+          "type": "image",
+          "label": "Figure 26.5",
+          "position": "",
+          "figure": "Figure 26.5",
+          "asset": "/beamer-generator/uploads/184007afa3634db7a5b1c876896eb271/fig_0128.png",
+          "url": "",
+          "path": "",
+          "page": 0,
+          "x": 500.0,
+          "y": 120.0,
+          "width": 235.0,
+          "height": 165.0
+        }
+      ],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 6,
+      "type": "content",
+      "title": "Table 26.4: Drift Intensified by Selection",
+      "subtitle": "暂无内容。",
+      "reviewBackground": false,
+      "items": [
+        "选择不仅减少保存的个体数 $N$，还使 $N_e$ 比 $N$ 更小。",
+        "这是因为选择造成家系间适合度方差，降低 $N_e/N$ 比率（Equation 26.6b-d）。",
+        "下表假设 $M=50$, $h^2=0.5$，计算不同 $N$ 下的 $N_e$ 和预期极限。",
+        "考虑 $N_e$ 额外缩减后，$p=0.5$ 与 $p=0.1$ 的极限比从 2.2 增加到 3.4。"
+      ],
+      "equations": [],
+      "table": {
+        "headers": [
+          "$N$",
+          "$\\bar{\\imath}$",
+          "$N_e$",
+          "$N_e/N$",
+          "$2N_e R(1)$"
+        ],
+        "rows": [
+          [
+            "25",
+            "0.8",
+            "20.0",
+            "0.80",
+            "161"
+          ],
+          [
+            "10",
+            "1.4",
+            "6.2",
+            "0.62",
+            "87"
+          ],
+          [
+            "5",
+            "1.8",
+            "2.6",
+            "0.52",
+            "47"
+          ]
+        ],
+        "headerRichHtml": [
+          "<span class=\" slide-inline-formula-box\" contenteditable=\"false\" data-latex=\"$N$\"><span class=\"katex\"><span class=\"katex-mathml\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>N</mi></mrow><annotation encoding=\"application/x-tex\">N</annotation></semantics></math></span><span class=\"katex-html\" aria-hidden=\"true\"><span class=\"base\"><span class=\"strut\" style=\"height: 0.6833em;\"></span><span class=\"mord mathnormal\" style=\"margin-right: 0.109em;\">N</span></span></span></span></span>",
+          "<span class=\" slide-inline-formula-box\" contenteditable=\"false\" data-latex=\"$\\bar{\\imath}$\"><span class=\"katex\"><span class=\"katex-mathml\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mover accent=\"true\"><mi mathvariant=\"normal\">ı</mi><mo>ˉ</mo></mover></mrow><annotation encoding=\"application/x-tex\">\\bar{\\imath}</annotation></semantics></math></span><span class=\"katex-html\" aria-hidden=\"true\"><span class=\"base\"><span class=\"strut\" style=\"height: 0.5678em;\"></span><span class=\"mord accent\"><span class=\"vlist-t\"><span class=\"vlist-r\"><span class=\"vlist\" style=\"height: 0.5678em;\"><span class=\"\" style=\"top: -3em;\"><span class=\"pstrut\" style=\"height: 3em;\"></span><span class=\"mord mathnormal\"></span></span><span class=\"\" style=\"top: -3em;\"><span class=\"pstrut\" style=\"height: 3em;\"></span><span class=\"accent-body\" style=\"left: -0.25em;\"><span class=\"mord\">ˉ</span></span></span></span></span></span></span></span></span></span></span>",
+          "<span class=\" slide-inline-formula-box\" contenteditable=\"false\" data-latex=\"$N_e$\"><span class=\"katex\"><span class=\"katex-mathml\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msub><mi>N</mi><mi>e</mi></msub></mrow><annotation encoding=\"application/x-tex\">N_e</annotation></semantics></math></span><span class=\"katex-html\" aria-hidden=\"true\"><span class=\"base\"><span class=\"strut\" style=\"height: 0.8333em; vertical-align: -0.15em;\"></span><span class=\"mord\"><span class=\"mord mathnormal\" style=\"margin-right: 0.109em;\">N</span><span class=\"msupsub\"><span class=\"vlist-t vlist-t2\"><span class=\"vlist-r\"><span class=\"vlist\" style=\"height: 0.1514em;\"><span class=\"\" style=\"top: -2.55em; margin-left: -0.109em; margin-right: 0.05em;\"><span class=\"pstrut\" style=\"height: 2.7em;\"></span><span class=\"sizing reset-size6 size3 mtight\"><span class=\"mord mathnormal mtight\">e</span></span></span></span><span class=\"vlist-s\">​</span></span><span class=\"vlist-r\"><span class=\"vlist\" style=\"height: 0.15em;\"><span class=\"\"></span></span></span></span></span></span></span></span></span></span>",
+          "<span class=\" slide-inline-formula-box\" contenteditable=\"false\" data-latex=\"$N_e/N$\"><span class=\"katex\"><span class=\"katex-mathml\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><msub><mi>N</mi><mi>e</mi></msub><mi mathvariant=\"normal\">/</mi><mi>N</mi></mrow><annotation encoding=\"application/x-tex\">N_e/N</annotation></semantics></math></span><span class=\"katex-html\" aria-hidden=\"true\"><span class=\"base\"><span class=\"strut\" style=\"height: 1em; vertical-align: -0.25em;\"></span><span class=\"mord\"><span class=\"mord mathnormal\" style=\"margin-right: 0.109em;\">N</span><span class=\"msupsub\"><span class=\"vlist-t vlist-t2\"><span class=\"vlist-r\"><span class=\"vlist\" style=\"height: 0.1514em;\"><span class=\"\" style=\"top: -2.55em; margin-left: -0.109em; margin-right: 0.05em;\"><span class=\"pstrut\" style=\"height: 2.7em;\"></span><span class=\"sizing reset-size6 size3 mtight\"><span class=\"mord mathnormal mtight\">e</span></span></span></span><span class=\"vlist-s\">​</span></span><span class=\"vlist-r\"><span class=\"vlist\" style=\"height: 0.15em;\"><span class=\"\"></span></span></span></span></span></span><span class=\"mord\">/</span><span class=\"mord mathnormal\" style=\"margin-right: 0.109em;\">N</span></span></span></span></span>",
+          "<span class=\" slide-inline-formula-box\" contenteditable=\"false\" data-latex=\"$2N_e R(1)$\"><span class=\"katex\"><span class=\"katex-mathml\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mn>2</mn><msub><mi>N</mi><mi>e</mi></msub><mi>R</mi><mo stretchy=\"false\">(</mo><mn>1</mn><mo stretchy=\"false\">)</mo></mrow><annotation encoding=\"application/x-tex\">2N_e R(1)</annotation></semantics></math></span><span class=\"katex-html\" aria-hidden=\"true\"><span class=\"base\"><span class=\"strut\" style=\"height: 1em; vertical-align: -0.25em;\"></span><span class=\"mord\">2</span><span class=\"mord\"><span class=\"mord mathnormal\" style=\"margin-right: 0.109em;\">N</span><span class=\"msupsub\"><span class=\"vlist-t vlist-t2\"><span class=\"vlist-r\"><span class=\"vlist\" style=\"height: 0.1514em;\"><span class=\"\" style=\"top: -2.55em; margin-left: -0.109em; margin-right: 0.05em;\"><span class=\"pstrut\" style=\"height: 2.7em;\"></span><span class=\"sizing reset-size6 size3 mtight\"><span class=\"mord mathnormal mtight\">e</span></span></span></span><span class=\"vlist-s\">​</span></span><span class=\"vlist-r\"><span class=\"vlist\" style=\"height: 0.15em;\"><span class=\"\"></span></span></span></span></span></span><span class=\"mord mathnormal\" style=\"margin-right: 0.0077em;\">R</span><span class=\"mopen\">(</span><span class=\"mord\">1</span><span class=\"mclose\">)</span></span></span></span></span>"
+        ],
+        "rowRichHtml": [
+          [
+            "25",
+            "0.8",
+            "20.0",
+            "0.80",
+            "161"
+          ],
+          [
+            "10",
+            "1.4",
+            "6.2",
+            "0.62",
+            "87"
+          ],
+          [
+            "5",
+            "1.8",
+            "2.6",
+            "0.52",
+            "47"
+          ]
+        ]
+      },
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 7,
+      "type": "content",
+      "title": "Experimental Support and Extensions",
+      "subtitle": "暂无内容。",
+      "reviewBackground": false,
+      "items": [
+        "Madalena & Robertson (1975): 果蝇胸侧板刚毛数，选 5/25 极限 18.0，选 10/25 极限 17.1，验证最优比例。",
+        "Jones et al. (1968), Ruano et al. (1975), Hanrahan et al. (1973) 在腹侧刚毛、产卵数、小鼠体重等性状上得到类似结果。",
+        "Robertson (1970b) 推广到最大化第 $t$ 代总响应，最优比例是 $t/M$ 的函数。",
+        "Jódar & López-Fanjul (1977) 扩展到性别比不相等的情形，最优要求两性选择比例和测量数相等。",
+        "Hospital & Chevalet (1993) 发现连锁使最优 $p$ 增大，且随群体增大效应更明显。",
+        "Frankham (1977) 认为忽略 $N_e$ 额外缩减会导致错误的最优比例，当 $t/M > 0.2$ 时预测与实验出现偏差。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 8,
+      "type": "content",
+      "title": "Founder Effects: Concept and Motivation",
+      "subtitle": "",
+      "reviewBackground": false,
+      "items": [
+        "此前假设基础群体无限大；实际上，起始群体通常由少数个体奠基，导致瓶颈效应。",
+        "奠基事件减少初始遗传方差，影响长期响应，尤其对稀有有利等位基因威胁最大。",
+        "Da Silva (1961) 发现由单对亲本形成的品系，响应大约下降 30",
+        "Robertson 解释：瓶颈后保留的等位基因频率趋向中间值 (1/4, 1/2, 3/4)，降低了后续漂变敏感度。",
+        "然而，Jones et al. (1968) 发现在选择多代后施加瓶颈仍可大幅降低响应。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 9,
+      "type": "content",
+      "title": "Figure 26.6: Bottleneck Effects on Response",
+      "subtitle": "暂无内容。",
+      "reviewBackground": true,
+      "items": [
+        "A: 果蝇胸侧板刚毛选择，最外曲线为基础群体，中间为单对奠基，最内为连续三代单对奠基。",
+        "B: 腹侧刚毛，40(10",
+        "所有瓶颈系响应均下降，表明即使选择多代后仍有低频有利等位基因存在。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [
+        {
+          "type": "image",
+          "label": "Figure 26.6",
+          "position": "",
+          "figure": "Figure 26.6",
+          "asset": "/beamer-generator/uploads/184007afa3634db7a5b1c876896eb271/fig_0129.png",
+          "url": "",
+          "path": "",
+          "page": 0,
+          "x": 554.0,
+          "y": 218.0,
+          "width": 235.0,
+          "height": 165.0
+        }
+      ],
+      "textboxes": [],
+      "callouts": [
+        {
+          "text": "111111",
+          "x": 130.0,
+          "y": 178.0,
+          "width": 420.0,
+          "height": 168.0,
+          "fontSize": 14.0,
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "content",
+      "title": "Quantifying Founder Effects: Additive Case",
+      "subtitle": "暂无内容。",
+      "reviewBackground": false,
+      "items": [
+        "对于加性基因且选择较弱时，起始奠基规模 $N_0$ 导致的期望加性方差为 $[1-1/(2N_0)]\\sigma_A^2(0)$。",
+        "预期响应缩放因子相同：",
+        "两个不同奠基数的重复系响应比为：",
+        "Frankham (1980) 在果蝇实验中观测到瓶颈系极限约为基础系的 0.69--0.72，接近预测 0.75。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 11,
+      "type": "content",
+      "title": "Major Alleles Under Strong Selection",
+      "subtitle": "",
+      "reviewBackground": false,
+      "items": [
+        "当存在大效应稀有等位基因且选择很强时，奠基瓶颈的影响更剧烈。",
+        "只要强选择等位基因出现在初始样本中，它就会固定；概率为 $1 - (1-p_0)^{2N_0}$。",
+        "因此贡献比近似为：",
+        "稀有有利等位基因 ($p_0\\ll1$) 对初始方差贡献小，但如果固定则对响应贡献极大，瓶颈极易丢失它。",
+        "因此，奠基效应对长期响应的影响高度依赖于未知的初始等位基因频率。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 12,
+      "type": "content",
+      "title": "Figure 26.7 and Experimental Caveats",
+      "subtitle": "",
+      "reviewBackground": false,
+      "items": [
+        "Frankham (1980) 比较了单对奠基 (B)、非瓶颈 (U) 和对照 (C) 的腹侧刚毛选择响应。",
+        "瓶颈系极限显著降低，但与加性预测吻合较好。",
+        "目前缺乏响应因瓶颈而增加的明确报道（非加性方差可能引起增加，但未证实）。",
+        "Skibinski & Shereif (1989) 发现来自分布中央的品系比极端品系有更高响应，提示杂合度更高的群体拥有更多可遗传方差。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [
+        {
+          "type": "image",
+          "label": "Figure 26.7",
+          "position": "right",
+          "figure": "Figure 26.7",
+          "asset": "/beamer-generator/uploads/184007afa3634db7a5b1c876896eb271/fig_0130.png",
+          "url": "",
+          "path": "",
+          "page": 0,
+          "x": 500.0,
+          "y": 120.0,
+          "width": 235.0,
+          "height": 165.0
+        }
+      ],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 13,
+      "type": "content",
+      "title": "Common Misconceptions and Discussion",
+      "subtitle": "",
+      "reviewBackground": false,
+      "items": [
+        "误区1：瓶颈总是减少响应。存在非加性方差时可能例外，但实验证据不足。",
+        "误区2：初始加性方差能完全预测瓶颈效应。实际上，稀有主要等位基因的贡献可能很大，且不可预测。",
+        "Zhang & Hill (2005a): 采样加上选择产生的连锁不平衡，会使含有许多稀有等位基因的群体表现出与无穷小模型无异的响应。",
+        "在实验室中，将野外样本繁殖多代相当于额外的瓶颈，可能丢失稀有重要等位基因。",
+        "因此，设计长期选择实验时，应尽量增大奠基群体并缩短实验室驯化时间。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 14,
+      "type": "content",
+      "title": "Population Subdivision: Overview",
+      "subtitle": "",
+      "reviewBackground": false,
+      "items": [
+        "若将总群体细分为多个亚系，对长期响应有何影响？",
+        "Robertson (1960a) 证明：仅存在加性方差时，细分不改变极限，只要最终合并所有系。",
+        "Maruyama (1970) 推广：任何细分形式，若杂交时无系间选择，极限与单一随机交配群体相同。",
+        "然而，若有显著非加性方差（隐性、上位），细分可能增加极限（Madalena & Hill 1972）。",
+        "Wright 的“移动平衡”理论认为细分有利于积累稀有的上位有利组合。",
+        "但对加性基因，Wright 结构与 Fisher 结构表现相似；连锁效应微弱偏向大群体。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 15,
+      "type": "content",
+      "title": "Review of Previous Concepts - Detailed Explanation",
+      "subtitle": "",
+      "reviewBackground": false,
+      "items": [
+        "进一步展开：Robertson's theory: selection limit is $2N_e R(1)$, where $R(1)$ is first generation response.",
+        "进一步展开：The limit depends on initial additive variance $\\sigma_A^2(0)$ and effective population size $N_e$.",
+        "进一步展开：Drift and selection jointly determine long-term response; increasing $N_e$ preserves more variation.",
+        "进一步展开：Equation (26.15b) expressed the limit as $2N_e R(1) = N_e \\bar{\\imath} (2\\sigma_A^2(0)/\\sigma_z)$."
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 16,
+      "type": "content",
+      "title": "Optimal Selection Intensities: Motivation - Key Points",
+      "subtitle": "",
+      "reviewBackground": false,
+      "items": [
+        "进一步展开：固定测量个体数 $M$，选择比例 $p = N/M$。",
+        "进一步展开：减小 $p$ 增加选择强度 $\\bar{\\imath}$，但也减小有效种群大小 $N_e$。",
+        "进一步展开：Robertson (1960a) 提出长期极限响应正比于 $N_e \\bar{\\imath}$。",
+        "进一步展开：因此必须权衡：某个中间 $p$ 会使 $N_e \\bar{\\imath}$ 最大化。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 17,
+      "type": "content",
+      "title": "Derivation of the Key Formula - Example Walkthrough",
+      "subtitle": "",
+      "reviewBackground": false,
+      "items": [
+        "进一步展开：Robertson's selection limit (Equation 26.15b):",
+        "进一步展开：其中 $R(1)$ 是第一代响应，取决于初始遗传方差 $\\sigma_A^2(0)$。",
+        "进一步展开：注意到乘积 $N_e \\bar{\\imath}$ 决定了最终响应：它随 $p$ 变化。",
+        "进一步展开：对于截断选择，$\\bar{\\imath} = \\varphi(x_{[1-p]})/p$（忽略有限总体校正）。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [],
+      "textboxes": [],
+      "callouts": []
+    },
+    {
+      "id": 18,
+      "type": "content",
+      "title": "Optimal Proportion - Review Summary",
+      "subtitle": "",
+      "reviewBackground": false,
+      "items": [
+        "进一步展开：式 (26.23) 中括号项与 $p$ 无关，因此响应随 $\\varphi(x_{[1-p]})$ 变化。",
+        "进一步展开：正态密度 $\\varphi(x)$ 在 $x=0$ 处最大，对应截断点 $x_{[1-p]}=0$，即 $p=0.5$。",
+        "进一步展开：因此，对于加性基因和正态表型，保存一半个体使长期响应最大。",
+        "进一步展开：Figure 26.5A 展示了随 $p$ 变化的极限响应：$M$ 增大时曲线变得非常平坦。"
+      ],
+      "equations": [],
+      "table": null,
+      "notes": "",
+      "images": [],
+      "placeholders": [
+        {
+          "type": "image",
+          "label": "Figure 26.5",
+          "position": "right",
+          "figure": "Figure 26.5",
+          "asset": "/beamer-generator/uploads/184007afa3634db7a5b1c876896eb271/fig_0128.png",
+          "url": "",
+          "path": "",
+          "page": 0,
+          "x": 500.0,
+          "y": 120.0,
+          "width": 235.0,
+          "height": 165.0
+        }
+      ],
+      "textboxes": [],
+      "callouts": []
+    }
+  ],
+  "figure_assets": {
+    "Figure 26.5": "/beamer-generator/uploads/184007afa3634db7a5b1c876896eb271/fig_0128.png",
+    "Figure 26.6": "/beamer-generator/uploads/184007afa3634db7a5b1c876896eb271/fig_0129.png",
+    "Figure 26.7": "/beamer-generator/uploads/184007afa3634db7a5b1c876896eb271/fig_0130.png",
+    "Figure 26.8": "/beamer-generator/uploads/184007afa3634db7a5b1c876896eb271/fig_0131.png"
+  },
+  "chapter_id": "2",
+  "chapter_title": "2",
+  "latex": "\\documentclass[10pt, aspectratio=169]{ctexbeamer}\n\\usetheme{Madrid}\n\n\\usepackage{amsmath, amssymb, amsthm}\n\\usepackage{graphicx}\n\\usepackage{booktabs}\n\\usepackage{multirow}\n\\usepackage{caption}\n\\usepackage{hyperref}\n\\usepackage{tikz}\n\\usetikzlibrary{shapes.callouts, tikzmark}\n\\usetikzlibrary{shapes, positioning}\n\n\\definecolor{myline}{RGB}{0,116,112}\n\\definecolor{myblue}{RGB}{40,100,180}\n\n\\setbeamertemplate{frametitle}{%\n  \\vspace*{0.2cm}%\n  \\begin{beamercolorbox}[wd=\\paperwidth, leftskip=0.5cm, rightskip=0.5cm, ht=0.3cm, dp=0pt]{whitebg}%\n    \\usebeamerfont{frametitle}\\textcolor{black}{\\insertframetitle}%\n  \\end{beamercolorbox}%\n  \\vspace{0pt}%\n  \\begin{tikzpicture}[remember picture, overlay]\n    \\draw[myline, line width=1.5pt]\n      ([yshift=-1.3cm] current page.north west) -- ([yshift=-1.3cm] current page.north east);\n  \\end{tikzpicture}%\n  \\vspace{0.1cm}%\n}\n\n\\setbeamertemplate{title page}{%\n  \\begin{tikzpicture}[remember picture, overlay]\n    \\draw[line width=1.5pt, color=myline]\n      ([yshift=-40pt] current page.north west) -- ([yshift=-40pt] current page.north east);\n    \\node[anchor=north west, inner sep=0, minimum width=0.25\\paperwidth,\n          minimum height=39pt, fill=gray!30, text=black, align=center]\n          at (current page.north west) {Public course in BIMSA in 2026 spring semester};\n  \\end{tikzpicture}%\n  \\vspace*{36pt}\n  \\begin{center}\n    \\begin{tikzpicture}\n      \\node[draw=none, inner sep=8pt, fill=white, text=black,\n            align=center, font=\\Huge\\bfseries] (titlebox) {\\inserttitle};\n      \\node[draw=none, rounded corners=2pt,\n            inner sep=8pt, fill=white, text=black,\n            align=center, font=\\large,\n            below=5pt of titlebox] (subtitlebox) {\\insertsubtitle};\n      \\node[below=5pt of subtitlebox.south east, anchor=north east, align=center, text=black] {\n        \\insertauthor \\\\[3pt]\n        \\insertdate\n      };\n    \\end{tikzpicture}\n  \\end{center}\n}\n\n\\newcommand{\\kgimageplaceholder}[2][]{%\n  \\centerline{%\n    \\fbox{%\n      \\parbox{0.65\\textwidth}{\\centering\\vspace{2em}%\n        \\textbf{#2}\\par\\vspace{0.5em}\\footnotesize(真实图片位置)\\vspace{1em}}%\n    }%\n  }%\n}\n\n\\newcommand{\\tikzmark}[2][]{\\tikz[remember picture,baseline=(#2.base),inner sep=0pt] \\node (#2) {#1};}\n\n\\setbeamertemplate{footline}{}\n\n\\title{暂无内容。}\n\\subtitle{暂无内容。}\n\\author{BIMSA Instructor}\n\\date{}\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\\begin{document}\n\n{\n\\setbeamertemplate{footline}{}\n\\begin{frame}\n  \\titlepage\n\\end{frame}\n}\n\n\\begin{frame}{Review of Previous Concepts}\n  \\begin{itemize}\n    \\item Robertson's theory: selection limit is $2N_e R(1)$, where $R(1)$ is first generation response.\n    \\item The limit depends on initial additive variance $\\sigma_A^2(0)$ and effective population size $N_e$.\n    \\item Drift and selection jointly determine long-term response; increasing $N_e$ preserves more variation.\n    \\item Equation (26.15b) expressed the limit as $2N_e R(1) = N_e \\bar{\\imath} (2\\sigma_A^2(0)/\\sigma_z)$.\n    \\item Today we examine optimal selection intensity, population structure, and mutational input.\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Outline Contents}\n  \\vfill\n  \\begin{center}\n    \\begin{minipage}{0.7\\textwidth}\n      \\begin{itemize}\n        \\setlength{\\itemsep}{0.3\\baselineskip}\n        \\item[\\textcolor{black}{\\textbf{1.}}] \\textcolor{black}{Optimal Selection Intensities [2.]}\n        \\item[\\textcolor{black}{\\textbf{2.}}] \\textcolor{black}{Founder Effects and Bottlenecks [3.]}\n        \\item[\\textcolor{black}{\\textbf{3.}}] \\textcolor{black}{Population Subdivision [4.]}\n        \\item[\\textcolor{black}{\\textbf{4.}}] \\textcolor{black}{Within-family Selection [5.]}\n        \\item[\\textcolor{black}{\\textbf{5.}}] \\textcolor{black}{Asymptotic Response from Mutation [6.]}\n        \\item[\\textcolor{black}{\\textbf{6.}}] \\textcolor{black}{Optimizing Asymptotic Response}\n      \\end{itemize}\n    \\end{minipage}\n  \\end{center}\n  \\vfill\n\\end{frame}\n\n\\begin{frame}{Optimal Selection Intensities: Motivation}\n  \\textit{暂无内容。}\n  \\vspace{0.3cm}\n  \\begin{itemize}\n    \\item 固定测量个体数 $M$，选择比例 $p = N/M$。\n    \\item 减小 $p$ 增加选择强度 $\\bar{\\imath}$，但也减小有效种群大小 $N_e$。\n    \\item Robertson (1960a) 提出长期极限响应正比于 $N_e \\bar{\\imath}$。\n    \\item 因此必须权衡：某个中间 $p$ 会使 $N_e \\bar{\\imath}$ 最大化。\n    \\item 我们首先从正态分布性状的截断选择出发推导最优比例。\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Derivation of the Key Formula}\n  \\textit{暂无内容。}\n  \\vspace{0.3cm}\n  \\begin{itemize}\n    \\item Robertson's selection limit (Equation 26.15b):\n    \\item 其中 $R(1)$ 是第一代响应，取决于初始遗传方差 $\\sigma_A^2(0)$。\n    \\item 注意到乘积 $N_e \\bar{\\imath}$ 决定了最终响应：它随 $p$ 变化。\n    \\item 对于截断选择，$\\bar{\\imath} = \\varphi(x_{[1-p]})/p$（忽略有限总体校正）。\n    \\item 因为 $N = pM$，代入得到：\n  \\end{itemize}\n  \\[\n    R(t) &\\simeq M p \\left(1 - e^{-t/2N_e}\\right) \\frac{\\varphi(x_{[1-p]}) \\sigma_A^2(0)}{p\\,\\sigma_z} \\\\ &= \\varphi(x_{[1-p]}) \\left[ \\frac{M\\sigma_A^2(0)}{\\sigma_z} (1 - e^{-t/2N_e}) \\right] \\tag{26.23}\n  \\]\n\\end{frame}\n\n\\begin{frame}{Optimal Proportion}\n  \\textit{暂无内容。}\n  \\vspace{0.3cm}\n  \\kgimageplaceholder[figure=Figure 26.5,center,x=500,y=120,width=235,height=165]{Figure 26.5}\n  \\begin{itemize}\n    \\item 式 (26.23) 中括号项与 $p$ 无关，因此响应随 $\\varphi(x_{[1-p]})$ 变化。\n    \\item 正态密度 $\\varphi(x)$ 在 $x=0$ 处最大，对应截断点 $x_{[1-p]}=0$，即 $p=0.5$。\n    \\item 因此，对于加性基因和正态表型，保存一半个体使长期响应最大。\n    \\item Figure 26.5A 展示了随 $p$ 变化的极限响应：$M$ 增大时曲线变得非常平坦。\n    \\item 当 $p$ 偏离 0.5 相当远时，极限几乎不变；但极端 $p$ 会明显降低极限。\n    \\item Hill \\& Robertson 发现连锁时最优比例略高于 0.5，因连锁不平衡产生偏斜。\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Table 26.4: Drift Intensified by Selection}\n  \\textit{暂无内容。}\n  \\vspace{0.3cm}\n  \\begin{table}[ht]\n    \\centering\n    \\begin{tabular}{lllll}\n      \\toprule\n      \\$N\\$ & \\$\\textbackslash\\{\\}bar\\{\\textbackslash\\{\\}imath\\}\\$ & \\$N\\_e\\$ & \\$N\\_e/N\\$ & \\$2N\\_e R(1)\\$ \\\\\n      \\midrule\n      25 & 0.8 & 20.0 & 0.80 & 161 \\\\\n      10 & 1.4 & 6.2 & 0.62 & 87 \\\\\n      5 & 1.8 & 2.6 & 0.52 & 47 \\\\\n      \\bottomrule\n    \\end{tabular}\n  \\end{table}\n  \\begin{itemize}\n    \\item 选择不仅减少保存的个体数 $N$，还使 $N_e$ 比 $N$ 更小。\n    \\item 这是因为选择造成家系间适合度方差，降低 $N_e/N$ 比率（Equation 26.6b-d）。\n    \\item 下表假设 $M=50$, $h^2=0.5$，计算不同 $N$ 下的 $N_e$ 和预期极限。\n    \\item 考虑 $N_e$ 额外缩减后，$p=0.5$ 与 $p=0.1$ 的极限比从 2.2 增加到 3.4。\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Experimental Support and Extensions}\n  \\textit{暂无内容。}\n  \\vspace{0.3cm}\n  \\begin{itemize}\n    \\item Madalena \\& Robertson (1975): 果蝇胸侧板刚毛数，选 5/25 极限 18.0，选 10/25 极限 17.1，验证最优比例。\n    \\item Jones et al. (1968), Ruano et al. (1975), Hanrahan et al. (1973) 在腹侧刚毛、产卵数、小鼠体重等性状上得到类似结果。\n    \\item Robertson (1970b) 推广到最大化第 $t$ 代总响应，最优比例是 $t/M$ 的函数。\n    \\item Jódar \\& López-Fanjul (1977) 扩展到性别比不相等的情形，最优要求两性选择比例和测量数相等。\n    \\item Hospital \\& Chevalet (1993) 发现连锁使最优 $p$ 增大，且随群体增大效应更明显。\n    \\item Frankham (1977) 认为忽略 $N_e$ 额外缩减会导致错误的最优比例，当 $t/M > 0.2$ 时预测与实验出现偏差。\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Founder Effects: Concept and Motivation}\n  \\begin{itemize}\n    \\item 此前假设基础群体无限大；实际上，起始群体通常由少数个体奠基，导致瓶颈效应。\n    \\item 奠基事件减少初始遗传方差，影响长期响应，尤其对稀有有利等位基因威胁最大。\n    \\item Da Silva (1961) 发现由单对亲本形成的品系，响应大约下降 30\n    \\item Robertson 解释：瓶颈后保留的等位基因频率趋向中间值 (1/4, 1/2, 3/4)，降低了后续漂变敏感度。\n    \\item 然而，Jones et al. (1968) 发现在选择多代后施加瓶颈仍可大幅降低响应。\n  \\end{itemize}\n\\end{frame}\n\n{\n% 设置全页背景：灰色 + 中心白色渐变矩形\n\\setbeamertemplate{background}{%\n  \\begin{tikzpicture}[remember picture, overlay]\n    \\def\\topheight{1cm}             %顶部灰色块保留高度\n    \\def\\height{2cm}               % 梯形高度\n    \\def\\backcolor{gray!30}\n    \\def\\frontcolor{white}\n    \\fill[\\backcolor] (current page.south west) rectangle (current page.north east);\n        %\\shade[shading=radial, inner color=white, outer color=red]\n      %({0.5\\paperwidth-7cm}, {0.5\\paperheight-13cm}) rectangle + (14cm,7cm);\n    \\fill[\\frontcolor] ([xshift=0.5\\height, yshift=0.5\\height] current page.south west)\n             rectangle ([xshift=-0.5\\height, yshift=-0.5\\height-\\topheight] current page.north east);\n    % 上底两端：页面左、右边界，距离页面顶部向下 5cm\n    \\coordinate (UL1) at ([yshift=-\\topheight] current page.north west);\n    \\coordinate (UR1) at ([yshift=-\\topheight] current page.north east);\n\n    % 下底两端：从上底两端垂直向下 \\height，再向内缩 \\offset\n    \\coordinate (DL1) at ([xshift=\\height,yshift=-\\height] UL1);\n    \\coordinate (DR1) at ([xshift=-\\height,yshift=-\\height] UR1);\n\n    \\coordinate (DL2) at (current page.south west);                     % 下底左端\n    \\coordinate (DR2) at (current page.south east);           % 下底右端\n    \\coordinate (UL2) at ([xshift=\\height, yshift=\\height] DL2); % 上底左端（向右向上各移 \\h）\n    \\coordinate (UR2) at ([xshift=-\\height, yshift=\\height] DR2);% 上底右端（向左向上各移 \\h）\n    \n    % 绘制渐变梯形\n    \\shade[top color=\\backcolor, bottom color=\\frontcolor]\n       (UL1) -- (UR1) -- (DR1) -- (DL1) -- cycle;\n    \\shade[top color=\\frontcolor, bottom color=\\backcolor]\n      (UL2) -- (UR2) -- (DR2) -- (DL2) -- cycle;\n    \\shade[left color=\\backcolor, right color=\\frontcolor]\n      (DL2) -- (UL1) -- (DL1) -- (UL2) -- cycle; %左下 -- 左上 -- 右上 -- 右下\n    \\shade[left color=\\frontcolor, right color=\\backcolor]\n      (UR2) -- (DR1) -- (UR1) -- (DR2) -- cycle; %左下 -- 左上 -- 右上 -- 右下\n  \\end{tikzpicture}%\n}\n\n% 复习内容空白幻灯\n\\begin{frame}{Figure 26.6: Bottleneck Effects on Response}\n  \\textit{暂无内容。}\n  \\vspace{0.3cm}\n  \\kgimageplaceholder[figure=Figure 26.6,top-right,x=554,y=218,width=235,height=165]{Figure 26.6}\n  \\begin{itemize}\n    \\item A: 果蝇胸侧板刚毛选择，最外曲线为基础群体，中间为单对奠基，最内为连续三代单对奠基。\n    \\item B: 腹侧刚毛，40(10\n    \\item 所有瓶颈系响应均下降，表明即使选择多代后仍有低频有利等位基因存在。\n  \\end{itemize}\n  \\begin{tikzpicture}[remember picture, overlay]\n    \\node[rectangle callout, callout relative pointer={(-0.45cm,-0.35cm)}, draw=blue, fill=white, rounded corners, text width=7.37cm, align=center, font=\\fontsize{14}{17}\\selectfont] at ([xshift=6.33cm,yshift=-4.87cm] current page.north west)\n      {111111};\n  \\end{tikzpicture}\n\\end{frame}\n\n}\n\n\\begin{frame}{Quantifying Founder Effects: Additive Case}\n  \\textit{暂无内容。}\n  \\vspace{0.3cm}\n  \\begin{itemize}\n    \\item 对于加性基因且选择较弱时，起始奠基规模 $N_0$ 导致的期望加性方差为 $[1-1/(2N_0)]\\sigma_A^2(0)$。\n    \\item 预期响应缩放因子相同：\n    \\item 两个不同奠基数的重复系响应比为：\n    \\item Frankham (1980) 在果蝇实验中观测到瓶颈系极限约为基础系的 0.69--0.72，接近预测 0.75。\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Major Alleles Under Strong Selection}\n  \\begin{itemize}\n    \\item 当存在大效应稀有等位基因且选择很强时，奠基瓶颈的影响更剧烈。\n    \\item 只要强选择等位基因出现在初始样本中，它就会固定；概率为 $1 - (1-p_0)^{2N_0}$。\n    \\item 因此贡献比近似为：\n    \\item 稀有有利等位基因 ($p_0\\ll1$) 对初始方差贡献小，但如果固定则对响应贡献极大，瓶颈极易丢失它。\n    \\item 因此，奠基效应对长期响应的影响高度依赖于未知的初始等位基因频率。\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Figure 26.7 and Experimental Caveats}\n  \\kgimageplaceholder[figure=Figure 26.7,right,x=500,y=120,width=235,height=165]{Figure 26.7}\n  \\begin{itemize}\n    \\item Frankham (1980) 比较了单对奠基 (B)、非瓶颈 (U) 和对照 (C) 的腹侧刚毛选择响应。\n    \\item 瓶颈系极限显著降低，但与加性预测吻合较好。\n    \\item 目前缺乏响应因瓶颈而增加的明确报道（非加性方差可能引起增加，但未证实）。\n    \\item Skibinski \\& Shereif (1989) 发现来自分布中央的品系比极端品系有更高响应，提示杂合度更高的群体拥有更多可遗传方差。\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Common Misconceptions and Discussion}\n  \\begin{itemize}\n    \\item 误区1：瓶颈总是减少响应。存在非加性方差时可能例外，但实验证据不足。\n    \\item 误区2：初始加性方差能完全预测瓶颈效应。实际上，稀有主要等位基因的贡献可能很大，且不可预测。\n    \\item Zhang \\& Hill (2005a): 采样加上选择产生的连锁不平衡，会使含有许多稀有等位基因的群体表现出与无穷小模型无异的响应。\n    \\item 在实验室中，将野外样本繁殖多代相当于额外的瓶颈，可能丢失稀有重要等位基因。\n    \\item 因此，设计长期选择实验时，应尽量增大奠基群体并缩短实验室驯化时间。\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Population Subdivision: Overview}\n  \\begin{itemize}\n    \\item 若将总群体细分为多个亚系，对长期响应有何影响？\n    \\item Robertson (1960a) 证明：仅存在加性方差时，细分不改变极限，只要最终合并所有系。\n    \\item Maruyama (1970) 推广：任何细分形式，若杂交时无系间选择，极限与单一随机交配群体相同。\n    \\item 然而，若有显著非加性方差（隐性、上位），细分可能增加极限（Madalena \\& Hill 1972）。\n    \\item Wright 的“移动平衡”理论认为细分有利于积累稀有的上位有利组合。\n    \\item 但对加性基因，Wright 结构与 Fisher 结构表现相似；连锁效应微弱偏向大群体。\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Review of Previous Concepts - Detailed Explanation}\n  \\begin{itemize}\n    \\item 进一步展开：Robertson's theory: selection limit is $2N_e R(1)$, where $R(1)$ is first generation response.\n    \\item 进一步展开：The limit depends on initial additive variance $\\sigma_A^2(0)$ and effective population size $N_e$.\n    \\item 进一步展开：Drift and selection jointly determine long-term response; increasing $N_e$ preserves more variation.\n    \\item 进一步展开：Equation (26.15b) expressed the limit as $2N_e R(1) = N_e \\bar{\\imath} (2\\sigma_A^2(0)/\\sigma_z)$.\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Optimal Selection Intensities: Motivation - Key Points}\n  \\begin{itemize}\n    \\item 进一步展开：固定测量个体数 $M$，选择比例 $p = N/M$。\n    \\item 进一步展开：减小 $p$ 增加选择强度 $\\bar{\\imath}$，但也减小有效种群大小 $N_e$。\n    \\item 进一步展开：Robertson (1960a) 提出长期极限响应正比于 $N_e \\bar{\\imath}$。\n    \\item 进一步展开：因此必须权衡：某个中间 $p$ 会使 $N_e \\bar{\\imath}$ 最大化。\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Derivation of the Key Formula - Example Walkthrough}\n  \\begin{itemize}\n    \\item 进一步展开：Robertson's selection limit (Equation 26.15b):\n    \\item 进一步展开：其中 $R(1)$ 是第一代响应，取决于初始遗传方差 $\\sigma_A^2(0)$。\n    \\item 进一步展开：注意到乘积 $N_e \\bar{\\imath}$ 决定了最终响应：它随 $p$ 变化。\n    \\item 进一步展开：对于截断选择，$\\bar{\\imath} = \\varphi(x_{[1-p]})/p$（忽略有限总体校正）。\n  \\end{itemize}\n\\end{frame}\n\n\\begin{frame}{Optimal Proportion - Review Summary}\n  \\kgimageplaceholder[figure=Figure 26.5,right,x=500,y=120,width=235,height=165]{Figure 26.5}\n  \\begin{itemize}\n    \\item 进一步展开：式 (26.23) 中括号项与 $p$ 无关，因此响应随 $\\varphi(x_{[1-p]})$ 变化。\n    \\item 进一步展开：正态密度 $\\varphi(x)$ 在 $x=0$ 处最大，对应截断点 $x_{[1-p]}=0$，即 $p=0.5$。\n    \\item 进一步展开：因此，对于加性基因和正态表型，保存一半个体使长期响应最大。\n    \\item 进一步展开：Figure 26.5A 展示了随 $p$ 变化的极限响应：$M$ 增大时曲线变得非常平坦。\n  \\end{itemize}\n\\end{frame}\n\n\\end{document}\n",
+  "updated_at": "2026-05-24T16:18:59.838317"
+}

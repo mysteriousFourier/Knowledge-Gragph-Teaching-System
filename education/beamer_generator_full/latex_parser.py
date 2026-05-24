@@ -78,26 +78,45 @@ def _extract_frames(body: str) -> List[str]:
     """提取所有 frame"""
     frames = []
     pattern = r"\\begin\{frame\}(.*?)\\end\{frame\}"
+    last_end = 0
     for m in re.finditer(pattern, body, re.DOTALL):
-        frames.append(m.group(0))
+        frame_text = m.group(0)
+        prefix = body[last_end:m.start()]
+        if _looks_like_review_background_prefix(prefix):
+            frame_text = "%__KG_REVIEW_BACKGROUND__\n" + frame_text
+        frames.append(frame_text)
+        last_end = m.end()
     return frames
+
+
+def _looks_like_review_background_prefix(prefix: str) -> bool:
+    """Detect frames wrapped by the browser's review-background template."""
+    if not prefix:
+        return False
+    tail = prefix[-4000:]
+    if "__KG_REVIEW_BACKGROUND__" in tail:
+        return True
+    has_background = r"\setbeamertemplate{background}" in tail
+    has_review_marker = "复习内容空白幻灯" in tail or r"\def\backcolor{gray!30}" in tail
+    return has_background and has_review_marker
 
 
 def _parse_frame(frame_text: str, slide_id: int) -> Optional[dict]:
     """解析单个 frame"""
+    review_background = "%__KG_REVIEW_BACKGROUND__" in frame_text
     # ---- 标题提取（支持嵌套花括号）----
     title = ""
     header_match = re.search(r"\\begin\{frame\}\s*\{", frame_text)
     if header_match:
         content = _match_braces(frame_text, header_match.end() - 1)
         if content:
-            title = _clean_latex_text(content)
+            title = _clean_frame_title_text(content)
 
     ft_match = re.search(r"\\frametitle\{", frame_text)
     if ft_match:
         content = _match_braces(frame_text, ft_match.end() - 1)
         if content:
-            title = _clean_latex_text(content)
+            title = _clean_frame_title_text(content)
 
     # ---- 类型识别 ----
     frame_type = "content"
@@ -120,7 +139,6 @@ def _parse_frame(frame_text: str, slide_id: int) -> Optional[dict]:
     equations = _extract_equations(frame_text)
     table = _extract_table(frame_text)
     placeholders = _extract_image_placeholders(frame_text)
-    placeholders = _merge_implicit_figure_placeholders(frame_text, placeholders)
     images = _extract_includegraphics(frame_text)
     callouts = _extract_callouts(frame_text)
     overview = _extract_overview(frame_text)
@@ -128,9 +146,6 @@ def _parse_frame(frame_text: str, slide_id: int) -> Optional[dict]:
     notes_parts = []
     if overview:
         notes_parts.append(overview)
-    for c in callouts:
-        notes_parts.append(f"[{c['label']}] {c['text']}")
-
     return {
         "id": slide_id,
         "type": frame_type,
@@ -141,6 +156,8 @@ def _parse_frame(frame_text: str, slide_id: int) -> Optional[dict]:
         "table": table,
         "images": images,
         "placeholders": placeholders,
+        "callouts": callouts,
+        "reviewBackground": review_background,
         "notes": "\n".join(notes_parts) if notes_parts else "",
     }
 
@@ -617,11 +634,26 @@ def _parse_placeholder_custom_box(location: str) -> dict:
 def _extract_callouts(frame_text: str) -> List[dict]:
     """提取 tikz callout 标注"""
     callouts = []
-    pattern = r"callout absolute pointer=\{.*?cs:(\w+)\}.*?\{([^}]+)\}\s*;"
+    pattern = r"\\node\[(?P<opts>[^\]]*rectangle callout[^\]]*)\]\s*at\s*\([\s\S]*?\)\s*\{(?P<text>.*?)\}\s*;"
     for m in re.finditer(pattern, frame_text, re.DOTALL):
-        label = m.group(1)
-        text = _clean_latex_text(m.group(2).strip())
-        callouts.append({"label": label, "text": text})
+        opts = m.group("opts")
+        pointer = re.search(r"cs:([A-Za-z0-9_:-]+)", opts)
+        width_match = re.search(r"text width\s*=\s*([0-9.]+\s*(?:cm|mm|pt|px|in)?)", opts)
+        align_match = re.search(r"align\s*=\s*(left|right|center)", opts)
+        width = _estimate_editor_px_from_latex_dimension(width_match.group(1), 250.0) if width_match else 250.0
+        text = _clean_latex_text(m.group("text").strip())
+        if not text:
+            continue
+        callouts.append({
+            "label": pointer.group(1) if pointer else "",
+            "text": text,
+            "x": 130.0 + len(callouts) * 18.0,
+            "y": 178.0 + len(callouts) * 18.0,
+            "width": max(120.0, min(520.0, width)),
+            "height": 92.0,
+            "fontSize": 12,
+            "align": align_match.group(1) if align_match else "center",
+        })
     return callouts
 
 
@@ -642,6 +674,11 @@ def _clean_latex_text(text: str) -> str:
         return ""
 
     s = text
+    s = s.replace(r"\textbackslash{}", "\\")
+    s = s.replace(r"\textbackslash\{\}", "\\")
+    s = s.replace(r"\_", "_")
+    s = s.replace(r"\$", "$")
+    s = s.replace(r"\{", "{").replace(r"\}", "}")
 
     # ---- 修复上游截断/分割后残留的显示数学和换行尺寸标记 ----
     s = re.sub(r"^\s*\[?\s*\d+(?:\.\d+)?\s*(?:pt|em|ex|cm|mm|in)\]?\s*", "", s)
@@ -709,7 +746,8 @@ def _clean_latex_text(text: str) -> str:
     s = re.sub(r"\\(?:quad|qquad|,|;|!|%)", " ", s)
     s = re.sub(r"\\(?:left|right|bigl|bigr|Bigl|Bigr)[.|(|)|\\{|\\}|\[|\]]?", "", s)
     s = re.sub(r"\\(?:cdot|cdots|ldots|dots|infty|approx|simeq|neq|geq|leq|gg|ll|pm|mp|times|div)\b", " ", s)
-    s = re.sub(r"\\(?:Rightarrow|Leftarrow|rightarrow|leftarrow|Longrightarrow)\b", "→", s)
+    s = re.sub(r"\\(?:Rightarrow|Longrightarrow|rightarrow)\b", "→", s)
+    s = re.sub(r"\\(?:Leftarrow|leftarrow)\b", "←", s)
     s = re.sub(r"\\(?:sum|prod|int|partial|nabla|forall|exists)\b", "", s)
 
     # ---- 移除 \usebeamertemplate{...} 等 beamer 命令 ----
@@ -737,6 +775,35 @@ def _clean_latex_text(text: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
 
     return s
+
+
+def _clean_frame_title_text(text: str) -> str:
+    """Clean frame titles for PPT display; titles should stay readable English."""
+    raw = str(text or "")
+    normalized = raw.replace(r"\textbackslash{}", "\\")
+    normalized = normalized.replace(r"\textbackslash\{\}", "\\")
+    normalized = normalized.replace(r"\_", "_")
+    normalized = normalized.replace(r"\{", "{").replace(r"\}", "}")
+    normalized = re.sub(r"\\bar\s*\{\s*\\?(?:imath|i)\s*\}", "Average Selection Intensity", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bN\s*_\s*\{?\s*e\s*\}?", "Effective Population Size", normalized)
+    cleaned = _clean_latex_text(normalized)
+    cleaned = cleaned.replace(r"\textbackslash{}", " ")
+    cleaned = cleaned.replace(r"\_", "_")
+    cleaned = re.sub(r"\btextbackslash\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\\bar\s*\{\s*\\?(?:imath|i)\s*\}", "Average Selection Intensity", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bbar\s+(?:imath|i)\b", "Average Selection Intensity", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bN\s*_\s*\{?\s*e\s*\}?", "Effective Population Size", cleaned)
+    cleaned = re.sub(r"\$[^$]*\$", " ", cleaned)
+    cleaned = re.sub(r"\\[a-zA-Z]+", " ", cleaned)
+    cleaned = cleaned.replace("{", " ").replace("}", " ").replace("\\", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:;,.")
+    if (
+        "tradeoff between" in cleaned.lower()
+        and ("average selection intensity" in cleaned.lower() or "bar imath" in cleaned.lower())
+        and "effective population size" in cleaned.lower()
+    ):
+        cleaned = "Tradeoff Between Selection Intensity and Effective Population Size"
+    return cleaned or "Content"
 
 
 def _estimate_editor_px_from_latex_dimension(value: str, default: float = 200.0) -> float:

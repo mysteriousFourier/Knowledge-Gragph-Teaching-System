@@ -58,6 +58,41 @@ def _prepare_text_frame(tf, font_size=None, color=None, bold=False, italic=False
     return p
 
 
+def _set_text_or_math(p, text: str, font_size=None, color=None, bold=False, italic=False, align=None):
+    """Set paragraph text while preserving inline LaTeX-style math as rendered images are not available in PPTX."""
+    text = _repair_latex_artifacts(text)
+    p.clear()
+    p.font.size = Pt(font_size) if font_size is not None else p.font.size
+    if color is not None:
+        p.font.color.rgb = color
+    p.font.bold = bold
+    p.font.italic = italic
+    if align is not None:
+        p.alignment = align
+    for idx, chunk in enumerate(_split_text_and_math(text)):
+        run = p.add_run()
+        run.text = chunk
+        if idx == 0:
+            continue
+
+
+def _split_text_and_math(text: str) -> list[str]:
+    parts = []
+    last = 0
+    pattern = re.compile(r"\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$\$[\s\S]*?\$\$|(^|[^\\])\$[^$\n]+?\$")
+    for m in pattern.finditer(text):
+        start = m.start()
+        if m.group(1):
+            start += len(m.group(1))
+        if start > last:
+            parts.append(text[last:start])
+        parts.append(text[start:m.end()])
+        last = m.end()
+    if last < len(text):
+        parts.append(text[last:])
+    return [p for p in parts if p]
+
+
 def _style_paragraph(p, font_size=None, color=None, bold=False, italic=False, align=None):
     if font_size is not None:
         p.font.size = Pt(font_size)
@@ -67,6 +102,176 @@ def _style_paragraph(p, font_size=None, color=None, bold=False, italic=False, al
     p.font.italic = italic
     if align is not None:
         p.alignment = align
+
+
+def _has_math_like(text: str) -> bool:
+    s = _repair_latex_artifacts(text)
+    return bool(re.search(r"\\|\$|[_^]|\\bar|\\frac|\\sqrt|\\begin\{", s))
+
+
+def _repair_latex_artifacts(text: str) -> str:
+    """Undo LaTeX escaping artifacts introduced by editor round-trips."""
+    s = str(text or "")
+    replacements = {
+        r"\textbackslash\{\}": "\\",
+        r"\textbackslash{}": "\\",
+        r"\textbackslash ": "\\",
+        r"\textasciicircum{}": "^",
+        r"\textasciitilde{}": "~",
+        r"\_": "_",
+        r"\$": "$",
+        r"\&": "&",
+        r"\%": "%",
+        r"\{": "{",
+        r"\}": "}",
+    }
+    for old, new in replacements.items():
+        s = s.replace(old, new)
+    return s
+
+
+def _render_text_png(text: str, font_size: float = 16, color: str = "#000000", align: str = "center") -> io.BytesIO:
+    s = _repair_latex_artifacts(text)
+    lines = s.splitlines() or [""]
+    width = max(1.6, min(8.5, max(len(line) for line in lines) * max(font_size, 10) * 0.06 + 0.7))
+    height = max(0.45, 0.32 * len(lines) + 0.25)
+    fig = plt.figure(figsize=(width, height), dpi=220)
+    fig.patch.set_alpha(0)
+    try:
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.axis("off")
+        x = 0.5 if align == "center" else (0.03 if align == "left" else 0.97)
+        ha = "center" if align == "center" else ("left" if align == "left" else "right")
+        for idx, line in enumerate(lines):
+            y = 0.5 if len(lines) == 1 else 1 - ((idx + 0.5) / len(lines))
+            fig.text(x, y, line, ha=ha, va="center", fontsize=font_size, color=color)
+        out = io.BytesIO()
+        fig.savefig(out, format="png", transparent=True, bbox_inches="tight", pad_inches=0.03)
+        out.seek(0)
+        return out
+    finally:
+        plt.close(fig)
+
+
+def _add_text_or_image(slide, left, top, width, height, text: str, font_size=14, color=COLOR_BLACK, bold=False, italic=False, align=PP_ALIGN.LEFT):
+    s = _repair_latex_artifacts(text)
+    align_name = "center" if align == PP_ALIGN.CENTER else ("right" if align == PP_ALIGN.RIGHT else "left")
+    if _has_math_like(s):
+        img = _render_text_png(s, font_size=font_size, color="#2864B4" if color == COLOR_MYBLUE else "#111111", align=align_name)
+        pic = slide.shapes.add_picture(img, left, top, width=width, height=height)
+        return pic
+    box = slide.shapes.add_textbox(left, top, width, height)
+    tf = box.text_frame
+    p = _prepare_text_frame(tf, font_size=font_size, color=color, bold=bold, italic=italic, align=align)
+    p.text = s
+    return box
+
+
+def _add_callout(slide, callout_data: dict):
+    if not isinstance(callout_data, dict):
+        return
+    text = _repair_latex_artifacts(callout_data.get("text", "") or "").strip()
+    if not text:
+        return
+    x = _editor_px_to_slide_x(callout_data.get("x", 130))
+    y = _editor_px_to_slide_y(callout_data.get("y", 180))
+    w = _editor_px_to_slide_x(callout_data.get("width", 250))
+    h = _editor_px_to_slide_y(callout_data.get("height", 92))
+    w = max(Inches(0.9), min(w, SLIDE_WIDTH - x))
+    h = max(Inches(0.45), min(h, SLIDE_HEIGHT - y))
+
+    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGULAR_CALLOUT, x, y, w, h)
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = COLOR_WHITE
+    shape.line.color.rgb = COLOR_MYBLUE
+    shape.line.width = Pt(1.5)
+    shape.adjustments[0] = 0.22
+    shape.adjustments[1] = 0.22
+
+    inner_left = x + Inches(0.08)
+    inner_top = y + Inches(0.05)
+    inner_w = max(Inches(0.5), w - Inches(0.16))
+    inner_h = max(Inches(0.3), h - Inches(0.1))
+    _add_text_or_image(
+        slide,
+        inner_left,
+        inner_top,
+        inner_w,
+        inner_h,
+        text,
+        font_size=_safe_float(callout_data.get("fontSize", 12), 12),
+        color=COLOR_BLACK,
+        align=PP_ALIGN.CENTER if str(callout_data.get("align", "center")).lower() == "center" else PP_ALIGN.LEFT,
+    )
+
+
+def _add_textbox_or_image(slide, left, top, width, height, text: str, font_size=14, color=COLOR_BLACK, bold=False, italic=False, align=PP_ALIGN.LEFT, bg=None, border=None):
+    text = _repair_latex_artifacts(text)
+    if _has_math_like(text):
+        return _add_text_or_image(slide, left, top, width, height, text, font_size=font_size, color=color, bold=bold, italic=italic, align=align)
+    box = slide.shapes.add_textbox(left, top, width, height)
+    tf = box.text_frame
+    tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    tf.margin_left = Inches(0.06)
+    tf.margin_right = Inches(0.06)
+    tf.margin_top = Inches(0.03)
+    tf.margin_bottom = Inches(0.03)
+    if bg:
+        box.fill.solid()
+        box.fill.fore_color.rgb = bg
+    if border:
+        box.line.color.rgb = border
+        box.line.width = Pt(0.5)
+    p = _prepare_text_frame(tf, font_size=font_size, color=color, bold=bold, italic=italic, align=align)
+    p.text = text
+    return box
+
+
+def _add_callout(slide, callout_data: dict):
+    if not isinstance(callout_data, dict):
+        return
+    text = _repair_latex_artifacts(callout_data.get("text", "") or "").strip()
+    if not text:
+        return
+    x = _editor_px_to_slide_x(callout_data.get("x", 130))
+    y = _editor_px_to_slide_y(callout_data.get("y", 180))
+    w = _editor_px_to_slide_x(callout_data.get("width", 250))
+    h = _editor_px_to_slide_y(callout_data.get("height", 92))
+    w = max(Inches(0.9), min(w, SLIDE_WIDTH - x))
+    h = max(Inches(0.45), min(h, SLIDE_HEIGHT - y))
+
+    shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGULAR_CALLOUT, x, y, w, h)
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = COLOR_WHITE
+    shape.line.color.rgb = COLOR_MYBLUE
+    shape.line.width = Pt(1.5)
+    shape.adjustments[0] = 0.22
+    shape.adjustments[1] = 0.22
+
+    tf = shape.text_frame
+    tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    tf.margin_left = Inches(0.06)
+    tf.margin_right = Inches(0.06)
+    tf.margin_top = Inches(0.05)
+    tf.margin_bottom = Inches(0.05)
+    p = tf.paragraphs[0]
+    _set_text_or_math(
+        p,
+        text,
+        font_size=_safe_float(callout_data.get("fontSize", 12), 12),
+        color=COLOR_BLACK,
+        align=PP_ALIGN.CENTER if str(callout_data.get("align", "center")).lower() == "center" else PP_ALIGN.LEFT,
+    )
+
+
+def _add_math_textbox(slide, left, top, width, height, text: str, font_size=14, color=COLOR_MYBLUE, align=PP_ALIGN.CENTER, italic=False):
+    box = slide.shapes.add_textbox(left, top, width, height)
+    tf = box.text_frame
+    p = _prepare_text_frame(tf, font_size=font_size, color=color, italic=italic, align=align)
+    _set_text_or_math(p, text, font_size=font_size, color=color, italic=italic, align=align)
+    return box
 
 
 def _image_size(image_source):
@@ -214,6 +419,8 @@ def _add_toc_slide(prs: Presentation, slide_data: dict):
 def _add_content_slide(prs: Presentation, slide_data: dict, upload_dir: str, figure_asset_paths: dict[str, str]):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
+    if slide_data.get("reviewBackground"):
+        _add_review_background(slide)
     _add_top_line(slide)
     _add_frame_title(slide, slide_data.get("title", ""))
     body_left = BODY_LEFT
@@ -300,11 +507,31 @@ def _add_content_slide(prs: Presentation, slide_data: dict, upload_dir: str, fig
 
     _add_image_placeholders(slide, slide_data.get("placeholders", []), figure_asset_paths, upload_dir)
     _add_textboxes(slide, slide_data.get("textboxes", []))
+    for callout in slide_data.get("callouts", []) or []:
+        _add_callout(slide, callout)
 
 
 # ================================================================
 #  辅助函数
 # ================================================================
+def _add_review_background(slide):
+    back = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0), Inches(0), SLIDE_WIDTH, SLIDE_HEIGHT)
+    back.fill.solid()
+    back.fill.fore_color.rgb = RGBColor(217, 217, 217)
+    back.line.fill.background()
+
+    front = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        Inches(0.92),
+        Inches(1.2),
+        SLIDE_WIDTH - Inches(1.84),
+        SLIDE_HEIGHT - Inches(1.85),
+    )
+    front.fill.solid()
+    front.fill.fore_color.rgb = RGBColor(255, 255, 255)
+    front.line.fill.background()
+
+
 def _add_top_line(slide):
     """顶部青色横线"""
     line = slide.shapes.add_shape(
@@ -418,7 +645,7 @@ def _add_textboxes(slide, textboxes: list):
         return
 
     for tb in textboxes:
-        text = str(tb.get("text", "") if isinstance(tb, dict) else "")
+        text = _repair_latex_artifacts(tb.get("text", "") if isinstance(tb, dict) else "")
         if not text.strip():
             continue
 
@@ -428,6 +655,26 @@ def _add_textboxes(slide, textboxes: list):
         h = _editor_px_to_slide_y(tb.get("height", 96))
         w = max(Inches(0.6), min(w, SLIDE_WIDTH - x))
         h = max(Inches(0.25), min(h, SLIDE_HEIGHT - y))
+
+        align = str(tb.get("align", "left") or "left").lower()
+        ppt_align = PP_ALIGN.CENTER if align == "center" else (PP_ALIGN.RIGHT if align == "right" else PP_ALIGN.LEFT)
+        if _has_math_like(text):
+            _add_textbox_or_image(
+                slide,
+                x,
+                y,
+                w,
+                h,
+                text,
+                font_size=_safe_float(tb.get("fontSize", 14), 14),
+                color=_parse_rgb_color(tb.get("color", "")) or COLOR_BLACK,
+                bold=bool(tb.get("bold", False)),
+                italic=bool(tb.get("italic", False)),
+                align=ppt_align,
+                bg=_parse_rgb_color(tb.get("bg", "")),
+                border=RGBColor(200, 205, 214),
+            )
+            continue
 
         box = slide.shapes.add_textbox(x, y, w, h)
         tf = box.text_frame
@@ -453,13 +700,7 @@ def _add_textboxes(slide, textboxes: list):
         p.font.color.rgb = _parse_rgb_color(tb.get("color", "")) or COLOR_BLACK
         p.font.bold = bool(tb.get("bold", False))
         p.font.italic = bool(tb.get("italic", False))
-        align = str(tb.get("align", "left") or "left").lower()
-        if align == "center":
-            p.alignment = PP_ALIGN.CENTER
-        elif align == "right":
-            p.alignment = PP_ALIGN.RIGHT
-        else:
-            p.alignment = PP_ALIGN.LEFT
+        p.alignment = ppt_align
 
 
 def _build_figure_asset_lookup(figure_assets: dict, upload_dir: str) -> dict[str, str]:
@@ -622,13 +863,24 @@ def _render_equation_image(equation: str) -> Optional[io.BytesIO]:
       out.seek(0)
       return out
     except Exception:
-      return None
+      return _render_formula_source_image(equation)
     finally:
       plt.close(fig)
 
 
+def _render_formula_source_image(equation: str) -> Optional[io.BytesIO]:
+    """Fallback formula box when mathtext cannot render a source equation."""
+    text = _formula_to_plain_text(equation)
+    if not text:
+        return None
+    try:
+        return _render_text_png(text, font_size=13, color="#2864B4", align="center")
+    except Exception:
+        return None
+
+
 def _split_equation_lines(equation: str) -> list[str]:
-    s = str(equation or "").strip()
+    s = _repair_latex_artifacts(equation).strip()
     if not s:
         return []
 

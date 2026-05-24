@@ -13,6 +13,11 @@ from pathlib import Path
 from time import time
 from typing import Any, Dict, Iterable, List, Optional
 
+try:
+    from .vector_index_service import GraphVectorIndex
+except Exception:  # pragma: no cover - optional vector stack
+    GraphVectorIndex = None  # type: ignore
+
 
 def _default_db_path() -> Path:
     explicit = os.getenv("GRAPH_DB_PATH") or os.getenv("KNOWLEDGE_GRAPH_DB_PATH")
@@ -204,6 +209,9 @@ class GraphService:
     def __init__(self, db_path: str | Path | None = None):
         self.db_path = Path(db_path) if db_path else _default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.retrieval_mode = (os.getenv("KGTS_RETRIEVAL_MODE") or "graph_db").strip().lower().replace("-", "_")
+        self.vector_index = GraphVectorIndex() if self.retrieval_mode == "hybrid" and GraphVectorIndex else None
+        self._vector_last_error: Optional[str] = None
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -367,10 +375,7 @@ class GraphService:
                 "relation_count": len(relations),
                 "node_types": node_types,
             },
-            "vector_stats": {
-                "mode": "graph-db",
-                "db_path": str(self.db_path),
-            },
+            "vector_stats": self._vector_stats(),
         }
 
     def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
@@ -403,6 +408,14 @@ class GraphService:
         return [self._node_row_to_api(row) for row in rows]
 
     def semantic_search(self, query: str, node_type: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
+        mode = self.retrieval_mode
+        if mode == "hybrid":
+            return self._semantic_search_hybrid(query, node_type=node_type, top_k=top_k)
+        if mode == "sparse_hybrid":
+            return self._semantic_search_sparse_hybrid(query, node_type=node_type, top_k=top_k)
+        return self._semantic_search_graph_db(query, node_type=node_type, top_k=top_k)
+
+    def _semantic_search_graph_db(self, query: str, node_type: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
         candidates = [self._node_row_to_api(row) for row in self._fetch_node_rows(node_type=node_type, limit=5000)]
         scored: List[Dict[str, Any]] = []
         for candidate in candidates:
@@ -423,6 +436,165 @@ class GraphService:
             )
         scored.sort(key=lambda item: item["similarity"], reverse=True)
         return scored[:top_k]
+
+    def _semantic_search_sparse_hybrid(self, query: str, node_type: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
+        candidates = [self._node_row_to_api(row) for row in self._fetch_node_rows(node_type=node_type, limit=5000)]
+        graph_scores = self._graph_scores()
+        scored: List[Dict[str, Any]] = []
+        for candidate in candidates:
+            haystack = f"{candidate['metadata'].get('label', '')}\n{candidate['content']}"
+            sparse_score = _score_text(query, haystack)
+            if sparse_score <= 0:
+                continue
+            graph_score = graph_scores.get(candidate["id"], 0.0)
+            combined = (0.82 * sparse_score) + (0.18 * graph_score)
+            scored.append(
+                {
+                    "node_id": candidate["id"],
+                    "similarity": round(combined, 4),
+                    "sparse_score": round(sparse_score, 4),
+                    "text_score": round(sparse_score, 4),
+                    "graph_score": round(graph_score, 4),
+                    "retrieval_source": "sparse_hybrid",
+                    "metadata": {
+                        "label": candidate["metadata"].get("label"),
+                        "type": candidate["type"],
+                        "content": candidate["content"],
+                    },
+                }
+            )
+        scored.sort(key=lambda item: item["similarity"], reverse=True)
+        return scored[:top_k]
+
+    def _semantic_search_hybrid(self, query: str, node_type: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
+        candidates = [self._node_row_to_api(row) for row in self._fetch_node_rows(node_type=node_type, limit=5000)]
+        by_id = {candidate["id"]: candidate for candidate in candidates}
+        graph_scores = self._graph_scores()
+        try:
+            if self.vector_index is None:
+                if GraphVectorIndex is None:
+                    raise RuntimeError("vector index unavailable")
+                self.vector_index = GraphVectorIndex()
+            self.vector_index.ensure_index(candidates)
+            vector_results = self.vector_index.search(query, top_k=max(top_k * 3, top_k), node_type=node_type)
+            self._vector_last_error = None
+        except Exception as exc:
+            self._vector_last_error = str(exc)
+            if self.vector_index is not None and hasattr(self.vector_index, "last_error"):
+                try:
+                    self.vector_index.last_error = str(exc)
+                except Exception:
+                    pass
+            return self._semantic_search_graph_db(query, node_type=node_type, top_k=top_k)
+
+        merged: Dict[str, Dict[str, Any]] = {}
+        for result in vector_results:
+            node_id = str(result.get("node_id") or "")
+            if not node_id:
+                continue
+            candidate = by_id.get(node_id)
+            metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+            text = f"{metadata.get('label') or (candidate or {}).get('label') or ''}\n{metadata.get('content') or (candidate or {}).get('content') or ''}"
+            vector_score = float(result.get("vector_score", result.get("similarity", 0.0)) or 0.0)
+            text_score = _score_text(query, text)
+            graph_score = graph_scores.get(node_id, 0.0)
+            hybrid_score = (0.65 * vector_score) + (0.25 * text_score) + (0.10 * graph_score)
+            merged[node_id] = {
+                "node_id": node_id,
+                "similarity": round(hybrid_score, 4),
+                "hybrid_score": round(hybrid_score, 4),
+                "vector_score": round(vector_score, 4),
+                "text_score": round(text_score, 4),
+                "graph_score": round(graph_score, 4),
+                "retrieval_source": "hybrid",
+                "metadata": {
+                    "label": metadata.get("label") or (candidate or {}).get("metadata", {}).get("label"),
+                    "type": metadata.get("type") or (candidate or {}).get("type"),
+                    "content": metadata.get("content") or (candidate or {}).get("content"),
+                },
+            }
+
+        for candidate in candidates:
+            if candidate["id"] in merged:
+                continue
+            haystack = f"{candidate['metadata'].get('label', '')}\n{candidate['content']}"
+            text_score = _score_text(query, haystack)
+            if text_score <= 0:
+                continue
+            graph_score = graph_scores.get(candidate["id"], 0.0)
+            hybrid_score = (0.25 * text_score) + (0.10 * graph_score)
+            merged[candidate["id"]] = {
+                "node_id": candidate["id"],
+                "similarity": round(hybrid_score, 4),
+                "hybrid_score": round(hybrid_score, 4),
+                "vector_score": 0.0,
+                "text_score": round(text_score, 4),
+                "graph_score": round(graph_score, 4),
+                "retrieval_source": "hybrid",
+                "metadata": {
+                    "label": candidate["metadata"].get("label"),
+                    "type": candidate["type"],
+                    "content": candidate["content"],
+                },
+            }
+
+        scored = list(merged.values())
+        scored.sort(key=lambda item: item["similarity"], reverse=True)
+        return scored[:top_k]
+
+    def _graph_scores(self) -> Dict[str, float]:
+        counts: Dict[str, int] = {}
+        with self._connect() as conn:
+            rows = conn.execute("SELECT source_node, target_node FROM relationships").fetchall()
+        for row in rows:
+            counts[row["source_node"]] = counts.get(row["source_node"], 0) + 1
+            counts[row["target_node"]] = counts.get(row["target_node"], 0) + 1
+        max_count = max(counts.values(), default=1)
+        return {node_id: count / max_count for node_id, count in counts.items()}
+
+    def rebuild_vector_index(self) -> Dict[str, Any]:
+        nodes = [self._node_row_to_api(row) for row in self._fetch_node_rows(limit=5000)]
+        try:
+            if self.vector_index is None:
+                if GraphVectorIndex is None:
+                    raise RuntimeError("vector index unavailable")
+                self.vector_index = GraphVectorIndex()
+            stats = self.vector_index.rebuild(nodes)
+            self._vector_last_error = None
+            return stats
+        except Exception as exc:
+            self._vector_last_error = str(exc)
+            if self.vector_index is not None and hasattr(self.vector_index, "last_error"):
+                try:
+                    self.vector_index.last_error = str(exc)
+                except Exception:
+                    pass
+            return self._vector_stats()
+
+    def _vector_stats(self) -> Dict[str, Any]:
+        mode = self.retrieval_mode
+        if mode == "hybrid" and self.vector_index is not None:
+            try:
+                stats = dict(self.vector_index.get_stats())
+            except Exception:
+                stats = {"enabled": False, "mode": "hybrid", "index_size": 0}
+            if self._vector_last_error:
+                stats["last_error"] = self._vector_last_error
+            return stats
+        if mode == "sparse_hybrid":
+            return {
+                "enabled": True,
+                "mode": "sparse_hybrid",
+                "provider": "standard-library-sparse",
+                "index_size": 0,
+                "last_error": self._vector_last_error,
+            }
+        return {
+            "enabled": False,
+            "mode": "graph-db",
+            "db_path": str(self.db_path),
+            "last_error": self._vector_last_error,
+        }
 
     def add_node(self, content: str, node_type: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         metadata = metadata or {}
@@ -724,7 +896,7 @@ class GraphService:
                 "average_degree": round((total_relations * 2) / total_nodes, 2) if total_nodes else 0,
                 "density": round(density, 4),
             },
-            "vector_stats": {"mode": "graph-db", "db_path": str(self.db_path)},
+            "vector_stats": self._vector_stats(),
         }
 
     def get_subgraph_by_type(self, node_type: str) -> Dict[str, Any]:
