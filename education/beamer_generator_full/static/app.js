@@ -469,6 +469,72 @@
     return clone.innerHTML;
   }
 
+  function cssColorToLatexSpec(value) {
+    var s = String(value || "").trim();
+    if (!s || s === "transparent" || s === "rgba(0, 0, 0, 0)") return "";
+    if (s[0] === "#") {
+      var hex = s.slice(1);
+      if (hex.length === 3) hex = hex.split("").map(function (ch) { return ch + ch; }).join("");
+      if (/^[0-9a-f]{6}$/i.test(hex)) return "[HTML]{" + hex.toUpperCase() + "}";
+    }
+    var m = s.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)/i);
+    if (m && (m[4] === undefined || parseFloat(m[4]) > 0)) {
+      var hexParts = [m[1], m[2], m[3]].map(function (part) {
+        var n = Math.max(0, Math.min(255, parseInt(part, 10) || 0));
+        return n.toString(16).padStart(2, "0").toUpperCase();
+      });
+      return "[HTML]{" + hexParts.join("") + "}";
+    }
+    return "";
+  }
+
+  function richHtmlToLatex(html, fallbackText) {
+    var source = String(html || "").trim();
+    if (!source) return escapeLatexTextPreservingMath(fallbackText || "");
+    var root = document.createElement("div");
+    root.innerHTML = source;
+
+    function walk(node) {
+      if (!node) return "";
+      if (node.nodeType === Node.TEXT_NODE) {
+        return escapeLatexTextPreservingMath(node.nodeValue || "");
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return "";
+      var el = node;
+      var tag = el.tagName ? el.tagName.toLowerCase() : "";
+      if (el.hasAttribute("data-latex")) {
+        return escapeLatexTextPreservingMath(el.getAttribute("data-latex") || "");
+      }
+      if (tag === "br") return "\\\\";
+      var inner = "";
+      for (var i = 0; i < el.childNodes.length; i++) {
+        inner += walk(el.childNodes[i]);
+      }
+      if (!inner) return "";
+      var colorSpec = cssColorToLatexSpec(el.style && el.style.color ? el.style.color : (el.getAttribute("color") || ""));
+      var fontWeight = String(el.style && el.style.fontWeight || "").toLowerCase();
+      var fontStyle = String(el.style && el.style.fontStyle || "").toLowerCase();
+      if (tag === "b" || tag === "strong" || fontWeight === "bold" || parseInt(fontWeight, 10) >= 600) {
+        inner = "\\textbf{" + inner + "}";
+      }
+      if (tag === "i" || tag === "em" || fontStyle === "italic") {
+        inner = "\\textit{" + inner + "}";
+      }
+      if (colorSpec) {
+        inner = "\\textcolor" + colorSpec + "{" + inner + "}";
+      }
+      if (tag === "div" || tag === "p") {
+        inner += "\n";
+      }
+      return inner;
+    }
+
+    var out = "";
+    for (var j = 0; j < root.childNodes.length; j++) out += walk(root.childNodes[j]);
+    out = out.replace(/\n{3,}/g, "\n\n").trim();
+    return out || escapeLatexTextPreservingMath(fallbackText || "");
+  }
+
   function restoreRichTextHtml($preview, html, fallbackText) {
     if (html) {
       var probe = document.createElement("div");
@@ -982,7 +1048,8 @@
     if (equations.length) {
       html += '<div class="saved-slide-mini-equations">';
       equations.forEach(function (eq) {
-        html += '<div>' + escHtml(String(eq || "").slice(0, 80)) + '</div>';
+        html += '<div class="saved-slide-mini-equation" data-math-source="' + escAttr(String(eq || "")) + '">' +
+          escHtml(String(eq || "").slice(0, 80)) + '</div>';
       });
       html += '</div>';
     }
@@ -1002,10 +1069,26 @@
     return html;
   }
 
+  function renderSavedSlideMiniMath($root) {
+    if (!$root || !$root.length) return;
+    $root.find(".saved-slide-mini-equation").each(function () {
+      var $eq = $(this);
+      var source = $eq.data("math-source") || $eq.text() || "";
+      renderMathText($eq, source, {
+        displayMode: true,
+        boxedMath: false,
+        emptyText: source,
+      });
+    });
+  }
+
   function renderSavedPptGalleryShell($gallery, title) {
     $gallery.empty().append(
       '<div class="saved-ppt-gallery-header">' +
-        '<span class="saved-ppt-gallery-title">' + escHtml(title || "已保存章节页面") + '</span>' +
+        '<div class="saved-ppt-gallery-title-wrap">' +
+          '<span class="saved-ppt-gallery-title">' + escHtml(title || "已保存章节页面") + '</span>' +
+          '<span class="saved-ppt-gallery-hint">按住缩略图拖到当前 PPT 左侧列表，即可插入到本章节</span>' +
+        '</div>' +
         '<button type="button" class="saved-ppt-gallery-close" data-action="close-saved-ppt-gallery" title="关闭">×</button>' +
       '</div>' +
       '<div class="saved-ppt-gallery-content"></div>'
@@ -1038,6 +1121,7 @@
           renderSavedSlideMini(slide, idx, "") +
         '</button>'
       );
+      renderSavedSlideMiniMath($card);
       $card.on("click", function () {
         openSavedSlidePreview(slide, idx);
       });
@@ -1110,7 +1194,9 @@
   }
 
   function openSavedSlidePreview(slide, pageIndex) {
-    $("#savedSlidePreviewContent").html(renderSavedSlideMini(slide, pageIndex, "saved-slide-mini-large"));
+    var $content = $("#savedSlidePreviewContent");
+    $content.html(renderSavedSlideMini(slide, pageIndex, "saved-slide-mini-large"));
+    renderSavedSlideMiniMath($content);
     $("#savedSlidePreviewModal").show();
     $("body").addClass("modal-open");
   }
@@ -2847,10 +2933,10 @@
 
   function buildContentSlideLatex(slide) {
     var out = [];
-    out.push("\\begin{frame}{" + escapeLatexTextPreservingMath(slide.title || "") + "}");
+    out.push("\\begin{frame}{" + richHtmlToLatex(slide.titleRichHtml || "", slide.title || "") + "}");
 
     if (slide.subtitle) {
-      out.push("  \\textit{" + escapeLatexTextPreservingMath(slide.subtitle) + "}");
+      out.push("  \\textit{" + richHtmlToLatex(slide.subtitleRichHtml || "", slide.subtitle) + "}");
       out.push("  \\vspace{0.3cm}");
     }
 
@@ -2867,7 +2953,7 @@
     if (slide.items && slide.items.length) {
       out.push("  \\begin{itemize}");
       for (var i = 0; i < slide.items.length; i++) {
-        out.push("    \\item " + escapeLatexTextPreservingMath(slide.items[i] || ""));
+        out.push("    \\item " + richHtmlToLatex((slide.itemRichHtml || [])[i] || "", slide.items[i] || ""));
       }
       out.push("  \\end{itemize}");
     }
@@ -2884,7 +2970,7 @@
       for (var k = 0; k < slide.textboxes.length; k++) {
         var tb = slide.textboxes[k] || {};
         if (!tb.text) continue;
-        var boxText = escapeLatexTextPreservingMath(tb.text);
+        var boxText = richHtmlToLatex(tb.richHtml || "", tb.text);
         if (tb.fontSize) {
           boxText = "{\\fontsize{" + tb.fontSize + "}{" + Math.round(tb.fontSize * 1.2) + "}\\selectfont " + boxText + "}";
         }
@@ -2945,10 +3031,18 @@
       addLine(line, lineMap);
     }
 
-    addTrackedLine("\\begin{frame}{", slide.title || "", "}", syncKey(slideIdx, "title"));
+    if (slide.titleRichHtml) {
+      addLine("\\begin{frame}{" + richHtmlToLatex(slide.titleRichHtml, slide.title || "") + "}");
+    } else {
+      addTrackedLine("\\begin{frame}{", slide.title || "", "}", syncKey(slideIdx, "title"));
+    }
 
     if (slide.subtitle) {
-      addTrackedLine("  \\textit{", slide.subtitle, "}", syncKey(slideIdx, "subtitle"));
+      if (slide.subtitleRichHtml) {
+        addLine("  \\textit{" + richHtmlToLatex(slide.subtitleRichHtml, slide.subtitle) + "}");
+      } else {
+        addTrackedLine("  \\textit{", slide.subtitle, "}", syncKey(slideIdx, "subtitle"));
+      }
       addLine("  \\vspace{0.3cm}");
     }
 
@@ -2986,7 +3080,12 @@
     if (slide.items && slide.items.length) {
       addLine("  \\begin{itemize}");
       for (var i = 0; i < slide.items.length; i++) {
-        addTrackedLine("    \\item ", slide.items[i] || "", "", syncKey(slideIdx, "item", i));
+        var itemRich = (slide.itemRichHtml || [])[i] || "";
+        if (itemRich) {
+          addLine("    \\item " + richHtmlToLatex(itemRich, slide.items[i] || ""));
+        } else {
+          addTrackedLine("    \\item ", slide.items[i] || "", "", syncKey(slideIdx, "item", i));
+        }
       }
       addLine("  \\end{itemize}");
     }
@@ -3017,7 +3116,11 @@
           tbSuffix += "}";
         }
         addLine("  \\begin{center}");
-        addTrackedLine(tbPrefix, tb.text, tbSuffix, syncKey(slideIdx, "textbox", k));
+        if (tb.richHtml) {
+          addLine(tbPrefix + richHtmlToLatex(tb.richHtml, tb.text) + tbSuffix);
+        } else {
+          addTrackedLine(tbPrefix, tb.text, tbSuffix, syncKey(slideIdx, "textbox", k));
+        }
         addLine("  \\end{center}");
       }
     }
@@ -3689,6 +3792,92 @@
     });
   });
 
+  function slideThumbBoxStyle(box, fallback) {
+    box = box || {};
+    fallback = fallback || {};
+    var width = clampNumber(Number(box.width), 40, SLIDE_DESIGN_WIDTH, Number(fallback.width) || 220);
+    var height = clampNumber(Number(box.height), 28, SLIDE_DESIGN_HEIGHT, Number(fallback.height) || 140);
+    var x = clampNumber(Number(box.x), 0, Math.max(0, SLIDE_DESIGN_WIDTH - width), Number(fallback.x) || 40);
+    var y = clampNumber(Number(box.y), 0, Math.max(0, SLIDE_DESIGN_HEIGHT - height), Number(fallback.y) || 170);
+    return [
+      "left:" + (x / SLIDE_DESIGN_WIDTH * 100).toFixed(2) + "%",
+      "top:" + (y / SLIDE_DESIGN_HEIGHT * 100).toFixed(2) + "%",
+      "width:" + (width / SLIDE_DESIGN_WIDTH * 100).toFixed(2) + "%",
+      "height:" + (height / SLIDE_DESIGN_HEIGHT * 100).toFixed(2) + "%"
+    ].join(";");
+  }
+
+  function renderSlideThumbPreview(slide, pageIndex) {
+    slide = slide || {};
+    var items = Array.isArray(slide.items) ? slide.items.slice(0, 4) : [];
+    var equations = Array.isArray(slide.equations) ? slide.equations.slice(0, 1) : [];
+    var placeholders = Array.isArray(slide.placeholders) ? slide.placeholders.slice(0, 4) : [];
+    var images = Array.isArray(slide.images) ? slide.images.slice(0, 4) : [];
+    var textboxes = Array.isArray(slide.textboxes) ? slide.textboxes.slice(0, 4) : [];
+    var callouts = Array.isArray(slide.callouts) ? slide.callouts.slice(0, 3) : [];
+    var hasVisibleContent = items.length || equations.length || placeholders.length || images.length ||
+      textboxes.length || callouts.length || (slide.table && slide.table.headers);
+    var html = '<div class="slide-thumb-preview' + (slide.reviewBackground ? " review-background" : "") + '">' +
+      '<div class="slide-thumb-preview-topline"></div>' +
+      '<div class="slide-thumb-preview-page">' + (pageIndex + 1) + '</div>' +
+      '<div class="slide-thumb-preview-title">' + escHtml(slide.title || "(Untitled)") + '</div>';
+    if (slide.subtitle) {
+      html += '<div class="slide-thumb-preview-subtitle">' + escHtml(String(slide.subtitle).slice(0, 80)) + '</div>';
+    }
+    html += '<div class="slide-thumb-preview-content">';
+    if (items.length) {
+      html += '<ul>';
+      items.forEach(function (item) {
+        html += '<li>' + escHtml(String(item || "").replace(/\s+/g, " ").slice(0, 90)) + '</li>';
+      });
+      html += '</ul>';
+    }
+    if (equations.length) {
+      html += '<div class="slide-thumb-preview-equation">' + escHtml(String(equations[0] || "").slice(0, 80)) + '</div>';
+    }
+    if (slide.table && slide.table.headers) {
+      html += '<div class="slide-thumb-preview-table"><span></span><span></span><span></span></div>';
+    }
+    if (!hasVisibleContent) {
+      html += '<div class="slide-thumb-preview-empty">空白页</div>';
+    }
+    html += '</div>';
+
+    placeholders.forEach(function (ph, phIdx) {
+      ph = ph || {};
+      var phUrl = ph.asset || ph.url || ph.path || "";
+      var phStyle = slideThumbBoxStyle(ph, { x: 500 + phIdx * 12, y: 120 + phIdx * 12, width: 235, height: 165 });
+      if (phUrl) {
+        html += '<img class="slide-thumb-preview-image" style="' + phStyle + '" src="' + escAttr(phUrl) + '" alt="" />';
+      } else {
+        html += '<div class="slide-thumb-preview-placeholder" style="' + phStyle + '">' +
+          escHtml(String(ph.label || ph.figure || "Figure").slice(0, 28)) + '</div>';
+      }
+    });
+    images.forEach(function (img, imgIdx) {
+      img = img || {};
+      var imgUrl = img.url || img.path || img.src || "";
+      if (!imgUrl) return;
+      var imgStyle = slideThumbBoxStyle(img, { x: 40 + imgIdx * 16, y: 170 + imgIdx * 12, width: 220, height: 150 });
+      html += '<img class="slide-thumb-preview-image" style="' + imgStyle + '" src="' + escAttr(imgUrl) + '" alt="" />';
+    });
+    textboxes.forEach(function (tb, tbIdx) {
+      tb = tb || {};
+      var tbStyle = slideThumbBoxStyle(tb, { x: 120 + tbIdx * 14, y: 210 + tbIdx * 12, width: 260, height: 70 });
+      var fontSize = Math.max(5, Math.min(9, (Number(tb.fontSize) || 14) * 0.45));
+      html += '<div class="slide-thumb-preview-textbox" style="' + tbStyle + ';font-size:' + fontSize.toFixed(1) + 'px">' +
+        escHtml(String(tb.text || "").replace(/\s+/g, " ").slice(0, 70)) + '</div>';
+    });
+    callouts.forEach(function (callout, calloutIdx) {
+      callout = callout || {};
+      var calloutStyle = slideThumbBoxStyle(callout, { x: 130 + calloutIdx * 18, y: 178 + calloutIdx * 18, width: 250, height: 92 });
+      html += '<div class="slide-thumb-preview-callout" style="' + calloutStyle + '">' +
+        escHtml(String(callout.text || "").replace(/\s+/g, " ").slice(0, 38)) + '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
   function renderSlideList() {
     var $list = $("#slideList").empty();
     if (!slidesData || !slidesData.slides) return;
@@ -3741,9 +3930,11 @@
         var $thumb = $(
           '<div class="slide-thumb" draggable="true" data-idx="' + idx + '" title="按住拖动可调整页面顺序">' +
             '<button class="slide-thumb-delete" title="Delete">&times;</button>' +
-            '<div class="slide-thumb-number">Page ' + (idx + 1) + '</div>' +
-            '<div class="slide-thumb-title">' + escHtml(s.title || "(Untitled)") + '</div>' +
-            '<span class="slide-thumb-type">' + (typeNames[s.type] || "Content") + '</span>' +
+            renderSlideThumbPreview(s, idx) +
+            '<div class="slide-thumb-meta">' +
+              '<span class="slide-thumb-number">Page ' + (idx + 1) + '</span>' +
+              '<span class="slide-thumb-type">' + (typeNames[s.type] || "Content") + '</span>' +
+            '</div>' +
           '</div>'
         );
 
@@ -3980,6 +4171,7 @@
         '<div class="toolbar-color">' +
           '<label>背景</label>' +
           '<input type="color" id="toolbarBgColor" value="#ffffff" />' +
+          '<button id="toolbarResetBgColor" class="toolbar-btn toolbar-mini toolbar-reset-btn" type="button" title="恢复白色背景">白底</button>' +
         '</div>' +
         '<div class="toolbar-sep"></div>' +
         '<div class="toolbar-label">字号</div>' +
@@ -4487,6 +4679,10 @@
       $("#toolbarTextAlign").val($(this).css("text-align") || "left");
     });
 
+    $ctx.on("keyup.slide mouseup.slide pointerup.slide", ".slide-rich-text-preview", function () {
+      rememberRichTextSelection(this);
+    });
+
     $ctx.on("mousedown.slide", ".slide-item-input, .slide-textbox-content, .slide-callout-content, .slide-eq-input, .slide-title-input, .slide-subtitle-input, .slide-notes-input, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function (e) {
       e.stopPropagation();
     });
@@ -4815,15 +5011,40 @@
       }
     }
 
-    $ctx.on("input.toolbar", "#toolbarFontColor", function () {
-      if (formatRichSelection("foreColor", $(this).val())) return;
-      if (lastFocusedInput) {
-        $(lastFocusedInput).css("color", $(this).val());
-        updateScopedMathPreviews(mathPreviewScope($(lastFocusedInput)));
-        saveCurrentSlide();
-        scheduleLatexSync();
-        scheduleHistoryCommit();
+    function applyRichSelectionStyle(styles) {
+      if (!lastFocusedRichText) return false;
+      var selection = window.getSelection ? window.getSelection() : null;
+      if (!selection || !selection.rangeCount || selection.isCollapsed) {
+        if (!restoreRichTextSelection()) return false;
+        selection = window.getSelection ? window.getSelection() : null;
       }
+      if (!selection || !selection.rangeCount || selection.isCollapsed) return false;
+      var range = selection.getRangeAt(0);
+      if (!selectionInsideElement(lastFocusedRichText, range)) return false;
+      var span = document.createElement("span");
+      Object.keys(styles || {}).forEach(function (key) {
+        span.style[key] = styles[key];
+      });
+      try {
+        span.appendChild(range.extractContents());
+        range.insertNode(span);
+        selection.removeAllRanges();
+        var nextRange = document.createRange();
+        nextRange.selectNodeContents(span);
+        selection.addRange(nextRange);
+        afterRichTextFormat();
+        return true;
+      } catch (err) {
+        return false;
+      }
+    }
+
+    function applyToolbarFontColor(value) {
+      if (applyRichSelectionStyle({ color: value })) return;
+    }
+
+    $ctx.on("input.toolbar change.toolbar", "#toolbarFontColor", function () {
+      applyToolbarFontColor($(this).val() || "#333333");
     });
 
     $ctx.on("input.toolbar", "#toolbarBgColor", function () {
@@ -4834,6 +5055,18 @@
         scheduleLatexSync();
         scheduleHistoryCommit();
       }
+    });
+
+    $ctx.on("click.toolbar", "#toolbarResetBgColor", function (e) {
+      e.preventDefault();
+      if (lastFocusedTextbox) {
+        $(lastFocusedTextbox).css("background-color", "#ffffff");
+        updateScopedMathPreviews($(lastFocusedTextbox));
+        saveCurrentSlide();
+        scheduleLatexSync();
+        scheduleHistoryCommit();
+      }
+      $("#toolbarBgColor").val("#ffffff");
     });
 
     $ctx.on("change.toolbar", "#toolbarFontSize", function () {

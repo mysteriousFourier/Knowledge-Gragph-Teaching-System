@@ -3,6 +3,8 @@ import io
 import os
 import re
 from pathlib import Path
+from html import escape as html_escape
+from html.parser import HTMLParser
 from typing import Optional
 
 import matplotlib
@@ -102,6 +104,152 @@ def _style_paragraph(p, font_size=None, color=None, bold=False, italic=False, al
     p.font.italic = italic
     if align is not None:
         p.alignment = align
+
+
+def _parse_inline_style(style_text: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for part in str(style_text or "").split(";"):
+        if ":" not in part:
+            continue
+        key, value = part.split(":", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key and value:
+            result[key] = value
+    return result
+
+
+def _rich_html_looks_safe(html: str) -> bool:
+    if not html:
+      return False
+    lowered = str(html).lower()
+    return not any(token in lowered for token in ("katex", "data-latex"))
+
+
+class _RichHtmlFragmentParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.paragraphs: list[list[dict[str, object]]] = [[]]
+        self._stack: list[dict[str, object]] = [self._base_style()]
+
+    def _base_style(self) -> dict[str, object]:
+        return {"bold": False, "italic": False, "color": None}
+
+    def _current_style(self) -> dict[str, object]:
+        return dict(self._stack[-1])
+
+    def _push_style(self, style: dict[str, object]) -> None:
+        self._stack.append(style)
+
+    def _pop_style(self) -> None:
+        if len(self._stack) > 1:
+            self._stack.pop()
+
+    def _new_paragraph(self) -> None:
+        if self.paragraphs and self.paragraphs[-1]:
+            self.paragraphs.append([])
+
+    def handle_starttag(self, tag, attrs):
+        tag = (tag or "").lower()
+        attrs = dict(attrs or [])
+        if tag in {"br"}:
+            self.paragraphs.append([])
+            return
+        if tag in {"p", "div"}:
+            self._new_paragraph()
+            return
+
+        style = self._current_style()
+        if tag in {"b", "strong"}:
+            style["bold"] = True
+        if tag in {"i", "em"}:
+            style["italic"] = True
+        if tag == "font" and attrs.get("color"):
+            style["color"] = attrs.get("color")
+        inline = _parse_inline_style(attrs.get("style", ""))
+        if inline.get("color"):
+            style["color"] = inline.get("color")
+        if inline.get("font-weight") and inline.get("font-weight").lower() not in {"normal", "400"}:
+            style["bold"] = True
+        if inline.get("font-style") and inline.get("font-style").lower() == "italic":
+            style["italic"] = True
+        if tag in {"span", "font", "b", "strong", "i", "em"}:
+            self._push_style(style)
+
+    def handle_endtag(self, tag):
+        tag = (tag or "").lower()
+        if tag in {"p", "div"}:
+            self._new_paragraph()
+            return
+        if tag in {"span", "font", "b", "strong", "i", "em"}:
+            self._pop_style()
+
+    def handle_data(self, data):
+        if not data:
+            return
+        current = self.paragraphs[-1]
+        style = self._current_style()
+        pieces = data.splitlines(True)
+        for piece in pieces:
+            if not piece:
+                continue
+            if piece in {"\n", "\r\n", "\r"}:
+                self.paragraphs.append([])
+                current = self.paragraphs[-1]
+                continue
+            current.append({"text": piece, "style": style})
+
+
+def _write_rich_html_to_text_frame(tf, html: str, fallback_text: str = "", font_size=None, color=None, bold=False, italic=False, align=None, vertical_anchor=None) -> bool:
+    html = str(html or "")
+    if not html.strip() or not _rich_html_looks_safe(html):
+        return False
+    parser = _RichHtmlFragmentParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        return False
+    paragraphs = [p for p in parser.paragraphs if any(str(f.get("text") or "").strip() for f in p)]
+    if not paragraphs:
+        return False
+    try:
+        tf.clear()
+    except Exception:
+        try:
+            tf._element.clear_content()
+        except Exception:
+            pass
+    tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    if vertical_anchor is not None:
+        tf.vertical_anchor = vertical_anchor
+    tf.margin_left = Inches(0.04)
+    tf.margin_right = Inches(0.04)
+    tf.margin_top = Inches(0.02)
+    tf.margin_bottom = Inches(0.02)
+    for idx, fragments in enumerate(paragraphs):
+        p = tf.paragraphs[0] if idx == 0 else tf.add_paragraph()
+        if font_size is not None:
+            p.font.size = Pt(font_size)
+        if color is not None:
+            p.font.color.rgb = color
+        p.font.bold = bold
+        p.font.italic = italic
+        if align is not None:
+            p.alignment = align
+        for fragment in fragments:
+            text = str(fragment.get("text") or "")
+            if not text:
+                continue
+            run = p.add_run()
+            run.text = text
+            style = fragment.get("style") or {}
+            run.font.size = Pt(font_size) if font_size is not None else run.font.size
+            run.font.color.rgb = _parse_rgb_color(str(style.get("color") or "")) or color or COLOR_BLACK
+            run.font.bold = bool(style.get("bold", False)) or bold
+            run.font.italic = bool(style.get("italic", False)) or italic
+    return True
 
 
 def _has_math_like(text: str) -> bool:
@@ -359,8 +507,10 @@ def _add_title_slide(prs: Presentation, meta: dict, slide_data: dict):
         Inches(1.35), Inches(2.05), Inches(10.6), Inches(1.8)
     )
     tf = title_box.text_frame
-    p = _prepare_text_frame(tf, font_size=34, color=COLOR_BLACK, bold=True, align=PP_ALIGN.CENTER)
-    p.text = meta.get("title", "")
+    title_rich = slide_data.get("titleRichHtml") or meta.get("titleRichHtml") or ""
+    if not _write_rich_html_to_text_frame(tf, title_rich, meta.get("title", ""), font_size=34, color=COLOR_BLACK, bold=True, align=PP_ALIGN.CENTER):
+        p = _prepare_text_frame(tf, font_size=34, color=COLOR_BLACK, bold=True, align=PP_ALIGN.CENTER)
+        p.text = meta.get("title", "")
 
     # 副标题
     if meta.get("subtitle"):
@@ -368,8 +518,10 @@ def _add_title_slide(prs: Presentation, meta: dict, slide_data: dict):
             Inches(1.9), Inches(3.7), Inches(9.5), Inches(0.8)
         )
         tf = subtitle_box.text_frame
-        p = _prepare_text_frame(tf, font_size=19, color=COLOR_BLACK, align=PP_ALIGN.CENTER)
-        p.text = meta["subtitle"]
+        subtitle_rich = slide_data.get("subtitleRichHtml") or meta.get("subtitleRichHtml") or ""
+        if not _write_rich_html_to_text_frame(tf, subtitle_rich, meta["subtitle"], font_size=19, color=COLOR_BLACK, align=PP_ALIGN.CENTER):
+            p = _prepare_text_frame(tf, font_size=19, color=COLOR_BLACK, align=PP_ALIGN.CENTER)
+            p.text = meta["subtitle"]
 
     # 作者 + 日期
     info_parts = []
@@ -393,7 +545,7 @@ def _add_toc_slide(prs: Presentation, slide_data: dict):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
     _add_top_line(slide)
-    _add_frame_title(slide, slide_data.get("title", "Contents"))
+    _add_frame_title(slide, slide_data.get("title", "Contents"), slide_data.get("titleRichHtml", ""))
 
     items = slide_data.get("items", [])
     if not items:
@@ -422,7 +574,7 @@ def _add_content_slide(prs: Presentation, slide_data: dict, upload_dir: str, fig
     if slide_data.get("reviewBackground"):
         _add_review_background(slide)
     _add_top_line(slide)
-    _add_frame_title(slide, slide_data.get("title", ""))
+    _add_frame_title(slide, slide_data.get("title", ""), slide_data.get("titleRichHtml", ""))
     body_left = BODY_LEFT
     body_right = BODY_RIGHT
     body_top = BODY_TOP
@@ -436,8 +588,10 @@ def _add_content_slide(prs: Presentation, slide_data: dict, upload_dir: str, fig
             Inches(0.6), Inches(1.08), Inches(12.0), Inches(0.4)
         )
         tf = sub_box.text_frame
-        p = _prepare_text_frame(tf, font_size=11, color=COLOR_GRAY)
-        p.text = f"  {slide_data['subtitle']}"
+        subtitle_rich = slide_data.get("subtitleRichHtml", "")
+        if not _write_rich_html_to_text_frame(tf, subtitle_rich, f"  {slide_data['subtitle']}", font_size=11, color=COLOR_GRAY):
+            p = _prepare_text_frame(tf, font_size=11, color=COLOR_GRAY)
+            p.text = f"  {slide_data['subtitle']}"
 
     # 计算正文区域起始 Y
     body_top = BODY_TOP
@@ -460,6 +614,22 @@ def _add_content_slide(prs: Presentation, slide_data: dict, upload_dir: str, fig
         tf.word_wrap = True
         tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
+        item_rich_html = slide_data.get("itemRichHtml", []) or []
+        if item_rich_html and any(item_rich_html):
+            rich_body_html = "".join(
+                "<div>&bull; " + (item_rich_html[i] if i < len(item_rich_html) and item_rich_html[i] else html_escape(str(item or ""))) + "</div>"
+                for i, item in enumerate(items)
+            )
+            if _write_rich_html_to_text_frame(
+                tf,
+                rich_body_html,
+                "\n".join("• " + str(item or "") for item in items),
+                font_size=15,
+                color=COLOR_BLACK,
+                align=PP_ALIGN.LEFT,
+            ):
+                items = []
+
         for i, item in enumerate(items):
             p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
             p.text = f"•  {item}"
@@ -478,12 +648,17 @@ def _add_content_slide(prs: Presentation, slide_data: dict, upload_dir: str, fig
                 top = eq_top + Inches(i * 0.72)
                 _add_picture_fit(slide, img_stream, body_left, top, body_width, Inches(0.72))
             else:
-                eq_box = slide.shapes.add_textbox(
-                    body_left + Inches(0.05), eq_top + Inches(i * 0.55), body_width - Inches(0.1), Inches(0.5)
-                )
-                tf = eq_box.text_frame
-                p = _prepare_text_frame(tf, font_size=14, color=COLOR_MYBLUE, italic=True, align=PP_ALIGN.CENTER)
-                p.text = _formula_to_plain_text(eq)
+                fallback_stream = _render_formula_source_image(eq)
+                if fallback_stream:
+                    top = eq_top + Inches(i * 0.72)
+                    _add_picture_fit(slide, fallback_stream, body_left, top, body_width, Inches(0.72))
+                else:
+                    eq_box = slide.shapes.add_textbox(
+                        body_left + Inches(0.05), eq_top + Inches(i * 0.55), body_width - Inches(0.1), Inches(0.5)
+                    )
+                    tf = eq_box.text_frame
+                    p = _prepare_text_frame(tf, font_size=14, color=COLOR_MYBLUE, italic=True, align=PP_ALIGN.CENTER)
+                    p.text = _formula_to_plain_text(eq)
 
     # 备注（callout 标注内容放在 PPT 备注区）
     if slide_data.get("notes"):
@@ -544,14 +719,15 @@ def _add_top_line(slide):
     line.line.fill.background()
 
 
-def _add_frame_title(slide, title: str):
+def _add_frame_title(slide, title: str, rich_html: str = ""):
     """页面标题（横线上方）"""
     title_box = slide.shapes.add_textbox(
         Inches(0.5), Inches(0.4), Inches(12), Inches(0.5)
     )
     tf = title_box.text_frame
-    p = _prepare_text_frame(tf, font_size=22, color=COLOR_BLACK, bold=True)
-    p.text = title
+    if not _write_rich_html_to_text_frame(tf, rich_html, title, font_size=22, color=COLOR_BLACK, bold=True):
+        p = _prepare_text_frame(tf, font_size=22, color=COLOR_BLACK, bold=True)
+        p.text = title
 
 
 def _add_table(slide, table_data: dict, top_y) -> float:
@@ -646,6 +822,7 @@ def _add_textboxes(slide, textboxes: list):
 
     for tb in textboxes:
         text = _repair_latex_artifacts(tb.get("text", "") if isinstance(tb, dict) else "")
+        rich_html = str(tb.get("richHtml", "") if isinstance(tb, dict) else "")
         if not text.strip():
             continue
 
@@ -693,6 +870,18 @@ def _add_textboxes(slide, textboxes: list):
             box.fill.background()
         box.line.color.rgb = RGBColor(200, 205, 214)
         box.line.width = Pt(0.5)
+
+        if rich_html and _write_rich_html_to_text_frame(
+            tf,
+            rich_html,
+            text,
+            font_size=_safe_float(tb.get("fontSize", 14), 14),
+            color=_parse_rgb_color(tb.get("color", "")) or COLOR_BLACK,
+            bold=bool(tb.get("bold", False)),
+            italic=bool(tb.get("italic", False)),
+            align=ppt_align,
+        ):
+            continue
 
         p = tf.paragraphs[0]
         p.text = text
@@ -926,6 +1115,9 @@ def _normalize_mathtext_unsupported(text: str) -> str:
     s = s.replace(r"\!", "")
     s = s.replace(r"\quad", r"\ ")
     s = s.replace(r"\qquad", r"\ ")
+    s = re.sub(r"\\text\{([^{}]*)\}", r"\\mathrm{\1}", s)
+    s = re.sub(r"\\operatorname\{([^{}]*)\}", r"\\mathrm{\1}", s)
+    s = re.sub(r"\\mathrm\{\\text\{([^{}]*)\}\}", r"\\mathrm{\1}", s)
     # mathtext 对 || 支持有限，按普通竖线显示即可。
     s = s.replace(r"\|", "|")
     return s
