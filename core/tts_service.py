@@ -1370,9 +1370,22 @@ def get_tts_status() -> dict[str, Any]:
         status.update(get_gpt_sovits_runtime_status(settings))
         return status
     if settings.provider == "genie_server":
-        status["available"] = bool(settings.server_url)
         status["server_url"] = settings.server_url
-        status["detail"] = "Using external Genie-TTS server proxy."
+        status["available"] = False
+        if not settings.server_url:
+            status["detail"] = "Genie-TTS server proxy URL is not configured."
+            return status
+        try:
+            import urllib.request
+
+            with urllib.request.urlopen(f"{settings.server_url}/status", timeout=1.5) as response:
+                payload = json.loads(response.read().decode("utf-8", errors="replace"))
+            status["available"] = bool(payload.get("available", payload.get("success", False)))
+            status["server_status"] = payload
+            status["detail"] = "Using external Genie-TTS server proxy."
+        except Exception as exc:
+            status["last_error"] = str(exc)
+            status["detail"] = "Genie-TTS server proxy is configured but not reachable."
         return status
     if settings.provider == "gpt_sovits_server":
         status["available"] = bool(settings.server_url)

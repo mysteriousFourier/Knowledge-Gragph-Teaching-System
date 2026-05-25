@@ -26,6 +26,8 @@ APP_BOOTSTRAP_SEED_DATA=1
 DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS=0
 ```
 
+如果要实验本地 TTS，必须把它作为独立服务运行，并让主站使用 `genie_server` 代理。不要在主 `kgts.service` 里直接使用 `KGTS_TTS_PROVIDER=genie`。
+
 ## 成本边界
 
 避免意外扣费时重点看这些资源：
@@ -233,6 +235,72 @@ sudo chown -R www-data:www-data /var/www/kgts
 sudo systemctl restart kgts
 sudo journalctl -u kgts -n 80 --no-pager
 ```
+
+## 可选：本机 Genie-TTS 代理实验
+
+这不是推荐生产配置，只用于验证 1 GB 免费 VM 是否能承载本地 `shu` TTS。先安装最小中文 Genie 依赖并确认 `models/tts/`、`third_party/Genie-TTS/` 已在 VM 本地存在；这些资产已被 `.gitignore` 排除，不要提交。
+
+主站 `.env` 使用代理模式：
+
+```text
+KGTS_TTS_ENABLED=1
+KGTS_TTS_PROVIDER=genie_server
+KGTS_TTS_SERVER_URL=http://127.0.0.1:9880
+KGTS_TTS_GENIE_DATA_DIR=models/tts/GenieData
+KGTS_TTS_MODEL_DIR=models/tts/shu
+KGTS_TTS_CHARACTER_NAME=shu
+KGTS_TTS_LANGUAGE=zh
+KGTS_TTS_REFERENCE_AUDIO=models/tts/shu/reference/shu.wav
+KGTS_TTS_REFERENCE_LANGUAGE=zh
+KGTS_TTS_REFERENCE_TEXT=我是谁？答案只在于我所见所遇的一切。
+```
+
+创建独立 TTS 服务：
+
+```bash
+sudo tee /etc/systemd/system/kgts-tts.service >/dev/null <<'EOF'
+[Unit]
+Description=KGTS Genie-TTS proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=azureuser
+WorkingDirectory=/home/azureuser/kgts
+EnvironmentFile=/home/azureuser/kgts/.env
+Environment=PYTHONPATH=/home/azureuser/kgts:/home/azureuser/kgts/third_party/Genie-TTS/src
+Environment=OMP_NUM_THREADS=1
+Environment=OPENBLAS_NUM_THREADS=1
+Environment=MKL_NUM_THREADS=1
+Environment=NUMEXPR_NUM_THREADS=1
+Environment=TOKENIZERS_PARALLELISM=false
+Environment=KGTS_TTS_GENIE_LOW_MEMORY=1
+Environment=KGTS_TTS_ONNX_CACHE_DIR=/home/azureuser/kgts/.runtime/tts/onnx-fp32-cache
+ExecStart=/home/azureuser/kgts/.venv/bin/python scripts/genie_tts_proxy_server.py
+Restart=on-failure
+RestartSec=10
+OOMPolicy=stop
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now kgts-tts
+sudo systemctl restart kgts
+```
+
+验证：
+
+```bash
+curl -s http://127.0.0.1:9880/status
+curl -s http://127.0.0.1:8000/api/tts/status
+free -h
+journalctl -u kgts-tts -n 100 --no-pager
+```
+
+如果合成时出现 OOM，`kgts-tts.service` 会失败或重启，但 `kgts.service` 应继续可用。这说明当前免费 VM 不能稳定承载本地 TTS；可以保留 `genie_server` 配置指向更高内存 VM，或恢复 `KGTS_TTS_ENABLED=0`。
 
 ## 官方参考
 

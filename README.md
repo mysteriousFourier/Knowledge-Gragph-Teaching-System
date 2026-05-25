@@ -217,7 +217,7 @@ KGTS_TTS_ENABLED=0
 KGTS_TTS_PROVIDER=disabled
 ```
 
-如果需要线上语音，推荐使用有足够内存/磁盘的 VM，或把 TTS 单独部署为外部推理服务，再配置对应的 server provider 和 `KGTS_TTS_SERVER_URL`，不要把模型放进 F1 主站。
+如果需要线上语音，推荐使用有足够内存/磁盘的 VM，或把 TTS 单独部署为外部推理服务，再配置对应的 server provider 和 `KGTS_TTS_SERVER_URL`，不要把模型放进 F1 主站。Azure for Students 1 GB VM 只能作为实验环境：可用 `scripts/genie_tts_proxy_server.py` 单独运行 Genie 代理并把主站设为 `KGTS_TTS_PROVIDER=genie_server`，但模型加载后的常驻内存仍可能超过免费 VM。
 
 ## Azure for Students VM 部署
 

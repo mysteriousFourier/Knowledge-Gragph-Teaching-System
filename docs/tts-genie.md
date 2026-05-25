@@ -71,3 +71,25 @@ KGTS_TTS_PROVIDER=disabled
 ```
 
 如果需要线上语音，优先把 TTS 独立部署到更高内存 VM 或专门推理服务，再让主站通过 server provider 调用，不要把 GenieData、ONNX 模型、缓存音频和主 Web 进程放在同一个 1 GB 免费 VM 里。
+
+## 受限 VM 实验：独立 Genie 代理
+
+Azure for Students 1 GB VM 可以尝试把主站和 TTS 分离成两个本机服务。主站配置成代理模式：
+
+```text
+KGTS_TTS_ENABLED=1
+KGTS_TTS_PROVIDER=genie_server
+KGTS_TTS_SERVER_URL=http://127.0.0.1:9880
+```
+
+另起一个进程运行本地 Genie：
+
+```bash
+KGTS_TTS_GENIE_LOW_MEMORY=1 \
+KGTS_TTS_ONNX_CACHE_DIR=.runtime/tts/onnx-fp32-cache \
+python scripts/genie_tts_proxy_server.py
+```
+
+`core/genie_low_memory.py` 会在代理进程里给 Genie-TTS 打运行时补丁：把 FP16 外部权重分块转换成可复用的 FP32 外部权重缓存，让 ONNX Runtime 从磁盘文件加载，避免一次性把完整 FP16、FP32 和序列化 ONNX 都放进 Python 内存。这个补丁降低的是加载峰值，不会改变模型本身需要的常驻内存。
+
+实际 1 GB VM 上仍要把它视为实验配置：`shu` 模型的 T2S 两个 decoder 各引用约 293 MB FP32 权重，VITS 约 154 MB，CN-HuBERT 约 360 MB；即使磁盘模型只有约 581 MB，ONNX Runtime 加载后也可能超过免费 VM 可用内存。代理进程的价值是保护主站，TTS OOM 时只重启代理，不拖垮页面和其它 API。
