@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Provider as ReduxProvider } from "react-redux"
 import { store } from "@/store"
 import { AppLayout } from "@/components/layout/AppLayout"
+import { SettingsPanel } from "@/components/layout/SettingsPanel"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,6 +26,7 @@ function RootComponent() {
         <AppLayout>
           <Outlet />
         </AppLayout>
+        <SettingsPanel />
       </QueryClientProvider>
     </ReduxProvider>
   )

@@ -43,6 +43,9 @@ const uiSlice = createSlice({
     toggleSettings: (state) => {
       state.settingsOpen = !state.settingsOpen
     },
+    setSettingsOpen: (state, action: PayloadAction<boolean>) => {
+      state.settingsOpen = action.payload
+    },
     showToast: (state, action: PayloadAction<{ message: string; type: "success" | "error" | "info" }>) => {
       state.toast = action.payload
     },
@@ -59,6 +62,7 @@ export const {
   toggleQAPanel,
   setQAPanelOpen,
   toggleSettings,
+  setSettingsOpen,
   showToast,
   clearToast,
 } = uiSlice.actions

@@ -38,6 +38,9 @@ backend/mcp-server/data/*.db
 backend/mcp-server/data/*.sqlite*
 backend/vector_index_system/knowledge_graph/knowledge_graph.db
 education/beamer_generator_full/uploads/
+education/beamer_generator_full/saved_projects/
+*.pptx
+*.zip
 
 # Python
 __pycache__/
