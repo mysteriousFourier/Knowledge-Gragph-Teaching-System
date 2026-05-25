@@ -126,7 +126,42 @@ async def config_status():
         "deepseek_api_key_configured": bool(os.getenv("DEEPSEEK_API_KEY")),
         "flash_model": get_deepseek_model("flash"),
         "pro_model": get_deepseek_model("pro"),
+        "deepseek_api_base": os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com"),
     }
+
+
+@router.post("/save-config")
+async def save_config(payload: dict[str, Any]):
+    editable_keys = {
+        "deepseek_api_key": "DEEPSEEK_API_KEY",
+        "deepseek_api_base": "DEEPSEEK_API_BASE",
+        "deepseek_flash_model": "DEEPSEEK_FLASH_MODEL",
+        "deepseek_pro_model": "DEEPSEEK_PRO_MODEL",
+    }
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    current: dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip() or line.lstrip().startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            current[key.strip()] = value.strip()
+
+    for payload_key, env_key in editable_keys.items():
+        value = str(payload.get(payload_key) or "").strip()
+        if not value and env_key == "DEEPSEEK_API_KEY":
+            continue
+        if value:
+            current[env_key] = value
+            os.environ[env_key] = value
+
+    ordered_keys = sorted(current)
+    env_path.write_text(
+        "\n".join(f"{key}={current[key]}" for key in ordered_keys) + "\n",
+        encoding="utf-8",
+    )
+    load_root_env()
+    return await config_status()
 
 
 @router.post("/education/generate-lecture")

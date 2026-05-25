@@ -26,7 +26,7 @@ import type {
   TtsSynthesizeResponse,
   UploadGraphResponse,
 } from "@/types/education"
-import type { ApiResponse, HealthCheckResponse, ConfigStatusResponse } from "@/types/api"
+import type { ApiResponse, HealthCheckResponse, ConfigStatusResponse, SaveConfigResponse } from "@/types/api"
 
 export const useHealthCheck = () => {
   return useQuery({
@@ -40,6 +40,17 @@ export const useConfigStatus = () => {
   return useQuery({
     queryKey: ["config-status"],
     queryFn: () => educationClient.get<ConfigStatusResponse>("/api/config-status").then((r) => r.data),
+  })
+}
+
+export const useSaveConfig = () => {
+  return useMutation({
+    mutationFn: (data: {
+      deepseek_api_key?: string
+      deepseek_api_base?: string
+      deepseek_flash_model?: string
+      deepseek_pro_model?: string
+    }) => educationClient.post<SaveConfigResponse>("/api/save-config", data).then((r) => r.data),
   })
 }
 
