@@ -113,9 +113,11 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 cd frontend
 npm ci
-npm run build
+NODE_OPTIONS=--max-old-space-size=1536 npm run build
 cd ..
 ```
+
+前端生产构建默认不生成 sourcemap，以降低 1 GB 免费 VM 的构建内存和磁盘压力。如需调试线上 bundle，可临时执行 `VITE_BUILD_SOURCEMAP=1 npm run build`。
 
 创建生产环境配置：
 
@@ -172,6 +174,13 @@ server {
 
     client_max_body_size 32m;
 
+    location /assets/ {
+        root /var/www/kgts;
+        try_files $uri =404;
+        access_log off;
+        expires 1h;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
@@ -195,6 +204,15 @@ curl -I http://127.0.0.1:8000/
 curl -I http://127.0.0.1/
 ```
 
+如果由 Nginx 直接服务前端静态资源，把构建产物复制到 Web 可读目录，避免 Nginx 无法遍历 `/home/azureuser`：
+
+```bash
+sudo rm -rf /var/www/kgts
+sudo mkdir -p /var/www/kgts
+sudo cp -a /home/azureuser/kgts/frontend/dist/. /var/www/kgts/
+sudo chown -R www-data:www-data /var/www/kgts
+```
+
 ## 更新部署
 
 以后更新 main 分支：
@@ -206,8 +224,12 @@ git pull --ff-only origin main
 python -m pip install -r requirements.txt
 cd frontend
 npm ci
-npm run build
+NODE_OPTIONS=--max-old-space-size=1536 npm run build
 cd ..
+sudo rm -rf /var/www/kgts
+sudo mkdir -p /var/www/kgts
+sudo cp -a frontend/dist/. /var/www/kgts/
+sudo chown -R www-data:www-data /var/www/kgts
 sudo systemctl restart kgts
 sudo journalctl -u kgts -n 80 --no-pager
 ```
