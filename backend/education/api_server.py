@@ -5,13 +5,17 @@
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+_KGTS_NAME = "KGTS"
+if _KGTS_NAME not in sys.modules:
+    _kgts_pkg = types.ModuleType(_KGTS_NAME)
+    _kgts_pkg.__path__ = [str(ROOT_DIR)]
+    sys.modules[_KGTS_NAME] = _kgts_pkg
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-if str(ROOT_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR.parent))
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +30,7 @@ from KGTS.middleware import setup_cors
 from KGTS.education.router import router as education_router
 from KGTS.education.router_student import router as student_router
 from KGTS.education.router_teacher import router as teacher_router
+from KGTS.education.tts_router import router as tts_router
 
 load_root_env()
 
@@ -40,6 +45,7 @@ setup_cors(app)
 app.include_router(education_router)
 app.include_router(student_router)
 app.include_router(teacher_router)
+app.include_router(tts_router)
 
 
 @app.post("/api/education/ppt-slide-image/{slide_index}")
@@ -78,10 +84,23 @@ async def ppt_slide_image(slide_index: int, file: UploadFile = File(...)):
 async def startup_event():
     """应用启动时初始化."""
     from KGTS.core.mcp_client import get_mcp_client
+    from KGTS.core.tts_service import run_tts_startup_cleanup
+    from KGTS.core.graph_service import GraphService
 
     print("教育模式API服务器启动...")
     print("正在初始化MCP客户端...")
     await get_mcp_client()
+    try:
+        graph = GraphService()
+        if graph.retrieval_mode == "hybrid":
+            stats = graph.rebuild_vector_index() if not graph._vector_stats().get("index_size") else graph._vector_stats()
+            print(f"GraphRAG vector index ready: mode={stats.get('mode')} size={stats.get('index_size')}")
+    except Exception as exc:
+        print(f"GraphRAG vector index startup check skipped: {exc}")
+    try:
+        run_tts_startup_cleanup()
+    except Exception as exc:
+        print(f"跳过 TTS 缓存清理: {exc}")
 
 
 @app.on_event("shutdown")

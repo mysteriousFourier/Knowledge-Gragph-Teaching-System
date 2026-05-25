@@ -73,6 +73,7 @@ def compute_relation_audit(
     if preset_relation_types is None:
         preset_relation_types = {
             "contains", "precedes", "references_formula", "references_table",
+            "references_figure", "references_example",
             "references", "defines", "explains", "derives", "depends_on",
             "supports", "contrasts_with", "example_of", "applies_to",
             "equivalent_to", "causes", "related",
@@ -82,7 +83,7 @@ def compute_relation_audit(
     nodes = graph.get("nodes", [])
     relations = graph.get("relations", [])
 
-    structural_types = {"contains", "precedes", "references_formula", "references_table"}
+    structural_types = {"contains", "precedes", "references_formula", "references_table", "references_figure", "references_example"}
     type_counts = Counter(relation.get("relation_type") or "related" for relation in relations)
     degree: Counter[str] = Counter()
     semantic_candidate_count = 0

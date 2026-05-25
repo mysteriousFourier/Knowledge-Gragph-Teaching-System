@@ -81,6 +81,12 @@ def _build_question_fallback_response(
         "consistency_report": _safe_consistency_report(answer, learning_plan, task="qa"),
         "keyword_hits": local.get("keyword_hits") or [],
         "semantic_hits": local.get("semantic_hits") or [],
+        "vector_hits": local.get("vector_hits") or local.get("semantic_hits") or [],
+        "retrieval_mode": local.get("retrieval_mode"),
+        "retrieval_stats": local.get("retrieval_stats") or {},
+        "graphrag_context": local.get("graphrag_context") or {},
+        "graph_paths": local.get("graph_paths") or [],
+        "formula_context": local.get("formula_context") or [],
         "memory_hits": local.get("memory_hits") or [],
     }
     if warning:
@@ -147,6 +153,13 @@ async def answer_with_retrieval(question: str, api_key: Optional[str] = None, ti
             "sources": rag["llm_context"],
             "learning_plan": learning_plan,
             "consistency_report": consistency_report,
+            "retrieval_mode": rag.get("retrieval_mode"),
+            "retrieval_stats": rag.get("retrieval_stats") or {},
+            "graphrag_context": rag.get("graphrag_context") or {},
+            "vector_hits": rag.get("vector_hits") or rag.get("semantic_hits") or [],
+            "semantic_hits": rag.get("semantic_hits") or [],
+            "graph_paths": rag.get("graph_paths") or [],
+            "formula_context": rag.get("formula_context") or [],
         }
     except asyncio.TimeoutError:
         warning = "大模型回答超时，已使用图谱和记忆检索结果回答"
@@ -168,4 +181,10 @@ async def answer_with_retrieval(question: str, api_key: Optional[str] = None, ti
         "consistency_report": _safe_consistency_report(fallback_answer, learning_plan, task="qa"),
         "memory_hits": rag.get("memory_hits"),
         "semantic_hits": rag.get("semantic_hits"),
+        "vector_hits": rag.get("vector_hits") or rag.get("semantic_hits"),
+        "retrieval_mode": rag.get("retrieval_mode"),
+        "retrieval_stats": rag.get("retrieval_stats") or {},
+        "graphrag_context": rag.get("graphrag_context") or {},
+        "graph_paths": rag.get("graph_paths") or [],
+        "formula_context": rag.get("formula_context") or [],
     }

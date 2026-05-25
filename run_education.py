@@ -17,6 +17,7 @@ from KGTS.middleware import setup_cors
 from KGTS.education.router import router as education_router
 from KGTS.education.router_student import router as student_router
 from KGTS.education.router_teacher import router as teacher_router
+from KGTS.education.tts_router import router as tts_router
 
 load_root_env()
 
@@ -26,11 +27,17 @@ setup_cors(app)
 app.include_router(education_router)
 app.include_router(student_router)
 app.include_router(teacher_router)
+app.include_router(tts_router)
 
 
 @app.on_event("startup")
 async def _startup() -> None:
-    pass
+    from KGTS.core.tts_service import run_tts_startup_cleanup
+
+    try:
+        run_tts_startup_cleanup()
+    except Exception as exc:
+        print(f"[education] TTS cache cleanup skipped: {exc}")
 
 
 @app.on_event("shutdown")

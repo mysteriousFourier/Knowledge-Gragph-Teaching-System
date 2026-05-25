@@ -7,6 +7,7 @@ import { EvidenceSummary } from "@/components/common/EvidenceSummary"
 import { LectureReviewPanel } from "@/components/common/LectureReviewPanel"
 import { EmptyState } from "@/components/common/EmptyState"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
+import { PlaybackProgress } from "@/components/common/PlaybackProgress"
 import { RichTextContent } from "@/components/renderers/RichTextContent"
 import { useLecturePlayback } from "@/hooks/useLecturePlayback"
 import { cn } from "@/lib/utils"
@@ -35,9 +36,19 @@ function LecturePage() {
   const selectedChapter = chapters.find((chapter) => chapter.id === selectedChapterId)
   const lectureContent = isEditing ? draftContent : selectedChapter?.lecture_content || ""
   const markdownSlides = lectureContent.trim() ? [lectureContent] : []
-  const isPptChapter = !isEditing && selectedChapter?.source_type === "ppt" && !!selectedChapter.ppt_slides?.length
-  const segmentCount = isPptChapter ? selectedChapter?.ppt_slides?.length || 0 : markdownSlides.length
-  const playback = useLecturePlayback({ segmentCount })
+  const isCoursewareChapter = !isEditing && !!selectedChapter?.ppt_slides?.length
+  const segmentCount = isCoursewareChapter ? selectedChapter?.ppt_slides?.length || 0 : markdownSlides.length
+  const playback = useLecturePlayback({
+    segmentCount,
+    getSegmentText: (segment) => {
+      if (isCoursewareChapter) {
+        const slide = selectedChapter?.ppt_slides?.[segment]
+        const lecture = selectedChapter?.slide_lectures?.find((item) => item.index === slide?.index)
+        return lecture?.lecture || slide?.notes || slide?.content || slide?.raw_text || ""
+      }
+      return markdownSlides[segment] || ""
+    },
+  })
   const currentSlide = playback.currentSegment
 
   useEffect(() => {
@@ -51,11 +62,11 @@ function LecturePage() {
     setSelectedChapterId((fromSearch || withLecture || chapters[0]).id)
   }, [chapterId, chapters, selectedChapterId])
 
-  const currentPptSlide = selectedChapter?.ppt_slides?.[currentSlide]
-  const currentPptLecture = useMemo(() => {
-    if (!selectedChapter?.slide_lectures?.length || !currentPptSlide) return undefined
-    return selectedChapter.slide_lectures.find((item) => item.index === currentPptSlide.index)
-  }, [currentPptSlide, selectedChapter?.slide_lectures])
+  const currentCoursewareSlide = selectedChapter?.ppt_slides?.[currentSlide]
+  const currentSlideLecture = useMemo(() => {
+    if (!selectedChapter?.slide_lectures?.length || !currentCoursewareSlide) return undefined
+    return selectedChapter.slide_lectures.find((item) => item.index === currentCoursewareSlide.index)
+  }, [currentCoursewareSlide, selectedChapter?.slide_lectures])
 
   const handleStartEdit = () => {
     setDraftContent(selectedChapter?.lecture_content || "")
@@ -93,10 +104,10 @@ function LecturePage() {
   }
 
   const handleDelete = async () => {
-    if (!selectedChapter || !window.confirm(`Delete chapter "${selectedChapter.title}"?`)) return
+    if (!selectedChapter || !window.confirm(`删除课程「${selectedChapter.title}」？`)) return
     const result = await deleteChapter.mutateAsync(selectedChapter.id)
     if (!result.success) {
-      window.alert(result.error || "Delete failed")
+      window.alert(result.error || "删除失败")
       return
     }
     setSelectedChapterId("")
@@ -120,7 +131,7 @@ function LecturePage() {
       </div>
 
       <div className="bg-card border rounded-xl p-4">
-        <label className="block text-sm font-medium mb-2">选择章节</label>
+        <label className="block text-sm font-medium mb-2">选择课程</label>
         {isLoading ? (
           <LoadingSpinner size={20} text="加载中..." />
         ) : (
@@ -136,7 +147,7 @@ function LecturePage() {
             }}
             className="w-full px-3 py-2.5 bg-background border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
           >
-            <option value="">-- 请选择章节 --</option>
+            <option value="">-- 请选择课程 --</option>
             {chapters.map((chapter) => (
               <option key={chapter.id} value={chapter.id}>
                 {chapter.title}
@@ -187,7 +198,7 @@ function LecturePage() {
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border text-destructive hover:bg-destructive/10 disabled:opacity-50 transition-colors"
                   >
                     <Trash2 size={14} />
-                    Delete
+                    删除
                   </button>
                 </>
               ) : (
@@ -198,7 +209,7 @@ function LecturePage() {
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border text-destructive hover:bg-destructive/10 disabled:opacity-50 transition-colors"
                   >
                     <Trash2 size={14} />
-                    Delete
+                    删除
                   </button>
                   <button
                     onClick={handleStartEdit}
@@ -216,8 +227,8 @@ function LecturePage() {
                     )}
                     title={playback.providerLabel}
                   >
-                    {playback.isPlaying ? <Pause size={14} /> : <Play size={14} />}
-                    {playback.isPlaying ? "暂停" : "播放"}
+                    {playback.isPlaying || playback.isLoadingAudio ? <Pause size={14} /> : <Play size={14} />}
+                    {playback.isPlaying || playback.isLoadingAudio ? "暂停" : "播放"}
                   </button>
                 </>
               )}
@@ -245,34 +256,32 @@ function LecturePage() {
                 <EmptyState title="暂无预览内容" description="请先在编辑模式输入授课文案。" icon={<BookOpen size={48} />} />
               )}
             </div>
-          ) : isPptChapter && selectedChapter?.ppt_slides?.length ? (
+          ) : isCoursewareChapter && selectedChapter?.ppt_slides?.length ? (
             <>
-              <div className="border-b px-4 py-2 text-sm text-muted-foreground">{playback.statusText}</div>
-              <div className="grid grid-cols-1 gap-0 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
-                <div className="border-b p-5 lg:border-b-0 lg:border-r">
-                  {currentPptSlide ? <PptSlidePreview slide={currentPptSlide} /> : <EmptyState title="暂无幻灯片" description="该 PPT 章节缺少页面预览数据。" />}
+              <PlaybackProgress progress={playback.progress} statusText={playback.statusText} />
+              <div className="space-y-0">
+                <div className="border-b p-5">
+                  {currentCoursewareSlide ? <PptSlidePreview slide={currentCoursewareSlide} /> : <EmptyState title="暂无页面" description="该课件缺少页面预览数据。" />}
                 </div>
                 <div className="p-5">
-                  {currentPptLecture?.lecture ? (
-                    <div className="prose prose-sm max-w-none dark:prose-invert">
-                      <RichTextContent content={currentPptLecture.lecture} />
-                    </div>
+                  {currentSlideLecture?.lecture ? (
+                    <RichTextContent content={currentSlideLecture.lecture} />
                   ) : (
                     <EmptyState title="暂无本页讲稿" description="该页没有保存逐页讲稿。" />
                   )}
-                  {(currentPptLecture?.learning_plan || currentPptLecture?.sources?.length) && (
+                  {(currentSlideLecture?.learning_plan || currentSlideLecture?.sources?.length) && (
                     <div className="mt-4">
                       <EvidenceSummary
-                        learningPlan={currentPptLecture.learning_plan}
-                        sources={currentPptLecture.sources}
+                        learningPlan={currentSlideLecture.learning_plan}
+                        sources={currentSlideLecture.sources}
                       />
                     </div>
                   )}
                   <LectureReviewPanel
                     className="mt-4"
-                    learningPlan={currentPptLecture?.learning_plan}
-                    sources={currentPptLecture?.sources}
-                    consistencyReport={currentPptLecture?.consistency_report}
+                    learningPlan={currentSlideLecture?.learning_plan}
+                    sources={currentSlideLecture?.sources}
+                    consistencyReport={currentSlideLecture?.consistency_report}
                   />
                 </div>
               </div>
@@ -286,11 +295,9 @@ function LecturePage() {
             </>
           ) : markdownSlides.length > 0 ? (
             <>
-              <div className="border-b px-4 py-2 text-sm text-muted-foreground">{playback.statusText}</div>
+              <PlaybackProgress progress={playback.progress} statusText={playback.statusText} />
               <div className="min-h-[240px] p-4 sm:min-h-[300px] sm:p-6">
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  <RichTextContent content={markdownSlides[currentSlide]} />
-                </div>
+                <RichTextContent content={markdownSlides[currentSlide]} />
                 <LectureReviewPanel
                   className="mt-6"
                   learningPlan={selectedChapter.lecture_learning_plan}
@@ -309,7 +316,7 @@ function LecturePage() {
             <div className="p-8">
               <EmptyState
                 title="暂无授课文案"
-                description="该章节尚未生成授课文稿，请在备课模式或PPT文案页面生成。"
+                description="该课程尚未生成授课文稿，请在备课工作台生成。"
                 icon={<BookOpen size={48} />}
               />
             </div>
@@ -350,17 +357,21 @@ function PptSlidePreview({ slide }: { slide: PptSlideDetail }) {
   return (
     <div className="space-y-4">
       <div>
-        <div className="text-xs font-medium uppercase text-muted-foreground">幻灯片 {slide.index}</div>
+        <div className="text-xs font-medium uppercase text-muted-foreground">页面 {slide.index}</div>
         <h3 className="mt-1 text-lg font-semibold">{slide.title || "无标题"}</h3>
       </div>
       <div>
         <div className="text-xs font-medium uppercase text-muted-foreground">页面文本</div>
-        <pre className="mt-2 min-h-40 overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted p-4 text-sm leading-relaxed">{slide.content || slide.raw_text || "无正文文本"}</pre>
+        <div className="mt-2 min-h-40 overflow-x-auto rounded-lg bg-muted p-4 text-sm leading-relaxed">
+          <RichTextContent content={slide.content || slide.raw_text || "无正文文本"} />
+        </div>
       </div>
       {slide.notes && (
         <div>
           <div className="text-xs font-medium uppercase text-muted-foreground">备注</div>
-          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-muted p-3 text-sm">{slide.notes}</pre>
+          <div className="mt-2 overflow-x-auto rounded-lg bg-muted p-3 text-sm">
+            <RichTextContent content={slide.notes} />
+          </div>
         </div>
       )}
       {!!slide.tables?.length && (
@@ -372,8 +383,8 @@ function PptSlidePreview({ slide }: { slide: PptSlideDetail }) {
                 {table.rows.map((row, rowIndex) => (
                   <div key={rowIndex} className="grid grid-flow-col auto-cols-fr border-b last:border-b-0">
                     {row.map((cell, cellIndex) => (
-                      <div key={cellIndex} className="border-r px-2 py-1 text-sm last:border-r-0">
-                        {cell}
+                      <div key={cellIndex} className="min-w-0 border-r px-2 py-1 text-sm last:border-r-0">
+                        <RichTextContent content={cell} inline />
                       </div>
                     ))}
                   </div>
@@ -383,7 +394,38 @@ function PptSlidePreview({ slide }: { slide: PptSlideDetail }) {
           </div>
         </div>
       )}
-      <div className="text-sm text-muted-foreground">图片数量：{slide.image_count || 0}</div>
+      <PptSlideImages slide={slide} />
+    </div>
+  )
+}
+
+function PptSlideImages({ slide }: { slide: PptSlideDetail }) {
+  const images = slide.images || []
+  if (!images.length) {
+    return <div className="text-sm text-muted-foreground">图片数量：{slide.image_count || 0}</div>
+  }
+
+  return (
+    <div>
+      <div className="text-xs font-medium uppercase text-muted-foreground">图片</div>
+      <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+        {images.map((image, index) => (
+          <figure key={`${image.source_path || index}-${index}`} className="rounded-lg border bg-background p-2">
+            {image.data_uri ? (
+              <img
+                src={image.data_uri}
+                alt={image.source_path || `课件图片 ${index + 1}`}
+                className="max-h-80 w-full rounded object-contain"
+              />
+            ) : (
+              <div className="flex min-h-32 items-center justify-center rounded bg-muted px-3 text-center text-xs text-muted-foreground">
+                {image.oversized ? "图片过大，未内嵌预览" : "图片无法预览"}
+              </div>
+            )}
+            {image.source_path ? <figcaption className="mt-2 truncate text-xs text-muted-foreground">{image.source_path}</figcaption> : null}
+          </figure>
+        ))}
+      </div>
     </div>
   )
 }

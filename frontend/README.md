@@ -53,6 +53,8 @@ npm run build
 
 构建产物输出到 `frontend/dist/`，由仓库根目录的 `render_app.py` 直接托管。
 
+线上 VM 部署时同样先构建前端，再只运行根目录的 Python 单端口服务。1 GB 免费 VM 构建时建议开启 swap；如果在 CI 中完成构建，VM 上只需要拉取或发布已经包含 `frontend/dist/` 的产物。
+
 ## 目录结构
 
 ```text
@@ -107,3 +109,4 @@ src/
 - API 地址和认证拦截逻辑集中在 `src/api/`
 - 如果调整了后端返回结构，通常还需要同步修改 `src/types/` 和页面层的数据读取逻辑
 - 不要在前端 API 客户端里给 DeepSeek 生成请求加短超时；生成接口可能因为并发和模型响应慢而需要等待
+- 生产部署不要依赖 Vite dev server；公网流量应进入 `render_app.py` 或它前面的 Nginx / App Service 反向代理

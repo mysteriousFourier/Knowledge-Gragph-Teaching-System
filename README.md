@@ -165,6 +165,25 @@ Azure 冷启动健康探测时间有限，默认会跳过结构化图谱重建�
 - `APP_BOOTSTRAP_SEED_DATA=1`
 - `DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS=0`
 
+### 本地 GraphRAG 检索配置
+
+本地默认使用真正的 `hybrid` GraphRAG：图谱节点 embedding + FAISS 向量索引召回，再用图关系补充公式、例题、表格和前后置节点。先安装可选向量依赖：
+
+```bash
+python -m pip install -r requirements-vector.txt
+```
+
+默认环境变量：
+
+```text
+KGTS_RETRIEVAL_MODE=hybrid
+KGTS_VECTOR_INDEX_DIR=.runtime/vector_index
+KGTS_EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+KGTS_EMBEDDING_LOCAL_FILES_ONLY=1
+```
+
+如果本机没有缓存该 embedding 模型，先下载/放置模型，或把 `KGTS_EMBEDDING_MODEL` 改为本地模型目录。缺失时接口会在 `vector_stats.last_error` 中给出明确错误，不会静默降级为 `graph_db`。
+
 ### Azure F1 检索配置
 
 Azure F1 免费实例不要安装本地 embedding 大模型，也不要上传 `backend/vector_index_system/models/`。生产部署默认可保持：
@@ -187,11 +206,43 @@ python -m pip install -r requirements-vector.txt
 
 然后设置 `KGTS_RETRIEVAL_MODE=hybrid` 并提供匹配的模型和 FAISS 索引。GitHub Actions 部署包会继续排除 `backend/vector_index_system/models/` 和 `backend/vector_index_system/vector_index/`，避免 F1 重新部署时上传大文件。
 
+### 可选本地语音推理
+
+项目预留了 `/api/tts/*` 接口，本地默认 provider 是 `genie`，使用项目内 `third_party/Genie-TTS` 推理特化和 `models/tts/shu` 中的 `shu` ONNX 模型推理。Azure F1 默认禁用，部署包会排除模型、缓存和生成音频。
+
+本地启用方式见 [本地语音推理](docs/tts-genie.md)。F1 上建议保持：
+
+```text
+KGTS_TTS_ENABLED=0
+KGTS_TTS_PROVIDER=disabled
+```
+
+如果需要线上语音，推荐使用有足够内存/磁盘的 VM，或把 TTS 单独部署为外部推理服务，再配置对应的 server provider 和 `KGTS_TTS_SERVER_URL`，不要把模型放进 F1 主站。
+
+## Azure for Students VM 部署
+
+如果要部署到 Azure for Students 免费 VM，优先选择 `Standard_B2ats_v2`；它是 AMD x86-64、2 vCPU / 1 GB RAM，在当前免费 VM 候选里比 `Standard_B1s` 更适合 KGTS，同时比 Arm 规格更少依赖兼容风险。若目标地区没有该 SKU 或订阅无配额，再退回 `Standard_B1s`。
+
+免费 VM 线上配置必须保持轻量：
+
+```text
+KGTS_RETRIEVAL_MODE=sparse_hybrid
+KGTS_TTS_ENABLED=0
+KGTS_TTS_PROVIDER=disabled
+APP_RUN_STARTUP_MAINTENANCE=0
+RENDER_AUTO_SYNC_STRUCTURED=0
+APP_BOOTSTRAP_SEED_DATA=1
+```
+
+完整 VM 创建、systemd 和 Nginx 部署步骤见 [Azure for Students VM 部署](docs/azure-student-vm.md)。
+
 ## 文档索引
 
 - [前端说明](frontend/README.md)
 - [后端兼容目录说明](backend/README.md)
 - [检索模式与 Azure F1 说明](docs/retrieval-modes.md)
+- [本地语音推理](docs/tts-genie.md)
+- [Azure for Students VM 部署](docs/azure-student-vm.md)
 - [数据目录说明](data/README.md)
 - [结构化数据说明](structured/README.md)
 - [第三方依赖迁移说明](THIRD_PARTY_MIGRATION.md)

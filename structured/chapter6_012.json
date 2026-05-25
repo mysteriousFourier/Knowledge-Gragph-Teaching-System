@@ -2,35 +2,34 @@
   "id": "chapter6_012",
   "metadata": {
     "chapter": "chapter6",
-    "section": "Chapter 6: Theorems of Natural Selection",
+    "section": "Theorems of Natural Selection: Results of Price, Fisher, and Robertson: Introduction",
     "subsections": [
-      "Nonadditive Genetic Variance for Traits Under Selection"
+      "IMPLICATIONS OF FISHER'S THEOREM FOR TRAIT VARIATION"
     ],
-    "source_file": "chapter6原文.json",
+    "source_file": "tmp\\paddle_output\\chapter6_full\\main.tex",
     "source_title": "Evolution and Selection of Quantitative Traits",
     "formula_references": [],
-    "table_references": []
+    "table_references": [],
+    "section_level_1": "Theorems of Natural Selection: Results of Price, Fisher, and Robertson: Introduction",
+    "section_level_2": "IMPLICATIONS OF FISHER'S THEOREM FOR TRAIT VARIATION",
+    "heading_path": [
+      "Theorems of Natural Selection: Results of Price, Fisher, and Robertson: Introduction",
+      "IMPLICATIONS OF FISHER'S THEOREM FOR TRAIT VARIATION"
+    ],
+    "display_heading": "IMPLICATIONS OF FISHER'S THEOREM FOR TRAIT VARIATION"
   },
   "blocks": [
     {
-      "type": "derivation",
-      "content": "As selection drives the additive variance in fitness toward zero, any remaining genetic variance is expected to be increasingly composed of nonadditive terms. As Example 6.5 highlights, this nonadditive genetic variance can be considerable. Thus, characters that are more closely associated with fitness are expected to have a higher fraction of nonadditive variance and hence a higher residual variance. This trend can be seen in results from chromosome substitution analysis (Example 6.7), which tend to show epistatic interactions for life-history characters but not for morphological characters (also see LW Table 5.1)."
+      "type": "proposition",
+      "content": "While the classical view of Fisher's theorem does not generally hold and the exact version has rather limited utility, Fisher's theorem has still had an enormous impact on how quantitative geneticists view trait variation. This is because an important corollary holds under very general conditions in a constant environment (Kimura 1965b; Ewens 1976; Nagylaki 1976a, 1977b; Ewens and Thomson 1977; Charlesworth 1987): in the absence of new variation from mutation or other sources such as migration, selection is expected to eventually remove all additive genetic variation in fitness. This can be seen immediately for a single locus by considering Equation 5.8b—if the population is at equilibrium, all average excesses are zero, as all segregating alleles have the same marginal fitness and hence no additive variation in fitness is present (Fisher 1941)."
     },
     {
       "type": "proposition",
-      "content": "Crnokrak and Roff (1995) examined roughly 340 estimates of dominance variance in both life-history and morphological traits from 17 wild and 21 domestic species. In the wild species, traits assumed more closely connected with fitness (life-history traits) showed significantly higher dominance genetic variation (measured relative to total variance) than did morphological traits. In domesticated species, however, there were no significant differences in dominance genetic variance between life-history and morphological traits. The presumption is that many of the morphological traits examined in the domesticated species were themselves the result of strong recent selection during domestication (and thus, both groups of traits may have been under similar selection). This is supported by the observation that morphological traits in domesticated species showed significantly higher dominance variance than morphological traits in wild species. While certainly not conclusive, these results are consistent with the prediction of higher dominance genetic variance in traits more closely associated with fitness. Ideally, as above, the comparison of the amount of dominance variance should also be examined in terms of the coefficients of variation, as opposed to just the fraction of total variance."
+      "content": "This corollary makes the general prediction that characters that are strongly genetically correlated with fitness should show reduced additive variance relative to characters that are less well correlated with fitness (Robertson 1955b), reflecting the removal of additive variance by selection (which is partly countered by new mutational input). As we now will review, there is indeed a loose trend for traits that are correlated with fitness to show reduced heritability, which is often interpreted as being due to a reduction in $ \\sigma_A^2 $ for fitness-related traits. However, note that we can express heritability as $ h^2 = \\sigma_A^2 / (\\sigma_A^2 + \\sigma_e^2) $, where $ \\sigma_e^2 = \\sigma_A^2 - \\sigma_A^2 $ is the residual variance (the non-additive genetic and environmental variances). While a reduction in $ \\sigma_A^2 $ with $ \\sigma_e^2 $ held constant results in a smaller $ h^2 $, by sufficiently increasing $ \\sigma_e^2 $, one can still have a reduced $ h^2 $, even when $ \\sigma_A^2 $ has also increased. Indeed, as we will show, a closer look at the data shows that the additive variance is often greater for traits that are correlated with fitness, but that this increase is overwhelmed by an increased residual variance, resulting in a lower heritability."
     },
     {
-      "type": "proposition",
-      "content": "Roff and Emerson (2006) presented a somewhat complementary analysis, using 90 estimates for life-history traits and over 140 estimates for morphological traits from line-cross data. Line-cross analysis examines the components (additive, dominance, etc.) contributing to the between-line divergence, rather than the variance segregating in any particular population (LW Chapter 9), and it is by no means clear if additive variance being driven to zero by selection within populations translates into significant nonadditive contributions to differences between line means. This important caveat aside, Roff and Emerson found that the magnitude of dominance effects (relative to additive effects) in line differences was much greater for life-history traits. Further, epistatic effects were more often detected for life-history traits, and the ratio of total nonadditive effects (dominance plus epistasis) relative to additive effects for life-history traits was roughly double that for morphological traits. Finally, DeRose and Roff (1999) showed that (in animals) inbreeding depression is greater for life-history than morphological traits, indicating higher amounts of directional dominance among segregating alleles for life-history traits (see also LW Chapter 10)."
-    },
-    {
-      "type": "proposition",
-      "content": "What accounts for the increase in residual variation for traits associated with fitness? One source, as suggested by Price and Schluter (1991), is higher environmental variance associated with fitness. As we have just seen, a second source is an increase in nonadditive variance. While both factors likely play a role, their relative importance is unknown (Merilä and Sheldon 1999). Due to the difficulty of estimating nonadditive genetic variance components without special mating designs (LW Chapter 20), resolving this question for natural populations is likely to prove quite difficult."
-    },
-    {
-      "type": "proposition",
-      "content": "Example 6.7. Mackay (1985b) examined total fitness (measured by competition against a marked balancer stock) of 41 third chromosomes extracted from a natural population of Drosophila melanogaster. Using these chromosomes, lines with an otherwise common background could be made homozygous for a particular extracted third chromosome, and likewise the performance of that chromosome as a heterozygote could also be assayed. If there is significant additive genetic variance in fitness, a correlation between homozygote and heterozygote fitness is expected. Such a correlation was found for viability, suggesting some additive genetic variance in this character. However, when total fitness was examined, no correlation was found, suggesting no significant additive variation in total fitness. Mackay observed strong inbreeding depression, consistent with the total genetic variation in fitness being caused by segregation of rare deleterious recessive alleles (LW Chapter 10). A very similar experiment using segregating third chromosomes within a Drosophila population selected for domestication, Fowler et al. (1997) and Gardner et al. (2005) found high homozygote-heterozygote correlations for total fitness, and thus significant additive variance in fitness."
+      "type": "example",
+      "content": "[[SEE_EXAMPLE:6.5]]"
     }
   ]
 }

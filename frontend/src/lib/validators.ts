@@ -21,6 +21,7 @@ export const generateLectureSchema = z.object({
   chapter_title: z.string().optional(),
   style: z.string().optional(),
   length: z.string().optional(),
+  teacher_guidance: z.string().max(2000, "教师建议不能超过 2000 字").optional(),
 })
 
 export type GenerateLectureFormData = z.infer<typeof generateLectureSchema>

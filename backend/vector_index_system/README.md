@@ -48,6 +48,17 @@ python backend/vector_index_system/backend_admin.py --port 8080
 
 仓库已经通过 `.gitignore` 把这些内容视为本地资产。
 
+## 部署边界
+
+Azure App Service F1 和 Azure for Students 免费 VM 不应上传 `models/`、`vector_index/` 或大型 embedding 缓存。线上默认用：
+
+```text
+KGTS_RETRIEVAL_MODE=sparse_hybrid
+```
+
+只有本地或高资源 VM 才建议安装 `requirements-vector.txt` 并启用 `hybrid`。
+
 ## 相关说明
 
 - [第三方依赖迁移说明](../../THIRD_PARTY_MIGRATION.md)
+- [检索模式说明](../../docs/retrieval-modes.md)

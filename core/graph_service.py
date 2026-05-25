@@ -10,11 +10,15 @@ import re
 import sqlite3
 import uuid
 from collections import deque
+from contextlib import contextmanager
 from pathlib import Path
 from time import time
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 
-from KGTS.core.vector_index_service import GraphVectorIndex, VectorIndexUnavailable
+from KGTS.core.vector_index_service import GraphVectorIndex, VectorIndexUnavailable, vector_path_policy_violations
+from KGTS.core.path_policy import project_local_only
+
+_LAST_VECTOR_ERROR: Optional[str] = None
 
 
 def _default_db_path() -> Path:
@@ -48,6 +52,8 @@ PRESET_RELATION_TYPES = {
     "precedes",
     "references_formula",
     "references_table",
+    "references_figure",
+    "references_example",
     "references",
     "defines",
     "explains",
@@ -244,9 +250,14 @@ class GraphService:
     def __init__(self, db_path: str | Path | None = None):
         self.db_path = Path(db_path) if db_path else _default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.retrieval_mode = os.getenv("KGTS_RETRIEVAL_MODE", "graph_db").strip().lower()
-        self.vector_index = GraphVectorIndex() if self.retrieval_mode == "hybrid" else None
+        self.retrieval_mode = os.getenv("KGTS_RETRIEVAL_MODE", "hybrid").strip().lower()
         self._vector_last_error: Optional[str] = None
+        self.vector_index = None
+        if self.retrieval_mode == "hybrid":
+            try:
+                self.vector_index = GraphVectorIndex()
+            except VectorIndexUnavailable as exc:
+                self._vector_last_error = str(exc)
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
@@ -254,8 +265,17 @@ class GraphService:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @contextmanager
+    def _connection(self) -> Iterable[sqlite3.Connection]:
+        conn = self._connect()
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
     def _init_db(self) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS nodes (
@@ -345,30 +365,53 @@ class GraphService:
             "target_node": row["target_node"],
         }
 
-    def _fetch_node_rows(self, node_type: Optional[str] = None, limit: int = 1000) -> List[sqlite3.Row]:
-        with self._connect() as conn:
+    def _fetch_node_rows(self, node_type: Optional[str] = None, limit: Optional[int] = 1000) -> List[sqlite3.Row]:
+        with self._connection() as conn:
             if node_type:
-                rows = conn.execute(
-                    """
-                    SELECT id, label, type, content, metadata_json, source, confidence, created_at, updated_at, reviewed
-                    FROM nodes
-                    WHERE type = ?
-                    ORDER BY updated_at DESC, created_at DESC
-                    LIMIT ?
-                    """,
-                    (node_type, limit),
-                ).fetchall()
+                if limit is None:
+                    rows = conn.execute(
+                        """
+                        SELECT id, label, type, content, metadata_json, source, confidence, created_at, updated_at, reviewed
+                        FROM nodes
+                        WHERE type = ?
+                        ORDER BY updated_at DESC, created_at DESC
+                        """,
+                        (node_type,),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT id, label, type, content, metadata_json, source, confidence, created_at, updated_at, reviewed
+                        FROM nodes
+                        WHERE type = ?
+                        ORDER BY updated_at DESC, created_at DESC
+                        LIMIT ?
+                        """,
+                        (node_type, limit),
+                    ).fetchall()
             else:
-                rows = conn.execute(
-                    """
-                    SELECT id, label, type, content, metadata_json, source, confidence, created_at, updated_at, reviewed
-                    FROM nodes
-                    ORDER BY updated_at DESC, created_at DESC
-                    LIMIT ?
-                    """,
-                    (limit,),
-                ).fetchall()
+                if limit is None:
+                    rows = conn.execute(
+                        """
+                        SELECT id, label, type, content, metadata_json, source, confidence, created_at, updated_at, reviewed
+                        FROM nodes
+                        ORDER BY updated_at DESC, created_at DESC
+                        """
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT id, label, type, content, metadata_json, source, confidence, created_at, updated_at, reviewed
+                        FROM nodes
+                        ORDER BY updated_at DESC, created_at DESC
+                        LIMIT ?
+                        """,
+                        (limit,),
+                    ).fetchall()
         return rows
+
+    def _fetch_all_node_rows(self, node_type: Optional[str] = None) -> List[sqlite3.Row]:
+        return self._fetch_node_rows(node_type=node_type, limit=None)
 
     def _fetch_relation_rows(
         self,
@@ -393,12 +436,12 @@ class GraphService:
             LIMIT ?
         """
         params.append(limit)
-        with self._connect() as conn:
+        with self._connection() as conn:
             return conn.execute(query, params).fetchall()
 
     def read_graph(self) -> Dict[str, Any]:
-        nodes = [self._node_row_to_api(row) for row in self._fetch_node_rows(limit=5000)]
-        relations = [self._relation_row_to_api(row) for row in self._fetch_relation_rows(limit=10000)]
+        nodes = [self._node_row_to_api(row) for row in self._fetch_node_rows(limit=20000)]
+        relations = [self._relation_row_to_api(row) for row in self._fetch_relation_rows(limit=100000)]
         node_types: Dict[str, int] = {}
         for node in nodes:
             node_types[node["type"]] = node_types.get(node["type"], 0) + 1
@@ -414,7 +457,7 @@ class GraphService:
         }
 
     def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT id, label, type, content, metadata_json, source, confidence, created_at, updated_at, reviewed
@@ -438,24 +481,51 @@ class GraphService:
             ORDER BY updated_at DESC, created_at DESC
             LIMIT ?
         """
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(query, params).fetchall()
         return [self._node_row_to_api(row) for row in rows]
 
-    def semantic_search(self, query: str, node_type: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
+    def semantic_search(
+        self,
+        query: str,
+        node_type: Optional[str] = None,
+        top_k: int = 10,
+        allowed_node_ids: Optional[Iterable[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        global _LAST_VECTOR_ERROR
+        allowed_ids = self._normalize_allowed_node_ids(allowed_node_ids)
         if self.retrieval_mode == "hybrid":
             try:
-                return self._hybrid_search(query, node_type=node_type, top_k=top_k)
+                results = self._hybrid_search(query, node_type=node_type, top_k=top_k, allowed_node_ids=allowed_ids)
+                _LAST_VECTOR_ERROR = None
+                return results
             except Exception as exc:
                 self._vector_last_error = str(exc)
+                _LAST_VECTOR_ERROR = str(exc)
                 if self.vector_index is not None:
                     self.vector_index.last_error = str(exc)
+                return []
         if self.retrieval_mode == "sparse_hybrid":
-            return self._sparse_hybrid_search(query, node_type=node_type, top_k=top_k)
-        return self._text_semantic_search(query, node_type=node_type, top_k=top_k)
+            return self._sparse_hybrid_search(query, node_type=node_type, top_k=top_k, allowed_node_ids=allowed_ids)
+        return self._text_semantic_search(query, node_type=node_type, top_k=top_k, allowed_node_ids=allowed_ids)
 
-    def _text_semantic_search(self, query: str, node_type: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
+    def _normalize_allowed_node_ids(self, values: Optional[Iterable[str]]) -> Optional[Set[str]]:
+        if not values:
+            return None
+        allowed = {str(value or "").strip() for value in values}
+        allowed.discard("")
+        return allowed or None
+
+    def _text_semantic_search(
+        self,
+        query: str,
+        node_type: Optional[str] = None,
+        top_k: int = 10,
+        allowed_node_ids: Optional[Set[str]] = None,
+    ) -> List[Dict[str, Any]]:
         candidates = [self._node_row_to_api(row) for row in self._fetch_node_rows(node_type=node_type, limit=5000)]
+        if allowed_node_ids is not None:
+            candidates = [candidate for candidate in candidates if str(candidate.get("id") or "") in allowed_node_ids]
         scored: List[Dict[str, Any]] = []
         for candidate in candidates:
             haystack = f"{candidate['metadata'].get('label', '')}\n{candidate['content']}"
@@ -476,14 +546,37 @@ class GraphService:
         scored.sort(key=lambda item: item["similarity"], reverse=True)
         return scored[:top_k]
 
-    def _hybrid_search(self, query: str, node_type: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
+    def _hybrid_search(
+        self,
+        query: str,
+        node_type: Optional[str] = None,
+        top_k: int = 10,
+        allowed_node_ids: Optional[Set[str]] = None,
+    ) -> List[Dict[str, Any]]:
         vector = self._ensure_vector_index()
         candidates = [self._node_row_to_api(row) for row in self._fetch_node_rows(node_type=node_type, limit=5000)]
+        if allowed_node_ids is not None:
+            candidates = [candidate for candidate in candidates if str(candidate.get("id") or "") in allowed_node_ids]
         candidates_by_id = {candidate["id"]: candidate for candidate in candidates}
+        if not candidates_by_id:
+            return []
         multiplier = max(1, int(os.getenv("KGTS_VECTOR_TOP_K_MULTIPLIER", "3") or "3"))
         candidate_limit = max(top_k * multiplier, top_k)
-        vector_hits = vector.search(query, top_k=candidate_limit, node_type=node_type)
-        text_hits = self._text_semantic_search(query, node_type=node_type, top_k=candidate_limit)
+        try:
+            vector_hits = vector.search(
+                query,
+                top_k=candidate_limit,
+                node_type=node_type,
+                allowed_node_ids=allowed_node_ids,
+            )
+        except TypeError:
+            vector_hits = vector.search(query, top_k=candidate_limit, node_type=node_type)
+        text_hits = self._text_semantic_search(
+            query,
+            node_type=node_type,
+            top_k=candidate_limit,
+            allowed_node_ids=allowed_node_ids,
+        )
 
         combined: Dict[str, Dict[str, Any]] = {}
         for hit in vector_hits:
@@ -534,12 +627,20 @@ class GraphService:
         results.sort(key=lambda item: item["hybrid_score"], reverse=True)
         return results[:top_k]
 
-    def _sparse_hybrid_search(self, query: str, node_type: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
+    def _sparse_hybrid_search(
+        self,
+        query: str,
+        node_type: Optional[str] = None,
+        top_k: int = 10,
+        allowed_node_ids: Optional[Set[str]] = None,
+    ) -> List[Dict[str, Any]]:
         query_terms = _sparse_terms(query)
         if not query_terms:
             return []
 
         candidates = [self._node_row_to_api(row) for row in self._fetch_node_rows(node_type=node_type, limit=5000)]
+        if allowed_node_ids is not None:
+            candidates = [candidate for candidate in candidates if str(candidate.get("id") or "") in allowed_node_ids]
         results: List[Dict[str, Any]] = []
         for candidate in candidates:
             haystack = f"{candidate['metadata'].get('label', '')}\n{candidate['type']}\n{candidate['content']}"
@@ -571,28 +672,41 @@ class GraphService:
         return results[:top_k]
 
     def _ensure_vector_index(self) -> GraphVectorIndex:
+        global _LAST_VECTOR_ERROR
         if self.vector_index is None:
             raise VectorIndexUnavailable("hybrid retrieval is not enabled")
-        candidates = [self._node_row_to_api(row) for row in self._fetch_node_rows(limit=5000)]
+        candidates = [self._node_row_to_api(row) for row in self._fetch_all_node_rows()]
         self.vector_index.ensure_index(candidates)
         self._vector_last_error = None
+        _LAST_VECTOR_ERROR = None
         return self.vector_index
 
     def rebuild_vector_index(self) -> Dict[str, Any]:
+        global _LAST_VECTOR_ERROR
         if self.vector_index is None:
-            self.vector_index = GraphVectorIndex()
-            self.retrieval_mode = "hybrid"
-        candidates = [self._node_row_to_api(row) for row in self._fetch_node_rows(limit=5000)]
+            try:
+                self.vector_index = GraphVectorIndex()
+                self.retrieval_mode = "hybrid"
+            except Exception as exc:
+                self._vector_last_error = str(exc)
+                _LAST_VECTOR_ERROR = str(exc)
+                return self._vector_stats()
+        candidates = [self._node_row_to_api(row) for row in self._fetch_all_node_rows()]
         try:
             return self.vector_index.rebuild(candidates)
         except Exception as exc:
             self._vector_last_error = str(exc)
+            _LAST_VECTOR_ERROR = str(exc)
             self.vector_index.last_error = str(exc)
             return self._vector_stats()
 
     def reset_vector_index(self) -> Dict[str, Any]:
         if self.vector_index is None:
-            self.vector_index = GraphVectorIndex()
+            try:
+                self.vector_index = GraphVectorIndex()
+            except Exception as exc:
+                self._vector_last_error = str(exc)
+                return self._vector_stats()
         return self.vector_index.reset()
 
     def _vector_stats(self) -> Dict[str, Any]:
@@ -603,6 +717,8 @@ class GraphService:
                 "provider": "standard-library-sparse",
                 "model": "token-char-ngram",
                 "db_path": str(self.db_path),
+                "path_policy": "project_local" if project_local_only() else "external_paths_allowed",
+                "outside_project_paths": [],
                 "last_error": None,
             }
         if self.retrieval_mode != "hybrid":
@@ -610,18 +726,25 @@ class GraphService:
                 "enabled": False,
                 "mode": "graph-db",
                 "db_path": str(self.db_path),
+                "path_policy": "project_local" if project_local_only() else "external_paths_allowed",
+                "outside_project_paths": [],
             }
         if self.vector_index is None:
+            outside_paths = vector_path_policy_violations()
             return {
                 "enabled": False,
                 "mode": "hybrid",
                 "db_path": str(self.db_path),
+                "path_policy": "project_local" if project_local_only() else "external_paths_allowed",
+                "outside_project_paths": outside_paths,
                 "last_error": self._vector_last_error or "vector index not initialized",
             }
         stats = self.vector_index.get_stats()
         stats["db_path"] = str(self.db_path)
         if self._vector_last_error and not stats.get("last_error"):
             stats["last_error"] = self._vector_last_error
+        if _LAST_VECTOR_ERROR and not stats.get("last_error"):
+            stats["last_error"] = _LAST_VECTOR_ERROR
         return stats
 
     def add_node(self, content: str, node_type: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -631,7 +754,7 @@ class GraphService:
         source = str(metadata.get("source") or "interactive_ui")
         confidence = float(metadata.get("confidence", 1.0))
         timestamp = int(time())
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO nodes (id, label, type, content, metadata_json, source, confidence, created_at, updated_at, reviewed)
@@ -682,7 +805,7 @@ class GraphService:
         source = str(merged_metadata.get("source") or current["metadata"].get("source") or "interactive_ui")
         confidence = float(merged_metadata.get("confidence", current["metadata"].get("confidence", 1.0)))
         timestamp = int(time())
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 UPDATE nodes
@@ -695,15 +818,21 @@ class GraphService:
         return {"success": True, "node": self.get_node(node_id)}
 
     def delete_node(self, node_id: str) -> Dict[str, Any]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute("DELETE FROM relationships WHERE source_node = ? OR target_node = ?", (node_id, node_id))
             cursor = conn.execute("DELETE FROM nodes WHERE id = ?", (node_id,))
         self._invalidate_vector_index()
         return {"success": cursor.rowcount > 0}
 
     def _invalidate_vector_index(self) -> None:
+        global _LAST_VECTOR_ERROR
         if self.vector_index is not None:
+            mark_stale = getattr(self.vector_index, "mark_stale", None)
+            if callable(mark_stale):
+                mark_stale()
             self.vector_index.last_error = None
+        self._vector_last_error = None
+        _LAST_VECTOR_ERROR = None
 
     def add_relation(
         self,
@@ -729,7 +858,7 @@ class GraphService:
         description = str(metadata.get("description") or "")
         source = str(metadata.get("source") or "interactive_ui")
         strength = float(similarity if similarity is not None else metadata.get("strength", 1.0))
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO relationships (
@@ -779,7 +908,7 @@ class GraphService:
         return [self._relation_row_to_api(row) for row in self._fetch_relation_rows(node_id, relation_type, limit)]
 
     def get_relation(self, relation_id: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT id, source_node, target_node, type, strength, description, metadata_json, source, created_at, updated_at, reviewed
@@ -822,7 +951,7 @@ class GraphService:
         strength = float(similarity if similarity is not None else current.get("similarity") or 1.0)
         timestamp = int(time())
 
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """
                 UPDATE relationships
@@ -844,9 +973,36 @@ class GraphService:
         return {"success": True, "relation": self.get_relation(relation_id)}
 
     def delete_relation(self, relation_id: str) -> Dict[str, Any]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             cursor = conn.execute("DELETE FROM relationships WHERE id = ?", (relation_id,))
         return {"success": cursor.rowcount > 0}
+
+    def delete_by_sources(self, sources: Iterable[str]) -> Dict[str, Any]:
+        source_values = [str(source or "").strip() for source in sources if str(source or "").strip()]
+        if not source_values:
+            return {"nodes_deleted": 0, "relations_deleted": 0}
+        placeholders = ",".join("?" for _ in source_values)
+        with self._connection() as conn:
+            relation_cursor = conn.execute(
+                f"DELETE FROM relationships WHERE source IN ({placeholders})",
+                source_values,
+            )
+            node_cursor = conn.execute(
+                f"DELETE FROM nodes WHERE source IN ({placeholders})",
+                source_values,
+            )
+            orphan_cursor = conn.execute(
+                """
+                DELETE FROM relationships
+                WHERE source_node NOT IN (SELECT id FROM nodes)
+                   OR target_node NOT IN (SELECT id FROM nodes)
+                """
+            )
+        self._invalidate_vector_index()
+        return {
+            "nodes_deleted": node_cursor.rowcount,
+            "relations_deleted": relation_cursor.rowcount + orphan_cursor.rowcount,
+        }
 
     def batch_import_graph(self, nodes: List[Dict[str, Any]], relations: List[Dict[str, Any]]) -> Dict[str, Any]:
         node_map: Dict[str, str] = {}
@@ -907,7 +1063,7 @@ class GraphService:
         }
 
     def get_graph_statistics(self) -> Dict[str, Any]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             total_nodes = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
             total_relations = conn.execute("SELECT COUNT(*) FROM relationships").fetchone()[0]
             node_types = {

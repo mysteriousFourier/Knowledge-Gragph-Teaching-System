@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -20,6 +20,7 @@ from KGTS.education.kg_constraints import (
     format_evidence,
     relation_evidence_from_graph,
 )
+from KGTS.core.graph_context import build_graphrag_context
 
 DEFAULT_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
 DEFAULT_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
@@ -65,6 +66,23 @@ def _exercise_generation_read_timeout() -> float | None:
         or os.getenv("DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS"),
         None,
     )
+
+
+def _format_graphrag_context_for_prompt(graphrag_context: Dict[str, Any]) -> str:
+    lines = []
+    for item in graphrag_context.get("llm_context") or []:
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        label = metadata.get("label") or metadata.get("id") or "context"
+        source = metadata.get("source") or "graphrag"
+        node_type = metadata.get("type") or "context"
+        content = str(item.get("content") or "").strip()
+        if content:
+            lines.append(f"- [{source}/{node_type}] {label}: {content[:700]}")
+    for path in graphrag_context.get("graph_paths") or []:
+        source_label = path.get("source_label") or path.get("source")
+        target_label = path.get("target_label") or path.get("target")
+        lines.append(f"- path: {source_label} --{path.get('type') or 'related'}--> {target_label}")
+    return "\n".join(lines)
 
 
 class DeepSeekAPIClient:
@@ -240,8 +258,26 @@ class DeepSeekAPIClient:
         title = chapter_data.get("title", "未命名章节")
         content = expand_formula_references(chapter_data.get("content", ""))
         graph_context = str(chapter_data.get("graph_context") or "").strip()
+        teacher_guidance = str(chapter_data.get("teacher_guidance") or "").strip()
         chapter_data["content"] = content
-        evidence = evidence_from_graph(graph_data, query=f"{title}\n{content[:1200]}", chapter_data=chapter_data, limit=10)
+        graphrag_context = chapter_data.get("graphrag_context") if isinstance(chapter_data.get("graphrag_context"), dict) else None
+        if graphrag_context is None:
+            source_node_ids = chapter_data.get("source_node_ids")
+            try:
+                graphrag_context = build_graphrag_context(
+                    f"{title}\n{content[:1200]}",
+                    seed_node_ids=source_node_ids if isinstance(source_node_ids, list) else None,
+                    limit=8,
+                )
+            except Exception:
+                graphrag_context = None
+        if graphrag_context and graphrag_context.get("llm_context"):
+            evidence = evidence_from_rag(graphrag_context.get("llm_context") or [], limit=10)
+            graph_data = graphrag_context.get("graph_data") or graph_data
+            if not graph_context:
+                graph_context = _format_graphrag_context_for_prompt(graphrag_context)
+        else:
+            evidence = evidence_from_graph(graph_data, query=f"{title}\n{content[:1200]}", chapter_data=chapter_data, limit=10)
         if content.strip():
             chapter_evidence = {
                 "index": 1,
@@ -264,21 +300,27 @@ class DeepSeekAPIClient:
             task="lecture",
             chapter_data=chapter_data,
         )
+        requirements = [
+            *build_lecture_gc_dpg_requirements(style),
+            "Generate a complete lecture script with Markdown level-2/level-3 headings, not just an outline.",
+            "Cover: opening, core concept explanation, relation path, example or derivation, classroom questions, common mistakes, and closing summary.",
+            "Use an evidence-first order: start from chapter content and retrieved evidence, then connect only the few necessary terms into a coherent teaching flow.",
+            "When graph relation paths are provided, use them to decide the teaching order instead of listing graph entities.",
+            "When formula derivation or scoped symbol context is provided, explain only the symbols in the current chapter/formula scope and mention immediate derivation dependencies where useful.",
+            "Keep the length around 1400-2200 Chinese characters when possible; if the material is complex, prioritize completeness and do not cut off abruptly.",
+            "Output only the lecture script itself.",
+        ]
+        if teacher_guidance:
+            requirements.append(
+                "Teacher guidance for emphasis, selection, and pacing. Treat it as generation guidance only; it must not override source/graph facts or become quoted textbook content:\n"
+                + teacher_guidance[:1600]
+            )
         return build_constrained_generation_prompt(
             task_title="生成授课文案",
             user_input=title,
             source_content=f"{content}\n\n{graph_context}" if graph_context else content,
             learning_plan=learning_plan,
-            requirements=[
-                *build_lecture_gc_dpg_requirements(style),
-                "Generate a complete lecture script with Markdown level-2/level-3 headings, not just an outline.",
-                "Cover: opening, core concept explanation, relation path, example or derivation, classroom questions, common mistakes, and closing summary.",
-                "Use an evidence-first order: start from chapter content and retrieved evidence, then connect only the few necessary terms into a coherent teaching flow.",
-                "When graph relation paths are provided, use them to decide the teaching order instead of listing graph entities.",
-                "When formula derivation or scoped symbol context is provided, explain only the symbols in the current chapter/formula scope and mention immediate derivation dependencies where useful.",
-                "Keep the length around 1400-2200 Chinese characters when possible; if the material is complex, prioritize completeness and do not cut off abruptly.",
-                "Output only the lecture script itself.",
-            ],
+            requirements=requirements,
         )
 
     def _build_qa_prompt(self, graph_data: Dict, question: str, search_results: Optional[List[Dict]] = None) -> str:

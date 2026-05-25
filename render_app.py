@@ -47,7 +47,7 @@ from app_config import load_root_env, get_bind_host  # noqa: E402
 
 load_root_env()
 
-from graph_service import GraphService, PRESET_RELATION_TYPES  # noqa: E402
+from KGTS.core.graph_service import GraphService, PRESET_RELATION_TYPES, _default_db_path  # noqa: E402
 from backend.maintenance.structured_sync import scan_structured_sources  # noqa: E402
 
 # Import after sys.path setup. These modules keep the existing teacher/student API
@@ -55,6 +55,9 @@ from backend.maintenance.structured_sync import scan_structured_sources  # noqa:
 from backend.education import api_server as education_api  # noqa: E402
 from backend.maintenance import api_server as maintenance_api  # noqa: E402
 from core.bridge import delete_generated_lecture_nodes, _is_generated_shell_chapter_node  # noqa: E402
+from education.tts_router import router as tts_router  # noqa: E402
+from core.path_policy import project_local_only  # noqa: E402
+from core.tts_service import get_tts_status, run_tts_startup_cleanup  # noqa: E402
 
 
 app = FastAPI(
@@ -70,6 +73,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(tts_router)
 
 
 def _append_api_routes(source_app: FastAPI, *, skip_paths: Iterable[str] = ()) -> None:
@@ -87,7 +91,7 @@ def _graph_db_path() -> str | None:
     data_dir = os.getenv("APP_DATA_DIR")
     if data_dir:
         return str(Path(data_dir) / "knowledge_graph.db")
-    return None
+    return str(_default_db_path())
 
 
 def _graph() -> GraphService:
@@ -285,10 +289,31 @@ def _ensure_structured_graph() -> None:
     )
 
 
+def _ensure_vector_index() -> None:
+    graph = _graph()
+    if graph.retrieval_mode != "hybrid":
+        return
+    try:
+        stats = graph._vector_stats()
+        if not int(stats.get("index_size") or 0) or stats.get("stale"):
+            stats = graph.rebuild_vector_index()
+        print(
+            "[render] GraphRAG vector index ready: "
+            f"mode={stats.get('mode')}, model={stats.get('model')}, size={stats.get('index_size')}"
+        )
+    except Exception as exc:
+        print(f"[render] GraphRAG vector index startup check skipped: {exc}")
+
+
 @app.on_event("startup")
 async def startup_sync_structured_graph() -> None:
     _ensure_seed_runtime()
     _ensure_structured_graph()
+    _ensure_vector_index()
+    try:
+        run_tts_startup_cleanup()
+    except Exception as exc:
+        print(f"[render] TTS cache cleanup skipped: {exc}")
 
 
 def _graph_nodes(limit: int = 5000) -> list[dict[str, Any]]:
@@ -350,6 +375,28 @@ async def health_check() -> dict[str, Any]:
         "status": "healthy",
         "service": "render-single-fastapi",
         "graph_db_path": _graph_db_path() or "default",
+    }
+
+
+@app.get("/api/local-assets/status")
+async def local_assets_status() -> dict[str, Any]:
+    graph = _graph()
+    vector_stats = graph._vector_stats()
+    tts_status = get_tts_status()
+    outside_paths: list[dict[str, Any]] = []
+    for source, payload in (("vector", vector_stats), ("tts", tts_status)):
+        for item in payload.get("outside_project_paths") or []:
+            if isinstance(item, dict):
+                outside_paths.append({"source": source, **item})
+    return {
+        "success": True,
+        "path_policy": "project_local" if project_local_only() else "external_paths_allowed",
+        "project_local_only": project_local_only(),
+        "outside_project_paths": outside_paths,
+        "asset_status": {
+            "vector": vector_stats,
+            "tts": tts_status,
+        },
     }
 
 

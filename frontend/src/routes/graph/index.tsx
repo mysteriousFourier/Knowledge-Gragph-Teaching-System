@@ -5,6 +5,7 @@ import { Background, Controls, Handle, MarkerType, MiniMap, Position, ReactFlow,
 import "@xyflow/react/dist/style.css"
 import {
   BookOpen,
+  ClipboardList,
   ExternalLink,
   Focus,
   GitBranch,
@@ -99,14 +100,14 @@ const CANVAS_EDGE_LIMITS: Record<GraphViewMode, number> = {
   explore: 18,
   formulaTheorem: 36,
   prerequisites: 36,
-  chapterPath: 48,
+  chapterPath: 100,
   overview: 140,
 }
 const CANVAS_CONTEXT_EDGE_LIMITS: Record<GraphViewMode, number> = {
   explore: 0,
   formulaTheorem: 12,
   prerequisites: 12,
-  chapterPath: 34,
+  chapterPath: 100,
   overview: 140,
 }
 const CANVAS_LABEL_LIMIT = 6
@@ -122,7 +123,7 @@ const ALL_NODE_FETCH_LIMIT = 10000
 const ALL_RELATION_FETCH_LIMIT = 50000
 const STRUCTURAL_RELATION_TYPES = new Set(["contains"])
 const PATH_RELATION_TYPES = new Set(["precedes"])
-const FORMULA_RELATION_TYPES = new Set(["references_formula", "references_table"])
+const FORMULA_RELATION_TYPES = new Set(["references_formula", "references_table", "references_figure", "references_example"])
 const PREREQUISITE_RELATION_TYPES = new Set(["precedes", "defines", "derives", "explains", "depends_on", "supports", "causes"])
 const SEMANTIC_RELATION_TYPES = new Set([
   "precedes",
@@ -136,9 +137,12 @@ const SEMANTIC_RELATION_TYPES = new Set([
   "contrasts_with",
   "references_formula",
   "references_table",
+  "references_figure",
+  "references_example",
 ])
 const FORMULA_CONTEXT_TYPES = new Set(["formula", "theorem", "table", "note"])
 const CONTENT_START_TYPES = new Set(["proposition", "derivation", "discussion", "concept"])
+const CHAPTER_PATH_INTERNAL_TYPES = new Set(["section", "proposition", "derivation", "discussion", "concept", "table", "figure", "example", "formula", "theorem", "note", "observation"])
 
 function GraphPage() {
   const queryClient = useQueryClient()
@@ -157,7 +161,7 @@ function GraphPage() {
   const [layoutStatus, setLayoutStatus] = useState("")
   const [editMessage, setEditMessage] = useState("")
 
-  const showAllNodes = viewMode === "overview"
+  const showAllNodes = viewMode === "overview" || viewMode === "chapterPath"
   const { data: nodesData, isLoading: nodesLoading } = useGraphNodes(showAllNodes ? ALL_NODE_FETCH_LIMIT : LIMITED_NODE_FETCH_LIMIT)
   const { data: relationshipsData, isLoading: relationshipsLoading } = useGraphRelationships(showAllNodes ? ALL_RELATION_FETCH_LIMIT : LIMITED_RELATION_FETCH_LIMIT)
   const { data: selectedRelationsData } = useGraphRelations(selectedNodeId || "")
@@ -227,6 +231,7 @@ function GraphPage() {
   )
   const graphNeighborIds = useMemo(() => getNeighborIds(graphFocusNodeId, graphFocusRelationships), [graphFocusNodeId, graphFocusRelationships])
   const recommendedNodes = useMemo(() => getRecommendedStarts(baseFilteredNodes, graphDegreeById, graphContentRelations), [baseFilteredNodes, graphContentRelations, graphDegreeById])
+  const orderedChapterNodes = useMemo(() => getOrderedChapterNodes(rawNodes, filteredNodeIds), [filteredNodeIds, rawNodes])
   const formulaStartNodeId = useMemo(
     () =>
       baseFilteredNodes
@@ -303,6 +308,9 @@ function GraphPage() {
         ...graphNeighborIds,
         ...visibleNodes.filter((node) => FORMULA_CONTEXT_TYPES.has(node.type || "")).map((node) => node.id),
       ])
+    }
+    if (viewMode === "chapterPath") {
+      return new Set(visibleNodes.map((node) => node.id))
     }
     return new Set([selectedNodeId, ...(graphFocusNodeId ? [graphFocusNodeId] : []), ...(viewMode === "explore" ? graphNeighborIds : [])])
   }, [graphFocusNodeId, graphNeighborIds, selectedNeighborIds, selectedNodeId, viewMode, visibleNodes])
@@ -467,24 +475,39 @@ function GraphPage() {
   }, [])
 
   const selectGraphNode = useCallback((nodeId: string) => {
-    setSelectedNodeId((currentNodeId) => {
-      if (currentNodeId !== nodeId) {
-        setExpandedNodeIds(new Set())
-      }
-      return nodeId
-    })
-    setGraphFocusNodeId(nodeId)
+    const node = nodeById.get(nodeId)
+    setSelectedNodeId(nodeId)
     setEditMessage("")
-  }, [])
+    if (viewMode === "chapterPath") {
+      if (isStructuralHubNode(node)) {
+        setGraphFocusNodeId(nodeId)
+        setExpandedNodeIds(new Set([nodeId]))
+        return
+      }
+      const chapterId = findContainingChapterId(nodeId, graphRelationships, nodeById) || (isStructuralHubNode(nodeById.get(graphFocusNodeId || "")) ? graphFocusNodeId : null)
+      if (chapterId) {
+        setGraphFocusNodeId(chapterId)
+        setExpandedNodeIds(new Set([chapterId]))
+        return
+      }
+    }
+    setGraphFocusNodeId(nodeId)
+    setExpandedNodeIds(new Set())
+  }, [graphFocusNodeId, graphRelationships, nodeById, viewMode])
 
   const resetGraphView = useCallback(() => {
-    const startNodeId = viewMode === "formulaTheorem" ? formulaStartNodeId || recommendedNodes[0]?.id || null : recommendedNodes[0]?.id || null
+    const startNodeId =
+      viewMode === "formulaTheorem"
+        ? formulaStartNodeId || recommendedNodes[0]?.id || null
+        : viewMode === "chapterPath"
+          ? orderedChapterNodes[0]?.id || recommendedNodes[0]?.id || null
+          : recommendedNodes[0]?.id || null
     setSelectedNodeId(startNodeId)
     setGraphFocusNodeId(startNodeId)
     setExpandedNodeIds(new Set())
     setEditMessage("")
     return startNodeId
-  }, [formulaStartNodeId, recommendedNodes, viewMode])
+  }, [formulaStartNodeId, orderedChapterNodes, recommendedNodes, viewMode])
 
   const selectViewMode = useCallback(
     (mode: GraphViewMode) => {
@@ -495,30 +518,48 @@ function GraphPage() {
         const startNodeId = formulaStartNodeId || recommendedNodes[0]?.id || null
         setSelectedNodeId(startNodeId)
         setGraphFocusNodeId(startNodeId)
+      } else if (mode === "chapterPath") {
+        const startNodeId = orderedChapterNodes[0]?.id || recommendedNodes[0]?.id || null
+        setSelectedNodeId(startNodeId)
+        setGraphFocusNodeId(startNodeId)
       }
     },
-    [formulaStartNodeId, recommendedNodes],
+    [formulaStartNodeId, orderedChapterNodes, recommendedNodes],
   )
 
   const expandSelected = useCallback(() => {
     if (!selectedNodeId) return
+    if (viewMode === "chapterPath" && isStructuralHubNode(nodeById.get(selectedNodeId))) {
+      setGraphFocusNodeId(selectedNodeId)
+      setExpandedNodeIds(new Set([selectedNodeId]))
+      return
+    }
     setGraphFocusNodeId(selectedNodeId)
     setExpandedNodeIds((prev) => new Set([...prev, selectedNodeId, ...selectedNeighborIds]))
-  }, [selectedNeighborIds, selectedNodeId])
+  }, [nodeById, selectedNeighborIds, selectedNodeId, viewMode])
 
   const resetToFocus = useCallback(() => {
+    if (viewMode === "chapterPath") {
+      const startNodeId = orderedChapterNodes[0]?.id || selectedNodeId
+      setSelectedNodeId(startNodeId)
+      setGraphFocusNodeId(startNodeId)
+      setExpandedNodeIds(new Set())
+      return
+    }
     setGraphFocusNodeId(selectedNodeId)
     setExpandedNodeIds(new Set())
     setViewMode("explore")
-  }, [selectedNodeId])
+  }, [orderedChapterNodes, selectedNodeId, viewMode])
 
   const backToStarts = useCallback(() => {
-    const startNodeId = recommendedNodes[0]?.id || null
+    const startNodeId = viewMode === "chapterPath" ? orderedChapterNodes[0]?.id || null : recommendedNodes[0]?.id || null
     setSelectedNodeId(startNodeId)
     setGraphFocusNodeId(startNodeId)
     setExpandedNodeIds(new Set())
-    setViewMode("explore")
-  }, [recommendedNodes])
+    if (viewMode !== "chapterPath") {
+      setViewMode("explore")
+    }
+  }, [orderedChapterNodes, recommendedNodes, viewMode])
 
   return (
     <div className="space-y-5">
@@ -574,7 +615,7 @@ function GraphPage() {
         <div className="flex flex-wrap items-center gap-2 p-3">
           <button type="button" onClick={expandSelected} disabled={!selectedNodeId} className="inline-flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50">
             <Waypoints size={16} />
-            展开邻居
+            {viewMode === "chapterPath" ? "展开章节" : "展开邻居"}
           </button>
           <button type="button" onClick={resetToFocus} disabled={!selectedNodeId} className="inline-flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm hover:bg-muted disabled:opacity-50">
             <Focus size={16} />
@@ -631,6 +672,10 @@ function GraphPage() {
               canEdit={canEditGraph}
               onSave={handleSaveNode}
               onStart={() => startFromNode(selectedNode.id)}
+              onPrepare={() => {
+                window.location.href = `/teacher/prepare?nodeId=${encodeURIComponent(selectedNode.id)}`
+              }}
+              onSelectNode={selectGraphNode}
               incoming={relationBuckets.incoming}
               outgoing={relationBuckets.outgoing}
               related={relationBuckets.related}
@@ -1340,6 +1385,7 @@ function selectCanvasNodes(nodes: Node[], relationNodeIds: Set<string>, selected
   if (viewMode === "formulaTheorem") {
     return selectFormulaCanvasNodes(nodes, relationNodeIds, selectedNodeId)
   }
+  if (viewMode === "chapterPath") return nodes
   const visibleIds = new Set(relationNodeIds)
   if (selectedNodeId) visibleIds.add(selectedNodeId)
 
@@ -1596,6 +1642,8 @@ function NodeDetails({
   canEdit,
   onSave,
   onStart,
+  onPrepare,
+  onSelectNode,
   incoming,
   outgoing,
   related,
@@ -1609,6 +1657,8 @@ function NodeDetails({
   canEdit: boolean
   onSave: (nodeId: string, content: string) => Promise<void>
   onStart: () => void
+  onPrepare: () => void
+  onSelectNode: (nodeId: string) => void
   incoming: GraphRelation[]
   outgoing: GraphRelation[]
   related: GraphRelation[]
@@ -1644,14 +1694,22 @@ function NodeDetails({
         <Focus size={15} />
         从这里开始
       </button>
+      <button
+        type="button"
+        onClick={onPrepare}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm font-medium hover:bg-muted"
+      >
+        <ClipboardList size={15} />
+        用该节点备课
+      </button>
 
       <section className="rounded-lg border bg-muted/40 p-3">
         <h3 className="mb-2 text-sm font-semibold">学习建议</h3>
         <div className="space-y-2 text-sm text-muted-foreground">
           <p>{buildLearningAdvice(node, prerequisites.length, nextNodes.length, formulas.length)}</p>
-          <RelationList title="前置知识" nodes={prerequisites.slice(0, 5)} empty="暂无明确前置节点" />
-          <RelationList title="下一步节点" nodes={nextNodes.slice(0, 5)} empty="暂无明确后续节点" />
-          <RelationList title="相关公式/定理/例题" nodes={relationsToNodes(formulas.concat(examples), nodeById, node.id).slice(0, 6)} empty="暂无相关公式或例题" />
+          <RelationList title="前置知识" nodes={prerequisites.slice(0, 5)} empty="暂无明确前置节点" onSelectNode={onSelectNode} />
+          <RelationList title="下一步节点" nodes={nextNodes.slice(0, 5)} empty="暂无明确后续节点" onSelectNode={onSelectNode} />
+          <RelationList title="相关公式/定理/例题" nodes={relationsToNodes(formulas.concat(examples), nodeById, node.id).slice(0, 6)} empty="暂无相关公式或例题" onSelectNode={onSelectNode} />
         </div>
       </section>
 
@@ -1661,8 +1719,8 @@ function NodeDetails({
           <span className="text-xs text-muted-foreground">{related.length} 条</span>
         </div>
         <div className="space-y-3">
-          <RelationDetailList title="指向当前节点" selectedNodeId={node.id} relations={incoming.slice(0, 12)} nodeById={nodeById} empty="暂无入边" />
-          <RelationDetailList title="从当前节点指出" selectedNodeId={node.id} relations={outgoing.slice(0, 12)} nodeById={nodeById} empty="暂无出边" />
+          <RelationDetailList title="指向当前节点" selectedNodeId={node.id} relations={incoming.slice(0, 12)} nodeById={nodeById} empty="暂无入边" onSelectNode={onSelectNode} />
+          <RelationDetailList title="从当前节点指出" selectedNodeId={node.id} relations={outgoing.slice(0, 12)} nodeById={nodeById} empty="暂无出边" onSelectNode={onSelectNode} />
         </div>
       </section>
 
@@ -1711,16 +1769,21 @@ function NodeDetails({
   )
 }
 
-function RelationList({ title, nodes, empty }: { title: string; nodes: GraphNode[]; empty: string }) {
+function RelationList({ title, nodes, empty, onSelectNode }: { title: string; nodes: GraphNode[]; empty: string; onSelectNode: (nodeId: string) => void }) {
   return (
     <div>
       <div className="text-xs font-medium text-foreground">{title}</div>
       {nodes.length ? (
         <div className="mt-1 flex flex-wrap gap-1.5">
           {nodes.map((node) => (
-            <span key={node.id} className="rounded-md border bg-background px-2 py-1 text-xs text-foreground">
+            <button
+              key={node.id}
+              type="button"
+              onClick={() => onSelectNode(node.id)}
+              className="rounded-md border bg-background px-2 py-1 text-left text-xs text-foreground hover:border-primary hover:text-primary"
+            >
               {truncateLabel(node.label || node.id, 28)}
-            </span>
+            </button>
           ))}
         </div>
       ) : (
@@ -1736,12 +1799,14 @@ function RelationDetailList({
   relations,
   nodeById,
   empty,
+  onSelectNode,
 }: {
   title: string
   selectedNodeId: string
   relations: GraphRelation[]
   nodeById: Map<string, GraphNode>
   empty: string
+  onSelectNode: (nodeId: string) => void
 }) {
   return (
     <div>
@@ -1756,7 +1821,17 @@ function RelationDetailList({
               <div key={relation.id || `${relation.source_id}-${relation.target_id}-${index}`} className="rounded-md border bg-muted/30 p-2 text-xs">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">{relation.relation_type || "related"}</span>
-                  <span className="text-foreground">{truncateLabel(otherNode?.label || otherId, 36)}</span>
+                  {otherNode ? (
+                    <button
+                      type="button"
+                      onClick={() => onSelectNode(otherNode.id)}
+                      className="text-left text-foreground underline-offset-2 hover:text-primary hover:underline"
+                    >
+                      {truncateLabel(otherNode.label || otherId, 36)}
+                    </button>
+                  ) : (
+                    <span className="text-foreground">{truncateLabel(otherId, 36)}</span>
+                  )}
                 </div>
                 {description && <div className="mt-1 text-muted-foreground">{truncateLabel(description, 90)}</div>}
               </div>
@@ -1857,6 +1932,54 @@ function getRecommendedStarts(nodes: GraphNode[], degreeById: Map<string, number
     .slice(0, RECOMMENDED_LIMIT)
 }
 
+function getOrderedChapterNodes(nodes: GraphNode[], filteredNodeIds: Set<string>) {
+  const chapters = nodes.filter((node) => isStructuralHubNode(node))
+  const filteredChapters = chapters.filter((node) => filteredNodeIds.has(node.id))
+  return (filteredChapters.length ? filteredChapters : chapters).sort(compareChapterNodes)
+}
+
+function getChapterPathAnchorNodeId(
+  selectedNodeId: string | null,
+  rawNodes: GraphNode[],
+  filteredNodeIds: Set<string>,
+  relations: GraphRelation[],
+  nodeById: Map<string, GraphNode>,
+) {
+  if (selectedNodeId && isStructuralHubNode(nodeById.get(selectedNodeId))) return selectedNodeId
+  if (selectedNodeId) {
+    const containingChapterId = findContainingChapterId(selectedNodeId, relations, nodeById)
+    if (containingChapterId) return containingChapterId
+  }
+  return getOrderedChapterNodes(rawNodes, filteredNodeIds)[0]?.id || null
+}
+
+function findContainingChapterId(nodeId: string | null, relations: GraphRelation[], nodeById: Map<string, GraphNode>) {
+  if (!nodeId) return null
+  const directNode = nodeById.get(nodeId)
+  if (isStructuralHubNode(directNode)) return nodeId
+
+  const parentByChild = new Map<string, string[]>()
+  relations.forEach((relation) => {
+    if (!STRUCTURAL_RELATION_TYPES.has(relation.relation_type || "")) return
+    if (!parentByChild.has(relation.target_id)) parentByChild.set(relation.target_id, [])
+    parentByChild.get(relation.target_id)?.push(relation.source_id)
+  })
+
+  const queue = [nodeId]
+  const visited = new Set<string>()
+  while (queue.length) {
+    const currentId = queue.shift()
+    if (!currentId || visited.has(currentId)) continue
+    visited.add(currentId)
+    const node = nodeById.get(currentId)
+    if (isStructuralHubNode(node)) return currentId
+    ;(parentByChild.get(currentId) || []).forEach((parentId) => {
+      if (!visited.has(parentId)) queue.push(parentId)
+    })
+  }
+  return null
+}
+
 function buildGraphSubgraph({
   selectedNodeId,
   viewMode,
@@ -1886,7 +2009,10 @@ function buildGraphSubgraph({
   degreeById: Map<string, number>
   limit: number
 }): GraphSubgraph {
-  const anchorNodeId = getAnchorNodeId(selectedNodeId, recommendedNodes, nodeById)
+  const anchorNodeId =
+    viewMode === "chapterPath"
+      ? getChapterPathAnchorNodeId(selectedNodeId, rawNodes, filteredNodeIds, filteredRelations, nodeById)
+      : getAnchorNodeId(selectedNodeId, recommendedNodes, nodeById)
 
   if (viewMode === "overview") {
     const overviewNodes = getOverviewNodes(baseFilteredNodes, degreeById, filteredRelations, limit)
@@ -1905,6 +2031,13 @@ function buildGraphSubgraph({
   }
 
   if (!anchorNodeId) {
+    if (viewMode === "chapterPath") {
+      return {
+        nodes: [],
+        relationships: [],
+        anchorNodeId,
+      }
+    }
     const nodeIds = new Set(recommendedNodes.slice(0, RECOMMENDED_LIMIT).map((node) => node.id))
     return finalizeSubgraph({
       nodeIds,
@@ -1920,7 +2053,7 @@ function buildGraphSubgraph({
   }
 
   if (viewMode === "chapterPath") {
-    return buildPathSubgraph(anchorNodeId, rawNodes, filteredNodeIds, filteredRelations, selectedNeighborIds, degreeById, limit)
+    return buildPathSubgraph(anchorNodeId, rawNodes, filteredNodeIds, filteredRelations, expandedNodeIds, selectedNeighborIds, degreeById, limit)
   }
 
   if (viewMode === "prerequisites") {
@@ -1971,38 +2104,198 @@ function getOverviewNodes(
     .slice(0, limit)
 }
 
+function createChapterOrderRelations(chapterNodes: GraphNode[]): GraphRelation[] {
+  return chapterNodes.slice(0, -1).map((node, index) => {
+    const nextNode = chapterNodes[index + 1]
+    return {
+      id: `chapter-path::${node.id}::${nextNode.id}`,
+      source_id: node.id,
+      target_id: nextNode.id,
+      source: node.id,
+      target: nextNode.id,
+      source_node: node.id,
+      target_node: nextNode.id,
+      relation_type: "precedes",
+      type: "precedes",
+      similarity: 1,
+      description: "chapter order",
+      reviewed: true,
+      metadata: { synthetic: true, role: "chapter_order" },
+    }
+  })
+}
+
+function getChapterInternalPath(
+  chapterId: string,
+  containsRelations: GraphRelation[],
+  pathRelations: GraphRelation[],
+  nodeById: Map<string, GraphNode>,
+  limit: number,
+) {
+  const chapterKey = getNodeChapterKey(nodeById.get(chapterId)) || chapterId.replace(/^chapter::/, "")
+  const directChildIds = new Set(containsRelations.filter((relation) => relation.source_id === chapterId).map((relation) => relation.target_id))
+  const descendantIds = getChapterDescendantIds(chapterId, containsRelations, nodeById)
+  const chapterNodeIds = new Set<string>([...directChildIds, ...descendantIds])
+
+  nodeById.forEach((node) => {
+    if (getNodeChapterKey(node) === chapterKey && CHAPTER_PATH_INTERNAL_TYPES.has(node.type || "")) {
+      chapterNodeIds.add(node.id)
+    }
+  })
+
+  const internalPathRelations = pathRelations.filter((relation) => chapterNodeIds.has(relation.source_id) && chapterNodeIds.has(relation.target_id))
+  const orderedIds = getOrderedIdsFromPathRelations(internalPathRelations, chapterNodeIds)
+  const preferredIds = orderedIds.length ? orderedIds : Array.from(chapterNodeIds).sort((a, b) => compareChapterPathNodeIds(a, b, nodeById))
+  const selectedIds = preferredIds
+    .filter((id) => {
+      const node = nodeById.get(id)
+      return node && id !== chapterId && CHAPTER_PATH_INTERNAL_TYPES.has(node.type || "")
+    })
+    .slice(0, Math.max(0, limit))
+  const selectedIdSet = new Set(selectedIds)
+  const selectedRelations = internalPathRelations.filter((relation) => selectedIdSet.has(relation.source_id) && selectedIdSet.has(relation.target_id))
+
+  if (selectedRelations.length || !selectedIds.length) {
+    return {
+      nodeIds: new Set(selectedIds),
+      relations: selectedRelations,
+    }
+  }
+
+  return {
+    nodeIds: new Set(selectedIds),
+    relations: selectedIds.slice(0, -1).map((id, index) => createSyntheticInternalPathRelation(id, selectedIds[index + 1])),
+  }
+}
+
+function getChapterDescendantIds(chapterId: string, containsRelations: GraphRelation[], nodeById: Map<string, GraphNode>) {
+  const childrenByParent = new Map<string, string[]>()
+  containsRelations.forEach((relation) => {
+    if (!childrenByParent.has(relation.source_id)) childrenByParent.set(relation.source_id, [])
+    childrenByParent.get(relation.source_id)?.push(relation.target_id)
+  })
+
+  const ids = new Set<string>()
+  const queue = [...(childrenByParent.get(chapterId) || [])]
+  while (queue.length) {
+    const nodeId = queue.shift()
+    if (!nodeId || ids.has(nodeId)) continue
+    ids.add(nodeId)
+    if (isStructuralHubNode(nodeById.get(nodeId))) continue
+    ;(childrenByParent.get(nodeId) || []).forEach((childId) => {
+      if (!ids.has(childId)) queue.push(childId)
+    })
+  }
+  return ids
+}
+
+function getOrderedIdsFromPathRelations(pathRelations: GraphRelation[], allowedIds: Set<string>) {
+  const outgoing = new Map<string, string[]>()
+  const incomingCount = new Map<string, number>()
+  allowedIds.forEach((id) => incomingCount.set(id, 0))
+  pathRelations.forEach((relation) => {
+    if (!allowedIds.has(relation.source_id) || !allowedIds.has(relation.target_id)) return
+    if (!outgoing.has(relation.source_id)) outgoing.set(relation.source_id, [])
+    outgoing.get(relation.source_id)?.push(relation.target_id)
+    incomingCount.set(relation.target_id, (incomingCount.get(relation.target_id) || 0) + 1)
+  })
+
+  const starts = Array.from(allowedIds).filter((id) => (incomingCount.get(id) || 0) === 0 && (outgoing.get(id)?.length || 0) > 0)
+  const ordered: string[] = []
+  const seen = new Set<string>()
+  const walk = (startId: string) => {
+    let currentId: string | undefined = startId
+    while (currentId && !seen.has(currentId)) {
+      seen.add(currentId)
+      ordered.push(currentId)
+      currentId = (outgoing.get(currentId) || []).find((nextId) => !seen.has(nextId))
+    }
+  }
+  starts.sort((a, b) => compareChapterPathNodeIds(a, b, new Map())).forEach(walk)
+  pathRelations.forEach((relation) => {
+    if (!seen.has(relation.source_id)) walk(relation.source_id)
+    if (!seen.has(relation.target_id)) walk(relation.target_id)
+  })
+  return ordered
+}
+
+function createSyntheticInternalPathRelation(sourceId: string, targetId: string): GraphRelation {
+  return {
+    id: `chapter-internal-path::${sourceId}::${targetId}`,
+    source_id: sourceId,
+    target_id: targetId,
+    source: sourceId,
+    target: targetId,
+    source_node: sourceId,
+    target_node: targetId,
+    relation_type: "precedes",
+    type: "precedes",
+    similarity: 1,
+    description: "chapter internal order",
+    reviewed: true,
+    metadata: { synthetic: true, role: "chapter_internal_order" },
+  }
+}
+
 function buildPathSubgraph(
   anchorNodeId: string,
   rawNodes: GraphNode[],
   filteredNodeIds: Set<string>,
   relations: GraphRelation[],
+  expandedNodeIds: Set<string>,
   selectedNeighborIds: Set<string>,
   degreeById: Map<string, number>,
   limit: number,
 ) {
+  const nodeById = new Map(rawNodes.map((node) => [node.id, node]))
+  const chapterNodes = getOrderedChapterNodes(rawNodes, filteredNodeIds)
+  const chapterNodeIds = new Set(chapterNodes.map((node) => node.id))
+  const anchorChapterId = chapterNodeIds.has(anchorNodeId) ? anchorNodeId : findContainingChapterId(anchorNodeId, relations, nodeById) || chapterNodes[0]?.id || anchorNodeId
+  const containsRelations = relations.filter((relation) => STRUCTURAL_RELATION_TYPES.has(relation.relation_type || ""))
   const pathRelations = relations.filter((relation) => PATH_RELATION_TYPES.has(relation.relation_type || ""))
-  const semanticRelations = relations.filter((relation) => SEMANTIC_RELATION_TYPES.has(relation.relation_type || ""))
-  const nodeIds = new Set<string>([anchorNodeId])
-  const orderedPath = getOrderedPath(anchorNodeId, pathRelations, 18, 24)
-  orderedPath.forEach((id) => nodeIds.add(id))
+  const expandedChapterIds = new Set<string>()
+  expandedNodeIds.forEach((id) => {
+    const chapterId = chapterNodeIds.has(id) ? id : findContainingChapterId(id, relations, nodeById)
+    if (chapterId && chapterNodeIds.has(chapterId)) expandedChapterIds.add(chapterId)
+  })
 
-  getTopRelationsForNode(anchorNodeId, semanticRelations, degreeById, 10).forEach((relation) => {
-    if (nodeIds.size < limit) {
-      nodeIds.add(relation.source_id)
-      nodeIds.add(relation.target_id)
-    }
+  if (!expandedChapterIds.size) {
+    const nodeIds = new Set(chapterNodes.map((node) => node.id))
+    return finalizeSubgraph({
+      nodeIds,
+      relations: createChapterOrderRelations(chapterNodes),
+      rawNodes,
+      filteredNodeIds,
+      anchorNodeId: anchorChapterId,
+      selectedNeighborIds,
+      degreeById,
+      relationshipLimit: FOCUSED_EDGE_LIMIT,
+      nodeLimit: Math.max(limit, chapterNodes.length),
+    })
+  }
+
+  const nodeIds = new Set<string>()
+  expandedChapterIds.forEach((chapterId) => nodeIds.add(chapterId))
+  const expandedRelations: GraphRelation[] = []
+  const expandedNodeLimit = Math.max(limit, expandedChapterIds.size + 56)
+  expandedChapterIds.forEach((chapterId) => {
+    const chapterPath = getChapterInternalPath(chapterId, containsRelations, pathRelations, nodeById, expandedNodeLimit - nodeIds.size)
+    chapterPath.nodeIds.forEach((id) => {
+      if (nodeIds.size < expandedNodeLimit) nodeIds.add(id)
+    })
+    expandedRelations.push(...chapterPath.relations)
   })
 
   return finalizeSubgraph({
     nodeIds,
-    relations: relations.filter((relation) => PATH_RELATION_TYPES.has(relation.relation_type || "") || relation.source_id === anchorNodeId || relation.target_id === anchorNodeId),
+    relations: expandedRelations,
     rawNodes,
     filteredNodeIds,
-    anchorNodeId,
+    anchorNodeId: anchorChapterId,
     selectedNeighborIds,
     degreeById,
     relationshipLimit: FOCUSED_EDGE_LIMIT,
-    nodeLimit: limit,
+    nodeLimit: expandedNodeLimit,
   })
 }
 
@@ -2190,6 +2483,58 @@ function getAnchorNodeId(selectedNodeId: string | null, recommendedNodes: GraphN
   return recommendedNodes.find((node) => !isStructuralHubNode(node))?.id || recommendedNodes[0]?.id || selectedNodeId
 }
 
+function compareChapterNodes(a: GraphNode, b: GraphNode) {
+  const chapterDelta = getChapterSortValue(a) - getChapterSortValue(b)
+  if (chapterDelta) return chapterDelta
+  return (a.label || a.id).localeCompare(b.label || b.id)
+}
+
+function getChapterSortValue(node: GraphNode) {
+  const key = getNodeChapterKey(node) || node.id || node.label || ""
+  const appendixMatch = key.match(/appendix\s*([0-9]+)/i) || key.match(/appendix([0-9]+)/i)
+  if (appendixMatch) return 10_000 + Number(appendixMatch[1])
+  const chapterMatch = key.match(/chapter\s*([0-9]+)/i) || key.match(/chapter([0-9]+)/i) || key.match(/(?:^|::)([0-9]+)$/)
+  if (chapterMatch) return Number(chapterMatch[1])
+  return Number.MAX_SAFE_INTEGER
+}
+
+function compareChapterPathNodeIds(leftId: string, rightId: string, nodeById: Map<string, GraphNode>) {
+  const leftNode = nodeById.get(leftId)
+  const rightNode = nodeById.get(rightId)
+  const leftUnit = getSourceUnitSortValue(leftNode, leftId)
+  const rightUnit = getSourceUnitSortValue(rightNode, rightId)
+  if (leftUnit !== rightUnit) return leftUnit - rightUnit
+  const leftIndex = getBlockIndexSortValue(leftNode, leftId)
+  const rightIndex = getBlockIndexSortValue(rightNode, rightId)
+  if (leftIndex !== rightIndex) return leftIndex - rightIndex
+  return leftId.localeCompare(rightId)
+}
+
+function getSourceUnitSortValue(node: GraphNode | undefined, fallback: string) {
+  const metadata = node?.metadata || {}
+  const sourceUnit = String(metadata.source_unit || metadata.source || metadata.source_file || fallback)
+  const match = sourceUnit.match(/(?:chapter|appendix)\d+[_-](\d+)/i) || fallback.match(/(?:chapter|appendix)\d+[_-](\d+)/i)
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER
+}
+
+function getBlockIndexSortValue(node: GraphNode | undefined, fallback: string) {
+  const blockIndex = node?.metadata?.block_index
+  if (typeof blockIndex === "number" && Number.isFinite(blockIndex)) return blockIndex
+  if (typeof blockIndex === "string" && Number.isFinite(Number(blockIndex))) return Number(blockIndex)
+  const match = fallback.match(/::(\d+)$/)
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER
+}
+
+function getNodeChapterKey(node: GraphNode | undefined) {
+  if (!node) return ""
+  const metadataChapter = typeof node.metadata?.chapter === "string" ? node.metadata.chapter.trim() : ""
+  if (metadataChapter) return metadataChapter.replace(/^chapter::/, "")
+  const id = node.id || ""
+  const chapterMatch = id.match(/chapter::([^:]+)/) || id.match(/(?:block|section|formula|table|example)::((?:chapter|appendix)[^_:]+)/)
+  if (chapterMatch) return chapterMatch[1]
+  return ""
+}
+
 function getOrderedPath(anchorNodeId: string, pathRelations: GraphRelation[], beforeLimit: number, afterLimit: number) {
   const incoming = new Map<string, GraphRelation[]>()
   const outgoing = new Map<string, GraphRelation[]>()
@@ -2344,8 +2689,8 @@ function getNodeIdPriority(nodeId: string, selectedNodeId: string | null, select
   return getVisibleNodePriority(node, selectedNodeId, selectedNeighborIds, degreeById)
 }
 
-function isStructuralHubNode(node: GraphNode) {
-  return (node.type || "") === "chapter"
+function isStructuralHubNode(node: GraphNode | undefined) {
+  return (node?.type || "") === "chapter"
 }
 
 function isContentStartNode(node: GraphNode) {

@@ -43,6 +43,15 @@ python backend/maintenance/api_server.py
 - 图谱校验、孤立节点清理、关系审计
 - 子图、前置知识、后续知识查询
 
+低资源线上环境默认不在启动时自动执行全量结构化同步和图谱清理：
+
+```text
+APP_RUN_STARTUP_MAINTENANCE=0
+RENDER_AUTO_SYNC_STRUCTURED=0
+```
+
+需要维护图谱时，应在服务稳定后通过维护页面或 API 手动触发，并观察服务日志与内存占用。
+
 ## 维护约定
 
 - 主逻辑改动优先落在根目录 `maintenance/`

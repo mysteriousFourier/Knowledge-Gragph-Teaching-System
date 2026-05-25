@@ -3,6 +3,18 @@ $ErrorActionPreference = "Stop"
 
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ROOT
+$env:KGTS_RETRIEVAL_MODE = "hybrid"
+$env:KGTS_VECTOR_INDEX_DIR = ".runtime/vector_index"
+$env:KGTS_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+$env:KGTS_EMBEDDING_LOCAL_FILES_ONLY = "1"
+$env:KGTS_PROJECT_LOCAL_ONLY = "1"
+$env:KGTS_ALLOW_EXTERNAL_PATHS = "0"
+$env:KGTS_EMBEDDING_CACHE_DIR = ".runtime/huggingface"
+$env:HF_HOME = Join-Path $ROOT ".runtime\huggingface"
+$env:HF_HUB_CACHE = Join-Path $ROOT ".runtime\huggingface"
+$env:SENTENCE_TRANSFORMERS_HOME = Join-Path $ROOT ".runtime\huggingface"
+$env:TRANSFORMERS_CACHE = Join-Path $ROOT ".runtime\huggingface"
+$env:PYTHONPATH = "$ROOT;$env:PYTHONPATH"
 
 Write-Host "=========================================="
 Write-Host "KGTS - Knowledge Graph Teaching System"
@@ -101,6 +113,23 @@ try {
         Write-Host "[ERROR] Failed to install dependencies" -ForegroundColor Red
         Read-Host "Press Enter to exit"
         exit 1
+    }
+}
+try {
+    & $PYTHON -c "import sentence_transformers, faiss" 2>$null
+    if ($LASTEXITCODE -ne 0) { throw }
+} catch {
+    Write-Host "[ERROR] Local KGTS_RETRIEVAL_MODE=hybrid requires optional vector dependencies." -ForegroundColor Red
+    Write-Host "Install them with:"
+    Write-Host "    & `"$PYTHON`" -m pip install -r requirements-vector.txt"
+    Write-Host "Azure/F1 or low-resource deployments may set KGTS_RETRIEVAL_MODE=sparse_hybrid or graph_db instead."
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+foreach ($asset in @("third_party\Genie-TTS", "models\tts\GenieData", "models\tts\shu")) {
+    if (-not (Test-Path (Join-Path $ROOT $asset))) {
+        Write-Host "[WARN] Project-local asset missing: $asset" -ForegroundColor Yellow
     }
 }
 

@@ -38,3 +38,4 @@
 
 项目当前很多调用路径已经通过 `core/mcp_client.py` 和 `core/cli_dispatch.py` 在进程内完成兼容，不再要求单独拉起一个外部 MCP 进程。
 
+在 Azure App Service 或 Azure for Students VM 上，也应保持这个进程内兼容模式。公网只暴露 `render_app.py` 提供的单端口 Web 服务，不单独开放 MCP 端口。

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from KGTS.maintenance.sync_core import (
     build_teacher_package,
+    rebuild_staging_graph,
     review_search,
     scan_structured_sources,
 )
@@ -18,6 +19,7 @@ from KGTS.maintenance.sync_utils import SourceSpec
 __all__ = [
     "SourceSpec",
     "scan_structured_sources",
+    "rebuild_staging_graph",
     "build_teacher_package",
     "review_search",
 ]

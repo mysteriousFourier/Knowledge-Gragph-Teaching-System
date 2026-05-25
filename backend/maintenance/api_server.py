@@ -5,13 +5,17 @@
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+_KGTS_NAME = "KGTS"
+if _KGTS_NAME not in sys.modules:
+    _kgts_pkg = types.ModuleType(_KGTS_NAME)
+    _kgts_pkg.__path__ = [str(ROOT_DIR)]
+    sys.modules[_KGTS_NAME] = _kgts_pkg
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-if str(ROOT_DIR.parent) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR.parent))
 
 from fastapi import FastAPI
 

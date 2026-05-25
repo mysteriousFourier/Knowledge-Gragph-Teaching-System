@@ -22,6 +22,16 @@
 
 如果没有显式指定运行时图谱数据库路径，项目默认仍会读取旧路径下的图谱数据库，并在节点过少时尝试从 `structured/` 自动重建图谱。
 
+低资源线上部署建议设置：
+
+```text
+APP_BOOTSTRAP_SEED_DATA=1
+APP_RUN_STARTUP_MAINTENANCE=0
+RENDER_AUTO_SYNC_STRUCTURED=0
+```
+
+这样启动时优先使用种子数据，避免在 Azure F1 或 1 GB 免费 VM 冷启动阶段做结构化全量同步。
+
 ## 维护约定
 
 - 只保留可公开分发的数据

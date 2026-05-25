@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
-import { ArrowRight, BookOpen, Brain, FileText, FileUp, MessageSquare, Trash2 } from "lucide-react"
+import { ArrowRight, BookOpen, Brain, FileText, MessageSquare, Trash2 } from "lucide-react"
 import { useDeleteChapter, useTeacherChapters } from "@/api/teacher"
 import { EmptyState } from "@/components/common/EmptyState"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
@@ -17,10 +17,10 @@ function TeacherPage() {
   const chapters = data?.chapters || []
 
   const handleDeleteChapter = async (chapter: Chapter) => {
-    if (!window.confirm(`Delete chapter "${chapter.title}"?`)) return
+    if (!window.confirm(`删除课程「${chapter.title}」？`)) return
     const result = await deleteChapter.mutateAsync(chapter.id)
     if (!result.success) {
-      window.alert(result.error || "Delete failed")
+      window.alert(result.error || "删除失败")
       return
     }
     await Promise.all([
@@ -35,21 +35,15 @@ function TeacherPage() {
       <div>
         <span className="sheet-label">Teacher Console</span>
         <h1 className="text-2xl font-bold">教师端</h1>
-        <p className="text-muted-foreground">管理章节、生成授课文案和练习题</p>
+        <p className="text-muted-foreground">管理课程、生成授课文案和练习题</p>
       </div>
 
       <div className="route-grid">
         <QuickActionCard
           to="/teacher/prepare"
           icon={<BookOpen className="h-5 w-5" />}
-          title="备课模式"
-          description="导入章节与生成文案"
-        />
-        <QuickActionCard
-          to="/teacher/ppt"
-          icon={<FileUp className="h-5 w-5" />}
-          title="PPT文案"
-          description="生成每页讲解文案"
+          title="备课工作台"
+          description="树选课程内容生成课件与逐页讲解"
         />
         <QuickActionCard
           to="/teacher/lecture"
@@ -72,11 +66,11 @@ function TeacherPage() {
       </div>
 
       <div>
-        <h2 className="text-lg font-semibold mb-4">已保存章节</h2>
+        <h2 className="text-lg font-semibold mb-4">已保存课程</h2>
         {isLoading ? (
-          <LoadingSpinner text="加载章节中..." />
+          <LoadingSpinner text="加载课程中..." />
         ) : chapters.length === 0 ? (
-          <EmptyState title="暂无章节" description="当前没有已保存的章节，请在备课模式导入内容。" />
+          <EmptyState title="暂无课程" description="当前没有已保存的课程，请在备课模式导入内容。" />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {chapters.map((chapter) => (
@@ -143,7 +137,7 @@ function ChapterCard({
       <div className="mt-auto flex items-center gap-2">
         <Link
           to="/teacher/prepare"
-          search={{ chapterId: chapter.id }}
+          search={{ chapterId: chapter.id, nodeId: "" }}
           className="flex-1 text-center py-2 bg-primary/10 text-primary rounded-lg text-sm font-medium hover:bg-primary/20 transition-colors"
         >
           备课
@@ -160,7 +154,7 @@ function ChapterCard({
           onClick={() => onDelete(chapter)}
           disabled={isDeleting}
           className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-destructive hover:bg-destructive/10 disabled:opacity-50"
-          title="Delete chapter"
+          title="删除课程"
         >
           <Trash2 size={15} />
         </button>

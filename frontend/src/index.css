@@ -145,6 +145,29 @@
 }
 
 @layer components {
+  .kgts-canvas-math {
+    font-size: inherit;
+    line-height: 1.25;
+  }
+
+  .kgts-canvas-math-wrap .prose,
+  .kgts-canvas-math-wrap .kgts-canvas-math {
+    font-size: inherit;
+    line-height: inherit;
+  }
+
+  .kgts-canvas-math :where(p):not(:where([class~="not-prose"] *)) {
+    margin: 0;
+  }
+
+  .kgts-canvas-math .katex-display {
+    margin: 0;
+  }
+
+  .kgts-canvas-math .katex {
+    font-size: 1em;
+  }
+
   .studio-shell {
     display: grid;
     height: 100dvh;
@@ -512,9 +535,16 @@
     opacity: 0;
   }
 
-  .prose,
   .prose :where(p, li, blockquote, td, th):not(:where([class~="not-prose"] *)) {
     overflow-wrap: anywhere;
+  }
+
+  .katex,
+  .katex *,
+  .katex-display,
+  .katex-display * {
+    overflow-wrap: normal;
+    word-break: normal;
   }
 
   .prose :where(table):not(:where([class~="not-prose"] *)) {
@@ -528,6 +558,10 @@
     overflow-x: auto;
     overflow-y: hidden;
     padding-bottom: 2px;
+  }
+
+  .katex-display > .katex {
+    white-space: nowrap;
   }
 }
 

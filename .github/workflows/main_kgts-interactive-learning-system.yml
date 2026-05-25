@@ -57,6 +57,27 @@ jobs:
             --exclude 'backend/vector_index_system/memory_systems' \
             --exclude 'backend/vector_index_system/models' \
             --exclude 'backend/vector_index_system/vector_index' \
+            --exclude 'requirements-tts.txt' \
+            --exclude 'requirements-gpt-sovits-tts.txt' \
+            --exclude 'third_party/Genie-TTS' \
+            --exclude 'third_party/genie-tts' \
+            --exclude 'Genie-TTS' \
+            --exclude 'genie-tts' \
+            --exclude '.runtime/tts' \
+            --exclude 'models/tts' \
+            --exclude 'models/genie-tts' \
+            --exclude 'backend/models/tts' \
+            --exclude 'backend/models/genie-tts' \
+            --exclude '**/GenieData' \
+            --exclude '**/genie_data' \
+            --exclude '**/tts-cache' \
+            --exclude '**/tts-output' \
+            --exclude '**/tts-audio' \
+            --exclude '*.onnx' \
+            --exclude '*.safetensors' \
+            --exclude '*.ckpt' \
+            --exclude '*.pt' \
+            --exclude '*.pth' \
             --exclude 'frontend/node_modules' \
             --exclude 'frontend/dist/.vite' \
             ./ deploy/

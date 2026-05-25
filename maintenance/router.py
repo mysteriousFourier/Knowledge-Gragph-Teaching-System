@@ -25,7 +25,7 @@ from KGTS.models.graph import (
     UpdateRelationRequest,
     ValidateGraphRequest,
 )
-from KGTS.models.maintenance import ReviewSearchRequest, StructuredSyncRequest
+from KGTS.models.maintenance import ReviewSearchRequest, StructuredStagingRebuildRequest, StructuredSyncRequest
 from KGTS.responses import success_response, timestamped_response, error_response
 from KGTS.maintenance.graph_ops import (
     add_node as _add_node,
@@ -51,6 +51,7 @@ from KGTS.maintenance.import_export import (
     export_teacher_package as _export_teacher_package,
 )
 from KGTS.maintenance.structured_sync import (
+    rebuild_staging_graph,
     scan_structured_sources,
     review_search,
 )
@@ -78,6 +79,7 @@ async def root():
             "export_graph": "/api/maintenance/export-graph",
             "export_teacher_package": "/api/maintenance/export-teacher-package",
             "scan_structured": "/api/maintenance/scan-structured",
+            "rebuild_staging_graph": "/api/maintenance/rebuild-staging-graph",
             "review_search": "/api/maintenance/review-search",
             "update_relation": "/api/maintenance/update-relation",
             "analytics": "/api/maintenance/analytics",
@@ -250,10 +252,28 @@ async def get_schema():
 @router.post("/scan-structured")
 async def scan_structured(request: StructuredSyncRequest):
     try:
-        result = scan_structured_sources(force=request.force)
+        result = scan_structured_sources(
+            force=request.force,
+            dry_run=request.dry_run,
+            skip_semantic=request.skip_semantic,
+            import_graph=request.import_graph,
+        )
         return success_response(data=result)
     except Exception as e:
         error_response(f"structured 同步失败: {e}")
+
+
+@router.post("/rebuild-staging-graph")
+async def rebuild_staging_graph_endpoint(request: StructuredStagingRebuildRequest):
+    try:
+        result = rebuild_staging_graph(
+            toc_export_dir=request.toc_export_dir,
+            skip_semantic=request.skip_semantic,
+            rebuild_vector=request.rebuild_vector,
+        )
+        return success_response(data=result)
+    except Exception as e:
+        error_response(f"staging 图谱重建失败: {e}")
 
 
 @router.post("/import-graphml")

@@ -159,6 +159,25 @@ def _is_placeholder_chapter(chapter: Dict[str, Any]) -> bool:
     return _is_generic_chapter_stub(title, content)
 
 
+def _is_toc_export_chapter(chapter: Dict[str, Any]) -> bool:
+    if not isinstance(chapter, dict):
+        return False
+    candidates = [
+        chapter.get("id"),
+        chapter.get("chapter_id"),
+        chapter.get("source_type"),
+        chapter.get("source"),
+    ]
+    metadata = chapter.get("metadata")
+    if isinstance(metadata, dict):
+        candidates.extend([metadata.get("id"), metadata.get("source"), metadata.get("source_file")])
+    return any(
+        re.search(r"(?:^|::)toc[_:]", str(candidate or ""), flags=re.I)
+        or str(candidate or "").strip().lower().endswith("_toc_tree.json")
+        for candidate in candidates
+    )
+
+
 def _is_empty_shell_chapter(chapter: Dict[str, Any]) -> bool:
     if not isinstance(chapter, dict):
         return False
@@ -444,10 +463,20 @@ def delete_generated_lecture_nodes() -> Dict[str, Any]:
     return {"success": True, "deleted_ids": removed, "deleted_count": len(removed)}
 
 
-def semantic_search(query: str, node_type: Optional[str] = None, top_k: int = 10) -> List[Dict[str, Any]]:
+def semantic_search(
+    query: str,
+    node_type: Optional[str] = None,
+    top_k: int = 10,
+    allowed_node_ids: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
     results = call_backend_tool(
         "semantic_search",
-        {"query": query, "node_type": node_type, "top_k": top_k},
+        {
+            "query": query,
+            "node_type": node_type,
+            "top_k": top_k,
+            "allowed_node_ids": allowed_node_ids,
+        },
     )
     if isinstance(results, list):
         return results
@@ -460,16 +489,23 @@ def search_memory(query: str, k: int = 5) -> Dict[str, Any]:
     return MemoryService().search_memory(query, k=k)
 
 
-def build_rag_context(question: str, limit: int = 6) -> Dict[str, Any]:
-    try:
-        keyword_hits = search_nodes(question, limit=limit)
-    except Exception:
-        keyword_hits = []
+def build_rag_context(
+    question: str,
+    limit: int = 6,
+    *,
+    seed_node_ids: Optional[List[str]] = None,
+    allowed_node_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    from KGTS.core.graph_context import build_graphrag_context
 
-    try:
-        semantic_hits = semantic_search(question, top_k=limit)
-    except Exception:
-        semantic_hits = []
+    graphrag = build_graphrag_context(
+        question,
+        seed_node_ids=seed_node_ids,
+        allowed_node_ids=allowed_node_ids,
+        limit=limit,
+    )
+    keyword_hits = graphrag.get("keyword_hits") or []
+    semantic_hits = graphrag.get("vector_hits") or []
 
     try:
         memory_payload = search_memory(question, k=limit)
@@ -477,9 +513,12 @@ def build_rag_context(question: str, limit: int = 6) -> Dict[str, Any]:
     except Exception:
         memory_hits = []
 
-    llm_context: List[Dict[str, Any]] = []
-    context_lines: List[str] = []
+    llm_context: List[Dict[str, Any]] = list(graphrag.get("llm_context") or [])
+    context_lines: List[str] = list(graphrag.get("context_lines") or [])
     seen: set[str] = set()
+    for item in llm_context:
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        seen.add(f"{metadata.get('source')}:{metadata.get('id')}:{str(item.get('content') or '')[:80]}")
 
     def add_context(source_id: str, label: str, node_type: str, content: str, source: str) -> None:
         clean_label = (label or source_id or "untitled").strip()
@@ -511,26 +550,6 @@ def build_rag_context(question: str, limit: int = 6) -> Dict[str, Any]:
         )
         context_lines.append(f"- [{source}] {clean_label} ({node_type or 'context'}): {clipped[:220]}")
 
-    for hit in keyword_hits:
-        metadata = hit.get("metadata") or {}
-        add_context(
-            str(hit.get("id") or metadata.get("id") or ""),
-            _node_label(hit),
-            str(hit.get("type") or metadata.get("type") or ""),
-            str(hit.get("content") or metadata.get("description") or _node_label(hit)),
-            "keyword",
-        )
-
-    for hit in semantic_hits:
-        metadata = hit.get("metadata") or {}
-        add_context(
-            str(hit.get("node_id") or metadata.get("id") or ""),
-            str(metadata.get("label") or hit.get("node_id") or "semantic_hit"),
-            str(metadata.get("type") or ""),
-            str(metadata.get("content") or metadata.get("description") or metadata.get("label") or ""),
-            "vector",
-        )
-
     for hit in memory_hits:
         metadata = hit.get("metadata") or {}
         add_context(
@@ -546,7 +565,13 @@ def build_rag_context(question: str, limit: int = 6) -> Dict[str, Any]:
         "llm_context": llm_context[:limit],
         "keyword_hits": keyword_hits,
         "semantic_hits": semantic_hits,
+        "vector_hits": semantic_hits,
         "memory_hits": memory_hits,
+        "retrieval_mode": graphrag.get("retrieval_mode"),
+        "retrieval_stats": graphrag.get("retrieval_stats") or {},
+        "graphrag_context": graphrag,
+        "graph_paths": graphrag.get("graph_paths") or [],
+        "formula_context": graphrag.get("formula_context") or [],
     }
 
 
@@ -626,6 +651,12 @@ def build_local_answer(question: str, limit: int = 5) -> Dict[str, Any]:
         "keyword_hits": rag_context["keyword_hits"],
         "semantic_hits": rag_context["semantic_hits"],
         "memory_hits": rag_context["memory_hits"],
+        "vector_hits": rag_context.get("vector_hits") or rag_context["semantic_hits"],
+        "retrieval_mode": rag_context.get("retrieval_mode"),
+        "retrieval_stats": rag_context.get("retrieval_stats") or {},
+        "graphrag_context": rag_context.get("graphrag_context") or {},
+        "graph_paths": rag_context.get("graph_paths") or [],
+        "formula_context": rag_context.get("formula_context") or [],
     }
 
 def import_graph_payload(graph_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -834,6 +865,10 @@ class ChapterStore:
                 merged.pop(chapter_id, None)
                 changed = True
                 continue
+            if _is_toc_export_chapter({**chapter, "id": chapter.get("id") or chapter_id}):
+                merged.pop(chapter_id, None)
+                changed = True
+                continue
             if _is_empty_shell_chapter({**chapter, "id": chapter.get("id") or chapter_id}):
                 merged.pop(chapter_id, None)
                 changed = True
@@ -984,8 +1019,16 @@ class ChapterStore:
         graph_data: Optional[Dict[str, Any]] = None,
         chapter_id: Optional[str] = None,
         source_type: Optional[str] = None,
+        source_node_ids: Optional[List[str]] = None,
+        source_scope: Optional[Dict[str, Any]] = None,
         ppt_slides: Optional[List[Dict[str, Any]]] = None,
         slide_lectures: Optional[List[Dict[str, Any]]] = None,
+        tex_content: Optional[str] = None,
+        editable_model: Optional[Dict[str, Any]] = None,
+        asset_map: Optional[Dict[str, Any]] = None,
+        ppt_artifact: Optional[Dict[str, Any]] = None,
+        ppt_source_node_ids: Optional[List[str]] = None,
+        lecture_source_node_ids: Optional[List[str]] = None,
         sync_backend: bool = True,
     ) -> Dict[str, Any]:
         chapters = self._load_chapters()
@@ -1013,8 +1056,16 @@ class ChapterStore:
                 "approved_exercise_bank": record.get("approved_exercise_bank", []),
                 "exercise_feedback": record.get("exercise_feedback", {}),
                 "source_type": source_type if source_type is not None else record.get("source_type"),
+                "source_node_ids": source_node_ids if source_node_ids is not None else record.get("source_node_ids"),
+                "source_scope": source_scope if source_scope is not None else record.get("source_scope"),
                 "ppt_slides": ppt_slides if ppt_slides is not None else record.get("ppt_slides"),
                 "slide_lectures": slide_lectures if slide_lectures is not None else record.get("slide_lectures"),
+                "tex_content": tex_content if tex_content is not None else record.get("tex_content"),
+                "editable_model": editable_model if editable_model is not None else record.get("editable_model"),
+                "asset_map": asset_map if asset_map is not None else record.get("asset_map"),
+                "ppt_artifact": ppt_artifact if ppt_artifact is not None else record.get("ppt_artifact"),
+                "ppt_source_node_ids": ppt_source_node_ids if ppt_source_node_ids is not None else record.get("ppt_source_node_ids"),
+                "lecture_source_node_ids": lecture_source_node_ids if lecture_source_node_ids is not None else record.get("lecture_source_node_ids"),
                 "created_at": record.get("created_at") or _now(),
                 "updated_at": _now(),
             }
@@ -1034,8 +1085,16 @@ class ChapterStore:
         lecture_content: str,
         graph_data: Optional[Dict[str, Any]] = None,
         source_type: Optional[str] = None,
+        source_node_ids: Optional[List[str]] = None,
+        source_scope: Optional[Dict[str, Any]] = None,
         ppt_slides: Optional[List[Dict[str, Any]]] = None,
         slide_lectures: Optional[List[Dict[str, Any]]] = None,
+        tex_content: Optional[str] = None,
+        editable_model: Optional[Dict[str, Any]] = None,
+        asset_map: Optional[Dict[str, Any]] = None,
+        ppt_artifact: Optional[Dict[str, Any]] = None,
+        ppt_source_node_ids: Optional[List[str]] = None,
+        lecture_source_node_ids: Optional[List[str]] = None,
         learning_plan: Optional[Dict[str, Any]] = None,
         consistency_report: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -1053,10 +1112,26 @@ class ChapterStore:
             chapter["graph_data"] = graph_data
         if source_type is not None:
             chapter["source_type"] = source_type
+        if source_node_ids is not None:
+            chapter["source_node_ids"] = source_node_ids
+        if source_scope is not None:
+            chapter["source_scope"] = source_scope
         if ppt_slides is not None:
             chapter["ppt_slides"] = ppt_slides
         if slide_lectures is not None:
             chapter["slide_lectures"] = slide_lectures
+        if tex_content is not None:
+            chapter["tex_content"] = tex_content
+        if editable_model is not None:
+            chapter["editable_model"] = editable_model
+        if asset_map is not None:
+            chapter["asset_map"] = asset_map
+        if ppt_artifact is not None:
+            chapter["ppt_artifact"] = ppt_artifact
+        if ppt_source_node_ids is not None:
+            chapter["ppt_source_node_ids"] = ppt_source_node_ids
+        if lecture_source_node_ids is not None:
+            chapter["lecture_source_node_ids"] = lecture_source_node_ids
         if learning_plan is not None:
             chapter["lecture_learning_plan"] = learning_plan
         if consistency_report is not None:
@@ -1067,8 +1142,16 @@ class ChapterStore:
             graph_data=chapter.get("graph_data"),
             chapter_id=resolved_id,
             source_type=chapter.get("source_type"),
+            source_node_ids=chapter.get("source_node_ids"),
+            source_scope=chapter.get("source_scope"),
             ppt_slides=chapter.get("ppt_slides"),
             slide_lectures=chapter.get("slide_lectures"),
+            tex_content=chapter.get("tex_content"),
+            editable_model=chapter.get("editable_model"),
+            asset_map=chapter.get("asset_map"),
+            ppt_artifact=chapter.get("ppt_artifact"),
+            ppt_source_node_ids=chapter.get("ppt_source_node_ids"),
+            lecture_source_node_ids=chapter.get("lecture_source_node_ids"),
             sync_backend=False,
         )
         saved["lecture_content"] = lecture_content
@@ -1079,8 +1162,16 @@ class ChapterStore:
         saved["approved_exercise_bank"] = chapter.get("approved_exercise_bank", saved.get("approved_exercise_bank", []))
         saved["exercise_feedback"] = chapter.get("exercise_feedback", saved.get("exercise_feedback", {}))
         saved["source_type"] = chapter.get("source_type", saved.get("source_type"))
+        saved["source_node_ids"] = chapter.get("source_node_ids", saved.get("source_node_ids"))
+        saved["source_scope"] = chapter.get("source_scope", saved.get("source_scope"))
         saved["ppt_slides"] = chapter.get("ppt_slides", saved.get("ppt_slides"))
         saved["slide_lectures"] = chapter.get("slide_lectures", saved.get("slide_lectures"))
+        saved["tex_content"] = chapter.get("tex_content", saved.get("tex_content"))
+        saved["editable_model"] = chapter.get("editable_model", saved.get("editable_model"))
+        saved["asset_map"] = chapter.get("asset_map", saved.get("asset_map"))
+        saved["ppt_artifact"] = chapter.get("ppt_artifact", saved.get("ppt_artifact"))
+        saved["ppt_source_node_ids"] = chapter.get("ppt_source_node_ids", saved.get("ppt_source_node_ids"))
+        saved["lecture_source_node_ids"] = chapter.get("lecture_source_node_ids", saved.get("lecture_source_node_ids"))
         chapters = self._load_chapters()
         aliases = self._chapter_alias_keys(chapters, chapter_id, saved.get("title"))
         self._store_chapter_record(chapters, saved["id"], saved, aliases)

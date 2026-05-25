@@ -16,6 +16,15 @@
 - 维护 API：把结构化内容同步到知识图谱
 - 单端口入口 `render_app.py`：在图谱节点过少时触发自动同步
 
+低资源线上环境通常会关闭启动时自动同步：
+
+```text
+RENDER_AUTO_SYNC_STRUCTURED=0
+APP_RUN_STARTUP_MAINTENANCE=0
+```
+
+这种部署仍会携带 `structured/` 作为可查询和后续维护的数据来源，但不会在冷启动窗口内强制全量重建图谱。
+
 ## 推荐引用格式
 
 ```text

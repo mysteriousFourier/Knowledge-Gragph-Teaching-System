@@ -15,6 +15,16 @@ export const maintenanceClient: AxiosInstance = axios.create({
   timeout: 30000,
 })
 
+educationClient.interceptors.request.use((request) => {
+  request.baseURL = getRuntimeConfig().educationApiBaseUrl
+  return request
+})
+
+maintenanceClient.interceptors.request.use((request) => {
+  request.baseURL = getRuntimeConfig().maintenanceApiBaseUrl
+  return request
+})
+
 // Request interceptor to add auth token
 const addAuthToken = (client: AxiosInstance) => {
   client.interceptors.request.use(

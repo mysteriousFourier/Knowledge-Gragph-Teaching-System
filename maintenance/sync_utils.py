@@ -20,13 +20,14 @@ class SourceSpec:
     chapters: Dict[str, str]
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-STRUCTURED_DIR = PROJECT_ROOT / "structured"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+STRUCTURED_DIR = Path(os.getenv("KGTS_STRUCTURED_DIR", str(PROJECT_ROOT / "structured")))
+TOC_EXPORT_DIR = Path(os.getenv("KGTS_TOC_EXPORT_DIR", ""))
 DATA_DIR = Path(os.getenv("APP_RUNTIME_DIR", str(PROJECT_ROOT / ".runtime")))
 MANIFEST_PATH = DATA_DIR / "structured_sync_manifest.json"
 TEACHER_PACKAGE_PATH = DATA_DIR / "teacher_memory_package.json"
 
-REFERENCE_PATTERN = re.compile(r"\[\[(SEE_)?(FORMULA|TABLE):([^\]]+)\]\]")
+REFERENCE_PATTERN = re.compile(r"\[\[(SEE_)?(FORMULA|TABLE|FIGURE|EXAMPLE):([^\]]+)\]\]", re.I)
 FORMULA_REFERENCE_PATTERN = re.compile(r"\[\[(SEE_)?FORMULA:([^\]]+)\]\]", re.I)
 _FORMULA_INDEX: Optional[Dict[str, Dict[str, str]]] = None
 
@@ -134,7 +135,35 @@ def _chapter_node_id(chapter: str) -> str:
 
 
 def _chapter_label(chapter: str, title: Optional[str]) -> str:
-    return title or chapter.replace("_", " ").title()
+    if title and title.strip().lower() != chapter.strip().lower():
+        return f"{_chapter_display_name(chapter)}: {title}"
+    return _chapter_display_name(chapter)
+
+
+def _chapter_display_name(chapter: str) -> str:
+    match = re.fullmatch(r"chapter0*([0-9]+)", chapter.strip(), flags=re.I)
+    if match:
+        return f"Chapter {int(match.group(1))}"
+    match = re.fullmatch(r"appendix0*([0-9]+)", chapter.strip(), flags=re.I)
+    if match:
+        return f"Appendix {int(match.group(1))}"
+    return chapter.replace("_", " ").title()
+
+
+def _slug_heading(value: str) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip().lower()
+    text = re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "_", text, flags=re.UNICODE)
+    text = re.sub(r"_+", "_", text).strip("_")
+    if not text:
+        text = hashlib.sha1(str(value or "").encode("utf-8")).hexdigest()[:10]
+    return text[:96]
+
+
+def _section_node_id(chapter: str, heading_path: List[str]) -> str:
+    path_slug = "__".join(_slug_heading(item) for item in heading_path if str(item or "").strip())
+    if not path_slug:
+        path_slug = "untitled"
+    return f"section::{chapter}::{path_slug}"
 
 
 def _node_payload(
@@ -216,12 +245,29 @@ def _overlap_score(left: Set[str], right: Set[str]) -> float:
 
 
 def _parse_references(text: str) -> Tuple[Set[str], Set[str]]:
+    refs = _parse_all_references(text)
+    return refs["formula"], refs["table"]
+
+
+def _parse_all_references(text: str) -> Dict[str, Set[str]]:
     formula_ids: Set[str] = set()
     table_ids: Set[str] = set()
+    figure_ids: Set[str] = set()
+    example_ids: Set[str] = set()
     for _, ref_type, ref_id in REFERENCE_PATTERN.findall(text or ""):
         normalized = ref_id.strip()
+        ref_type = ref_type.upper()
         if ref_type == "FORMULA":
             formula_ids.add(normalized)
         elif ref_type == "TABLE":
             table_ids.add(normalized)
-    return formula_ids, table_ids
+        elif ref_type == "FIGURE":
+            figure_ids.add(normalized)
+        elif ref_type == "EXAMPLE":
+            example_ids.add(normalized)
+    return {
+        "formula": formula_ids,
+        "table": table_ids,
+        "figure": figure_ids,
+        "example": example_ids,
+    }

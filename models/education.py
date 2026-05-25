@@ -10,6 +10,59 @@ class GenerateLectureRequest(BaseModel):
     chapter_title: str = Field("", description="Chapter title")
     chapter_content: str = Field("", description="Chapter content")
     style: str = Field("guided", description="Teaching style")
+    source_node_id: Optional[str] = Field(None, description="Graph node ID used as the lecture source")
+    source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used as lecture sources")
+    graph_scope: Optional[str] = Field(None, description="Graph source scope, currently subtree")
+    teacher_guidance: Optional[str] = Field(None, description="Optional teacher guidance for emphasis, selection, and pacing")
+    api_key: Optional[str] = Field(None, description="DeepSeek API key")
+    model: Optional[str] = Field(None, description="DeepSeek model name")
+
+
+class GeneratePptTexRequest(BaseModel):
+    chapter_title: str = Field("", description="Optional title override")
+    style: str = Field("引导式教学", description="Teaching style")
+    source_node_id: Optional[str] = Field(None, description="Graph node ID used as the PPT/TeX source")
+    source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used as PPT/TeX sources")
+    graph_scope: Optional[str] = Field("subtree", description="Graph source scope, currently subtree")
+    teacher_guidance: Optional[str] = Field(None, description="Optional teacher guidance for emphasis, selection, and pacing")
+    max_slides: int = Field(12, description="Maximum slide count")
+    api_key: Optional[str] = Field(None, description="DeepSeek API key")
+    model: Optional[str] = Field(None, description="DeepSeek model name")
+
+
+class PreviewTexRequest(BaseModel):
+    tex_content: str = Field(..., description="Editable TeX source to parse into slide previews")
+    filename: str = Field("edited.tex", description="Virtual filename used for parser hints")
+
+
+class CoursewareProjectSaveRequest(BaseModel):
+    project_id: Optional[str] = Field(None, description="Existing project ID to update")
+    title: str = Field("未命名课件", description="Project title")
+    editable_model: Dict[str, Any] = Field(default_factory=dict, description="Structured editable slide model")
+    asset_map: Optional[Dict[str, Any]] = Field(None, description="Courseware asset map")
+    slides: Optional[List[Dict[str, Any]]] = Field(None, description="Legacy preview slide payload")
+    tex_content: Optional[str] = Field(None, description="Serialized TeX source")
+    ppt_artifact: Optional[Dict[str, Any]] = Field(None, description="Export artifact metadata")
+    source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs associated with this project")
+
+
+class CoursewareExportPptxRequest(BaseModel):
+    title: str = Field("未命名课件", description="Export title")
+    editable_model: Dict[str, Any] = Field(default_factory=dict, description="Structured editable slide model")
+    source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used as sources")
+
+
+class GenerateSlideLecturesRequest(BaseModel):
+    chapter_title: str = Field("", description="Generated PPT/TeX title")
+    slides: List[Dict[str, Any]] = Field(default_factory=list, description="Generated slide/page details")
+    tex_content: Optional[str] = Field(None, description="Generated TeX source")
+    style: str = Field("引导式教学", description="Teaching style")
+    source_node_id: Optional[str] = Field(None, description="Graph node ID used as the lecture source")
+    source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used as lecture sources")
+    graph_scope: Optional[str] = Field("subtree", description="Graph source scope, currently subtree")
+    teacher_guidance: Optional[str] = Field(None, description="Optional teacher guidance for emphasis, selection, and pacing")
+    ppt_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate the PPT/TeX")
+    ppt_source_scope: Optional[Dict[str, Any]] = Field(None, description="Graph source scope used to generate the PPT/TeX")
     api_key: Optional[str] = Field(None, description="DeepSeek API key")
     model: Optional[str] = Field(None, description="DeepSeek model name")
 
@@ -83,8 +136,16 @@ class SaveChapterRequest(BaseModel):
     content: Optional[str] = Field(None, description="Chapter content")
     graph_data: Optional[Dict[str, Any]] = Field(None, description="Knowledge graph data")
     source_type: Optional[str] = Field(None, description="Chapter source type")
+    source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used as chapter sources")
+    source_scope: Optional[Dict[str, Any]] = Field(None, description="Graph source scope metadata")
     ppt_slides: Optional[List[Dict[str, Any]]] = Field(None, description="PPT slide parse result")
     slide_lectures: Optional[List[Dict[str, Any]]] = Field(None, description="PPT slide lectures")
+    tex_content: Optional[str] = Field(None, description="Generated TeX source")
+    editable_model: Optional[Dict[str, Any]] = Field(None, description="Structured editable courseware model")
+    asset_map: Optional[Dict[str, Any]] = Field(None, description="Courseware asset map")
+    ppt_artifact: Optional[Dict[str, Any]] = Field(None, description="Generated PPT/TeX artifact metadata")
+    ppt_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate PPT/TeX")
+    lecture_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate slide lectures")
 
 
 class SaveLectureRequest(BaseModel):
@@ -92,10 +153,18 @@ class SaveLectureRequest(BaseModel):
     lecture_content: str = Field(..., description="Lecture content")
     graph_data: Optional[Dict[str, Any]] = Field(None, description="Knowledge graph data")
     source_type: Optional[str] = Field(None, description="Chapter source type")
+    source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used as lecture sources")
+    source_scope: Optional[Dict[str, Any]] = Field(None, description="Graph source scope metadata")
     ppt_slides: Optional[List[Dict[str, Any]]] = Field(None, description="PPT slide parse result")
     slide_lectures: Optional[List[Dict[str, Any]]] = Field(None, description="PPT slide lectures")
     learning_plan: Optional[Dict[str, Any]] = Field(None, description="Lecture grounding plan")
     consistency_report: Optional[Dict[str, Any]] = Field(None, description="Lecture consistency report")
+    tex_content: Optional[str] = Field(None, description="Generated TeX source")
+    editable_model: Optional[Dict[str, Any]] = Field(None, description="Structured editable courseware model")
+    asset_map: Optional[Dict[str, Any]] = Field(None, description="Courseware asset map")
+    ppt_artifact: Optional[Dict[str, Any]] = Field(None, description="Generated PPT/TeX artifact metadata")
+    ppt_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate PPT/TeX")
+    lecture_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate slide lectures")
 
 
 class GenerateExercisesRequest(BaseModel):

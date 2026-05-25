@@ -36,8 +36,12 @@
 
 如果没有显式覆盖，项目仍会兼容旧的本地路径布局。
 
+## 部署约定
+
+Azure App Service 和 Azure for Students VM 都应从 `data/seed/` 引导初始数据，再把运行时写入 `.runtime/` 或显式的 `APP_DATA_DIR` / `GRAPH_DB_PATH`。不要在生产运行中把教师反馈、学生进度、缓存和日志写回 `data/seed/`。
+
 ## 相关文档
 
 - [种子数据说明](seed/README.md)
 - [结构化课程数据说明](../structured/README.md)
-
+- [Azure for Students VM 部署](../docs/azure-student-vm.md)

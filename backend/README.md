@@ -36,6 +36,14 @@ python render_app.py
 
 需要排查 API 报错时，优先在前台运行上述命令，让日志直接输出到当前终端。不要把长期服务静默放到后台，否则题目生成、图谱上传等问题难以及时看到 traceback。
 
+Linux VM 或 App Service 上推荐直接运行：
+
+```bash
+python -m uvicorn render_app:app --host 0.0.0.0 --port ${PORT:-8000}
+```
+
+VM 上可用 systemd 管理这个命令，再用 Nginx 把 80 端口转发到本机 8000。完整步骤见 [Azure for Students VM 部署](../docs/azure-student-vm.md)。
+
 ## 何时使用这个目录下的脚本
 
 如果你明确要跑旧的多服务模式，可以使用：

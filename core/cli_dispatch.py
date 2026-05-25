@@ -60,6 +60,15 @@ def _rag_answer(query: str, graph: GraphService, memory: MemoryService, limit: i
 
 def dispatch_tool(name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
     args = arguments or {}
+    if name == "rebuild_staging_graph":
+        from KGTS.maintenance.structured_sync import rebuild_staging_graph
+
+        return rebuild_staging_graph(
+            toc_export_dir=args.get("toc_export_dir"),
+            skip_semantic=bool(args.get("skip_semantic", False)),
+            rebuild_vector=bool(args.get("rebuild_vector", True)),
+        )
+
     graph = _service_graph(args.get("db_path"))
     memory = _service_memory()
 
@@ -70,7 +79,12 @@ def dispatch_tool(name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
     if name == "search_nodes":
         return graph.search_nodes(args.get("keyword", ""), args.get("node_type"), int(args.get("limit", 20)))
     if name == "semantic_search":
-        return graph.semantic_search(args.get("query", ""), args.get("node_type"), int(args.get("top_k", 10)))
+        return graph.semantic_search(
+            args.get("query", ""),
+            args.get("node_type"),
+            int(args.get("top_k", 10)),
+            args.get("allowed_node_ids"),
+        )
     if name == "rebuild_vector_index":
         return graph.rebuild_vector_index()
     if name == "reset_vector_index":
@@ -124,6 +138,8 @@ def dispatch_tool(name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
         )
     if name == "delete_relation":
         return graph.delete_relation(args["relation_id"])
+    if name == "delete_by_sources":
+        return graph.delete_by_sources(args.get("sources", []))
     if name == "get_graph_statistics":
         return graph.get_graph_statistics()
     if name == "get_subgraph_by_type":

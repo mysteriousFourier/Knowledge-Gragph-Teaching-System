@@ -2,67 +2,76 @@
   "id": "chapter6_010",
   "metadata": {
     "chapter": "chapter6",
-    "section": "Chapter 6: Theorems of Natural Selection",
+    "section": "FISHER'S FUNDAMENTAL THEOREM OF NATURAL SELECTION",
     "subsections": [
-      "Traits Correlated With Fitness Have Lower Heritabilities"
+      "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_w = \\sigma_A^2(w) $"
     ],
-    "source_file": "chapter6原文.json",
+    "source_file": "tmp\\paddle_output\\chapter6_full\\main.tex",
     "source_title": "Evolution and Selection of Quantitative Traits",
     "formula_references": [
-      "6.23"
+      "6.17a",
+      "6.17b",
+      "6.17c",
+      "6.18a",
+      "6.18b",
+      "6.18c",
+      "6.18d",
+      "6.18e",
+      "6.18f",
+      "6.18g",
+      "6.19",
+      "6.20a",
+      "6.20b"
     ],
-    "table_references": [
-      "6.2"
-    ]
+    "table_references": [],
+    "section_level_1": "FISHER'S FUNDAMENTAL THEOREM OF NATURAL SELECTION",
+    "section_level_2": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_w = \\sigma_A^2(w) $",
+    "heading_path": [
+      "FISHER'S FUNDAMENTAL THEOREM OF NATURAL SELECTION",
+      "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_w = \\sigma_A^2(w) $"
+    ],
+    "display_heading": "The Classical Interpretation of Fisher's Fundamental Theorem, $ R_w = \\sigma_A^2(w) $"
   },
   "blocks": [
     {
-      "type": "proposition",
-      "content": "The corollary to Fisher's theorem, that additive genetic variance in fitness is driven toward zero by selection in a constant environment, suggests that traits that are correlated with fitness will have reduced levels of additive variance relative to characters under less direct selection. How well does this prediction hold up? Many authors have noticed that characters that are expected to be under selection (e.g., life-history traits, such as clutch size) tend, on average, to have lower heritabilities than morphological characters measured in the same population or species (reviewed by Robertson 1955b; Charlesworth 1987; Mousseau and Roff 1987; Roff and Mousseau 1987; also see LW Figure 7.10). However, some notable exceptions are also apparent (see Charlesworth 1987)."
-    },
-    {
-      "type": "proposition",
-      "content": "The difficulty with these general surveys is knowing whether a character is highly genetically correlated with lifetime fitness. Clutch size, for example, would seem to be highly correlated with total fitness, but if birds with large clutch sizes have poorer survivorship, the correlation with lifetime fitness may be weak. Negative genetic correlations between components of fitness allow for significant additive variance in each component at equilibrium, even when additive variance in total fitness is zero (Robertson 1955b; Rose 1982)."
-    },
-    {
-      "type": "proposition",
-      "content": "Unfortunately, estimates of lifetime fitness in natural populations and their correlation with components of fitness (such as clutch size) are rare. One example was given by Gustafsson (1986; see also Merilä and Sheldon 2000), who measured lifetime reproductive success as well as the heritabilities of fitness and other characters in a closed natural population of collared flycatcher birds (Ficedula albicollis) in the Baltic Sea. Lifetime reproductive success had an estimated heritability that was not significantly different from zero, as expected from the corollary to Fisher's theorem. Clutch size had a rather high heritability, $ 0. 3 2 \\pm0. 1 5 $ but the estimated phenotypic correlation between clutch size and total fitness was very low, $ r^{2}=0. 0 3 $ . In general, as the phenotypic correlation between a trait and total fitness decreased, its heritability increased (Figure 6.3)."
-    },
-    {
-      "type": "proposition",
-      "content": "McCleery et al. (2004) also found a negative relationship between trait heritability and trait-fitness phenotypic correlation in an English population of great tits (Parus major) that was followed for almost 40 years. Similar findings were seen by Teplitsky et al. (2009) in red-billed gulls (Larus novaehollandiae). Conversely, Schwaegerle and Levin (1991) found no significant association between the heritability of a character and its phenotypic correlation to fruit production (chosen as one measure of total fitness) in a wild population of the plant Phlox dummondii (Figure 6.3). While the evidence is mixed, these studies suggest a mild trend for characters that are phenotypically correlated with fitness to have reduced heritabilities relative to other characters. One important caveat is that this association is based on phenotypic, rather than genetic, correlations with fitness."
-    },
-    {
-      "type": "proposition",
-      "content": "Under the classical view, if a trait is known to be under selection, one might be tempted to assume it is still far from its genotypic equilibrium value if it shows a modest to large heritability. This is false. As Example 6.6 highlights, a trait that is under selection can still have a high trait additive variance even when the additive genetic variance in fitness is near zero. This can happen if there is a nonlinear transformation of the trait value into fitness, such as occurs with stabilizing selection."
-    },
-    {
-      "type": "proposition",
-      "content": "More generally, Price and Schluter (1991) noted that even with a simple linear relationship between a trait and fitness, it is quite likely that there may be a modest heritability for the trait but a very low heritability for fitness. The following simple model makes most of their main points. Assume fitness is entirely determined by a metric character, with fitness being a linear function of the phenotypic value z plus a residual deviation e, $ W ( z )=a+\\beta z+e $ making the total variance in fitness $ \\sigma^{2} \\left[ W ( z ) \\right]=\\beta^{2} \\sigma_{z}^{2}+\\sigma_{e}^{2}. $ Writing $ z=A+E $ , the additive genetic value A plus all other sources of variance (environmental and genetic), makes the"
-    },
-    {
-      "type": "proposition",
-      "content": "Figure 6.3 Two studies examining the association between a character's heritability and its total fitness, measured by $ r^{2} $ , the squared phenotypic correlation between the character and lifetime fitness. (Left) Gustafsson's (1986) work on the collared flycatcher Ficedula albicollis on the island of Gotland in the Baltic Sea. (Right) Schwaegerle and Levin's (1991) study of Phlox drummondii, with fruit production used as a measure of total fitness."
-    },
-    {
-      "type": "proposition",
-      "content": "additive variance in fitness $ \\beta^{2}\\sigma_{A}^{2} $ . The heritability of fitness can be expressed in terms of the variance components for z as follows:"
+      "type": "derivation",
+      "content": "One way to demystify the classical version of Fisher's theorem is to suppose that fitness is just a trait, and use the breeder's equation, $ R = h^2 S $, to predict the response to selection on that trait. Letting $ z = W $, and recalling that $ w = W/\\overline{W} $, the Robertson-Price identity (Equation 6.10) yields the selection differential [[SEE_FORMULA:6.17a]]"
     },
     {
       "type": "derivation",
-      "content": "[[FORMULA:6.23]]"
+      "content": "Substituting into the breeder's equation shows [[SEE_FORMULA:6.17b]]"
     },
     {
-      "type": "proposition",
-      "content": "Thus, even when fitness is entirely determined by a single trait, the heritability of fitness is less than the heritability of the character under selection, due to the variation, $ \\sigma_{e}^{2} $ , in fitness about its expected value for a given trait value (which is expected to be considerable; see Chapter 29). If the heritability of fitness is found to be close to zero in this case, there still could be a significant heritability in the actual character under selection, implying that the trait mean can continue to change over time, albeit slowly."
+      "type": "derivation",
+      "content": "Expressed in terms of relative fitnesses, [[SEE_FORMULA:6.17c]] recovering the classical view of Fisher’s theorem."
     },
     {
-      "type": "proposition",
-      "content": "Example 6.6. Even if Fisher's theorem holds exactly, its implication for character evolution can often be misinterpreted. Suppose that locus A in Example 6.5 completely determines a character under stabilizing selection. Let the genotypes AA, Aa, and aa have discrete phenotypic values of $ z=-1,0 $ and 1, respectively (so that this locus is strictly additive with respect to the trait), and let the fitness function be $ W ( z )=1-s z^{2} $ . If we assume no environmental variance, this generates the fitnesses for each genotype assumed in Example 6.5. The additive genetic variance for the trait z is $ 2 ( 1 )^{2} p ( 1-p ) $ , which is maximized at $ p=1/2 $ precisely the allele frequency at which the additive genetic variance in fitness, $ \\sigma_{A}^{2} ( W ) $ , equals zero. This difference emphasizes that Fisher's theorem concerns additive genetic variance in fitness, not in the character. In this example, the nonlinear mapping of the phenotypic character value, z, into the trait fitness, W, results in a situation where a character that is correlated with fitness retains additive variance in the trait but not in fitness at its equilibrium value."
+      "type": "derivation",
+      "content": "One can also use a population-genetics framework to motivate Fisher’s theorem in terms of allele-frequency change. Consider a diallelic locus with constant fitnesses under random mating, and define $ \\overline{W}(p) $ to be the mean population fitness at allele frequency $ p $ (Equation 5.1a). The change in mean fitness is a function of the allele-frequency change, $ \\Delta p $, [[SEE_FORMULA:6.18a]]"
     },
     {
-      "type": "proposition",
-      "content": "[[TABLE:6.2]] Heritabilities and coefficients of additive genetic $ ( C V_{A} ) $ and residual $ ( C V_{R} ) $ variation for representative traits in Drosophilia melanogaster. Both $ C V_{A} $ and $ C V_{R} $ values are multiplied by 100. Here n is the number of studies, and the median estimates are reported. (After Houle 1992.)"
+      "type": "derivation",
+      "content": "If the allele-frequency change is small, a first-order Taylor-series approximation yields [[SEE_FORMULA:6.18b]] so [[SEE_FORMULA:6.18c]] From Equation 5.5a [[SEE_FORMULA:6.18d]] where the last equality follows from the definition of the average effects (under random mating; see LW Chapter 4) of alleles A and a on fitness, namely, [[SEE_FORMULA:6.18e]]"
+    },
+    {
+      "type": "discussion",
+      "content": "Recall that the quantity $ \\alpha = \\alpha_A - \\alpha_a $ is the average effect of an allelic substitution (LW Equation 4.6), as the difference in the average effects of these two alleles yields the mean effect on fitness from replacing a randomly chosen $ a $ allele with an $ A $ allele."
+    },
+    {
+      "type": "derivation",
+      "content": "Applying Wright’s formula (Equation 5.5b) together with Equation 6.18d returns [[SEE_FORMULA:6.18f]] and substitution into Equation 6.18c then yields [[SEE_FORMULA:6.18g]]"
+    },
+    {
+      "type": "derivation",
+      "content": "The last step follows from the fact that the additive genetic variance is related to $ \\alpha $ by $ \\sigma_A^2 = 2p(1 - p)\\alpha^2 $ (LW Equation 4.12a). Thus, under this approximation of small allele-frequency change (in which terms of order $ (\\Delta p)^2 $ can be ignored), the change in mean fitness is indeed proportional to the additive genetic variance in fitness. As Example 6.4 (below) highlights, Equation 6.18g, and thus the classical view of Fisher's theorem, is only approximate. Under what conditions does this expression actually hold? While Equation 6.18g is correct for multiple additive loci (i.e., no dominance or epistasis) under both random and nonrandom mating (Kempthorne 1957; Ewens 1969), it is generally compromised by departures from additivity. Even when the theorem does not hold exactly, does it still remain a good approximation? Nagylaki (1976a, 1977a, 1977b, 1991, 1992b, 1993) examined ever more general models of fitness under the assumption of weak selection (i.e., the fitness of genotypes being approximately $ 1 + bs $ with $ s $ small and $ |b| \\ll 1 $) and random mating. Selection is further assumed to be much weaker than the recombination frequency $ c_{min} $ for the closest pair of loci under selection ($ s \\ll c_{min} $). Under these conditions, the evolution of mean fitness falls into three distinct stages. During the first phase (roughly $ t < 2 \\ln s / \\ln [1 - c_{min}] $ generations), any initial disequilibrium has a transient impact on the dynamics until the point where disequilibrium reaches a steady-state value. At this point, we enter the central phase, with the change in mean fitness becoming [[SEE_FORMULA:6.19]] where $ O(s^{3}) $ means that terms on the order of $ s^{3} $ have been ignored. Because additive genetic variance is expected to be of order $ s^{2} $, Fisher's theorem is expected to hold to a good approximation during this period. The central phase of evolution lasts roughly 1/s generations. However, as gametic frequencies approach their equilibrium values, we reach the third phase, where the additive variance in fitness can be much smaller than order $ s^{2} $, in which case terms of order $ s^{3} $ can be important. During the first and third phases, mean fitness can decrease, but the fundamental theorem holds during the central phase of evolution. Because we expect the bulk of evolution (the majority of change in $ \\overline{W} $) to occur during this middle phase, Fisher's theorem approximately holds over the major part of evolutionary change. While Nagylaki's results are weak-selection approximations, we often expect weak selection to be the norm for quantitative traits, as even strong selection on a trait translates into weak selection on the underlying loci if each of these has a small effect (Equation 5.21)."
+    },
+    {
+      "type": "derivation",
+      "content": "Unlike Fisher’s theorem, because Price’s theorem is exact, we can go further and apply Price’s results to make an exact statement about the evolution of mean fitness. Letting $ z_{i} = A_{i} $ denote the breeding value for the fitness of the ith midparent, the mean breeding value in their offspring becomes [[SEE_FORMULA:6.20a]] where (as above) $ \\overline{\\delta}_i $ is the difference between the trait value in the ancestor (the breeding value of the midparent) and the mean value in its offspring. The phenotypic value of fitness for this midparent (the average of the two parental fitnesses) can be written as $ W_i = A_i + \\epsilon_i $. Substituting these results into Equation 6.7c gives the between-generation change in the mean breeding value ($ \\Delta \\overline{A}_W $) for fitness as [[SEE_FORMULA:6.20b]] where the last expression follows because $ \\sigma(A_i, \\epsilon_i) = 0 $ by construction. When $ E(\\bar{\\delta}_i) = \\sigma(w_i, \\bar{\\delta}_i) = 0 $, we recover the classic version of Fisher's fundamental theorem. If the mean breeding value for offspring is the average of their parent's breeding values, then $ \\bar{\\delta}_i = 0 $ and these conditions hold. Even if not exactly true, often $ \\bar{\\delta}_i $ is very close to zero and the leading term (and hence Fisher's theorem) dominates."
+    },
+    {
+      "type": "example",
+      "content": "[[SEE_EXAMPLE:6.4]]"
     }
   ]
 }

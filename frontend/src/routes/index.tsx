@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { BookOpen, FileUp, GraduationCap, LogIn, Network, ShieldCheck } from "lucide-react"
+import { BookOpen, GraduationCap, LogIn, Network, PencilRuler, ShieldCheck } from "lucide-react"
 
 export const Route = createFileRoute("/")({
   component: HomePage,
@@ -16,15 +16,14 @@ function HomePage() {
 
       <div className="route-grid">
         <RouteCard to="/login" icon={<LogIn size={20} />} title="登录" text="学生 / 教师身份选择" />
-        <RouteCard to="/teacher" icon={<BookOpen size={20} />} title="教师端" text="备课、PPT、授课、题库" />
+        <RouteCard to="/teacher" icon={<BookOpen size={20} />} title="教师端" text="备课工作台、授课、题库" />
         <RouteCard to="/student" icon={<GraduationCap size={20} />} title="学生端" text="学习、练习、复习" />
         <RouteCard to="/graph" icon={<Network size={20} />} title="知识图谱" text="浏览、筛选、邻居聚焦" />
         <RouteCard to="/graph/admin" icon={<ShieldCheck size={20} />} title="图谱管理" text="新增、编辑、删除节点" />
       </div>
 
       <div className="mt-8 grid gap-3 border-t pt-6">
-        <WorkflowLine icon={<BookOpen size={17} />} title="Prepare" text="导入章节和图谱，生成授课文案。" />
-        <WorkflowLine icon={<FileUp size={17} />} title="PPT" text="解析幻灯片，生成逐页讲稿。" />
+        <WorkflowLine icon={<PencilRuler size={17} />} title="Prepare" text="树选章节生成 PPT/TeX 课件与逐页讲解。" />
         <WorkflowLine icon={<GraduationCap size={17} />} title="Learn" text="学生阅读章节内容并围绕当前材料提问。" />
       </div>
     </section>

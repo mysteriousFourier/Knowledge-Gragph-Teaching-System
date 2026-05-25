@@ -6,8 +6,16 @@ export interface Chapter {
   lecture_learning_plan?: unknown
   lecture_consistency_report?: import("./education").ConsistencyReport
   source_type?: string
+  source_node_ids?: string[]
+  source_scope?: import("./education").GraphSourceScope
   ppt_slides?: import("./education").PptSlideDetail[]
   slide_lectures?: import("./education").PptSlideLecture[]
+  tex_content?: string
+  editable_model?: import("./education").EditableSlideModel
+  asset_map?: Record<string, import("./education").CoursewareAsset>
+  ppt_artifact?: import("./education").PptArtifact
+  ppt_source_node_ids?: string[]
+  lecture_source_node_ids?: string[]
   created_at?: string | number
   updated_at?: string | number
   source?: string
@@ -30,17 +38,35 @@ export interface SaveChapterRequest {
   chapter_id: string
   title: string
   content?: string
+  graph_data?: Record<string, unknown>
   source_type?: string
+  source_node_ids?: string[]
+  source_scope?: import("./education").GraphSourceScope
   ppt_slides?: import("./education").PptSlideDetail[]
   slide_lectures?: import("./education").PptSlideLecture[]
+  tex_content?: string
+  editable_model?: import("./education").EditableSlideModel
+  asset_map?: Record<string, import("./education").CoursewareAsset>
+  ppt_artifact?: import("./education").PptArtifact
+  ppt_source_node_ids?: string[]
+  lecture_source_node_ids?: string[]
 }
 
 export interface SaveLectureRequest {
   chapter_id: string
   lecture_content: string
+  graph_data?: Record<string, unknown>
   learning_plan?: unknown
   consistency_report?: import("./education").ConsistencyReport
   source_type?: string
+  source_node_ids?: string[]
+  source_scope?: import("./education").GraphSourceScope
   ppt_slides?: import("./education").PptSlideDetail[]
   slide_lectures?: import("./education").PptSlideLecture[]
+  tex_content?: string
+  editable_model?: import("./education").EditableSlideModel
+  asset_map?: Record<string, import("./education").CoursewareAsset>
+  ppt_artifact?: import("./education").PptArtifact
+  ppt_source_node_ids?: string[]
+  lecture_source_node_ids?: string[]
 }

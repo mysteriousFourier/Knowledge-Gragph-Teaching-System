@@ -21,6 +21,7 @@ function normalizeLatexDelimiters(content: string) {
         .map((segment) => {
           if (segment.startsWith("`")) return segment
           return wrapStandaloneBareMath(normalizeBrokenDisplayMath(wrapBareLatexEnvironments(segment)))
+            .replace(/\$\$([\s\S]*?)\$\$/g, (_match, formula) => `\n\n$$\n${String(formula).trim()}\n$$\n\n`)
             .replace(/\\\[([\s\S]*?)\\\]/g, (_match, formula) => `\n\n$$\n${String(formula).trim()}\n$$\n\n`)
             .replace(/\\\(([\s\S]*?)\\\)/g, (_match, formula) => `$${String(formula).trim()}$`)
         })

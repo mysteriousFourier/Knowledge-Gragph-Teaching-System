@@ -50,7 +50,10 @@ DEFAULT_CONSTRAINTS = [
 
 FORMULA_REFERENCE_PATTERN = re.compile(r"\[\[(SEE_)?FORMULA:([^\]]+)\]\]", re.I)
 EQUATION_LABEL_PATTERN = re.compile(r"\b(?:Equation|Eq\.)\s+([0-9]+(?:\.[0-9]+[a-z]?)?)\b(?!\s*[:(])", re.I)
+PAREN_FORMULA_LABEL_PATTERN = re.compile(r"\(([A]?[0-9]+(?:\.[0-9]+[a-z]?)?)\)", re.I)
 INLINE_MATH_PATTERN = re.compile(r"\${1,2}\s*(.+?)\s*\${1,2}", re.S)
+CORE_CONSISTENCY_TYPES = {"chapter", "section", "concept", "formula", "theorem", "example"}
+LECTURE_EXPECTED_ENTITY_LIMIT = 10
 _FORMULA_INDEX: Optional[Dict[str, Dict[str, Any]]] = None
 
 
@@ -109,6 +112,19 @@ def _load_formula_index() -> Dict[str, Dict[str, Any]]:
             "derives_from": derives_from,
             "derives_to": derives_to,
         }
+
+    for record in index.values():
+        context_ids = _formula_ids_in_text(str(record.get("context") or ""))
+        inferred_from_context = [
+            formula_id
+            for formula_id in context_ids
+            if formula_id.lower() in index and formula_id.lower() != str(record.get("id") or "").lower()
+        ]
+        if inferred_from_context:
+            record["derives_from"] = _unique_formula_ids(
+                [*record.get("derives_from", []), *inferred_from_context],
+                exclude={str(record.get("id") or "")},
+            )
 
     inferred_derivations = _infer_formula_derivations(structured_dir)
     for formula_id, upstream_ids in inferred_derivations.items():
@@ -303,6 +319,7 @@ def _formula_ids_in_text(text: str) -> List[str]:
     ids: List[str] = []
     ids.extend(match.group(2).strip() for match in FORMULA_REFERENCE_PATTERN.finditer(text or ""))
     ids.extend(match.group(1).strip() for match in EQUATION_LABEL_PATTERN.finditer(text or ""))
+    ids.extend(match.group(1).strip() for match in PAREN_FORMULA_LABEL_PATTERN.finditer(text or ""))
     return _unique_formula_ids(ids)
 
 
@@ -484,6 +501,8 @@ SUPPORTED_RELATION_TYPES = {
     "misconception_of",
     "references_formula",
     "references_table",
+    "references_figure",
+    "references_example",
     "supports",
     "causes",
 }
@@ -681,8 +700,9 @@ def build_constrained_generation_prompt(
     source_block = f"\nSource/chapter content:\n{source_content.strip()}\n" if source_content.strip() else ""
     evidence = learning_plan.get("evidence") or []
     allowed = learning_plan.get("allowed_concepts") or []
-    concept_names = ", ".join(str(item.get("name") or "") for item in allowed[:8] if item.get("name"))
-    concept_line = f"\nRelevant concepts: {concept_names}\n" if concept_names else ""
+    core_concepts = _expected_entities_for_task(_entity_records_from_allowed(allowed), learning_plan, str(learning_plan.get("task") or "qa"))
+    concept_names = ", ".join(str(item.get("name") or "") for item in core_concepts[:6] if item.get("name"))
+    concept_line = f"\nCore terms to preserve when relevant: {concept_names}\n" if concept_names else ""
     return f"""Task: {task_title}
 User input: {user_input}
 {source_block}
@@ -703,6 +723,7 @@ def build_lecture_gc_dpg_requirements(style: str, *, slide_level: bool = False) 
         "Before writing, internally select only 3-6 highly relevant concepts and 1-3 relation paths from the evidence; use them as planning anchors only.",
         f"Write natural Markdown teaching prose for {scope}, not a concept inventory, extraction report, evidence report, or outline.",
         "Ground each core explanation in the source content or retrieved evidence; when extending beyond evidence, keep the extension limited and clearly tied to the lesson goal.",
+        "When introducing a core concept, formula, theorem, or example from the evidence, keep its original term or formula label in the first mention, then explain it naturally.",
         "Mention technical terms only where they are needed to explain a definition, formula, relation, example, or misconception.",
         "Avoid clustered lists of names or concepts. Prefer short explanatory paragraphs, examples, teacher questions, and transitions.",
         "Keep English source terms, formulas, variables, and key definitions in English when the source is English; Chinese explanation may support but must not change the meaning.",
@@ -748,7 +769,8 @@ def check_generation_consistency(
     output_text = output or ""
     output_lower = output_text.lower()
 
-    expected_entities = _entity_records_from_allowed(allowed)
+    support_entities = _entity_records_from_allowed(allowed)
+    expected_entities = _expected_entities_for_task(support_entities, learning_plan, task)
     mentioned_entities = [
         entity for entity in expected_entities
         if _entity_mentioned(entity["name"], output_text)
@@ -759,20 +781,20 @@ def check_generation_consistency(
         if entity["id"] not in mentioned_ids
     ]
     extracted_entities = _extract_entity_candidates(output_text)
-    expected_names = [entity["name"] for entity in expected_entities]
+    support_names = [entity["name"] for entity in support_entities]
     unsupported_entities = [
         entity for entity in extracted_entities
-        if not _candidate_supported(entity["name"], expected_names)
+        if not _candidate_supported(entity["name"], support_names)
     ][:30]
 
     matched = len(mentioned_entities)
-
     evidence_count = len(evidence)
-    support_ratio = 0.0
-    if evidence_count:
-        support_ratio = matched / max(1, min(len(allowed), evidence_count))
-        if matched == 0 and output_text.strip():
-            support_ratio = 0.5
+    support_ratio = _knowledge_support_ratio(
+        output_text=output_text,
+        evidence_count=evidence_count,
+        expected_count=len(expected_entities),
+        matched_count=matched,
+    )
 
     insufficiency_acknowledged = (
         "当前图谱依据不足" in output_text
@@ -957,6 +979,85 @@ def _entity_records_from_allowed(allowed: Sequence[Dict[str, Any]]) -> List[Dict
     return entities
 
 
+def _knowledge_support_ratio(
+    *,
+    output_text: str,
+    evidence_count: int,
+    expected_count: int,
+    matched_count: int,
+) -> float:
+    if not output_text.strip():
+        return 0.0
+    if evidence_count <= 0:
+        return 0.0
+    if expected_count <= 0:
+        return 1.0
+    return matched_count / max(1, expected_count)
+
+
+def _expected_entities_for_task(
+    entities: Sequence[Dict[str, Any]],
+    learning_plan: Dict[str, Any],
+    task: str,
+) -> List[Dict[str, Any]]:
+    if task != "lecture":
+        return list(entities)
+
+    selected: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add_entity(entity: Optional[Dict[str, Any]]) -> None:
+        if not entity:
+            return
+        key = _entity_key(str(entity.get("name") or entity.get("id") or ""))
+        if not key or key in seen:
+            return
+        seen.add(key)
+        selected.append(dict(entity))
+
+    def add_reference(reference: Any) -> None:
+        if not isinstance(reference, dict):
+            return
+        ref_id = str(reference.get("id") or "").strip()
+        ref_name = str(reference.get("name") or reference.get("label") or "").strip()
+        ref_key = _entity_key(ref_name)
+        for entity in entities:
+            if ref_id and str(entity.get("id") or "") == ref_id:
+                add_entity(entity)
+                return
+            if ref_key and _entity_key(str(entity.get("name") or "")) == ref_key:
+                add_entity(entity)
+                return
+
+    add_reference(learning_plan.get("subject"))
+    for slot in learning_plan.get("slots") or []:
+        if not isinstance(slot, dict):
+            continue
+        for entity in slot.get("entities") or []:
+            add_reference(entity)
+            if len(selected) >= LECTURE_EXPECTED_ENTITY_LIMIT:
+                return selected[:LECTURE_EXPECTED_ENTITY_LIMIT]
+
+    if selected:
+        return selected[:LECTURE_EXPECTED_ENTITY_LIMIT]
+
+    for entity in entities:
+        if _is_core_consistency_entity(entity):
+            add_entity(entity)
+        if len(selected) >= LECTURE_EXPECTED_ENTITY_LIMIT:
+            break
+
+    return (selected or list(entities)[:LECTURE_EXPECTED_ENTITY_LIMIT])[:LECTURE_EXPECTED_ENTITY_LIMIT]
+
+
+def _is_core_consistency_entity(entity: Dict[str, Any]) -> bool:
+    name = str(entity.get("name") or "").strip()
+    node_type = str(entity.get("type") or "").strip().lower()
+    if not name or len(name) > 120:
+        return False
+    return node_type in CORE_CONSISTENCY_TYPES
+
+
 def _expected_entity_name(concept: Dict[str, Any]) -> str:
     name = str(concept.get("name") or "").strip()
     if not name:
@@ -1001,7 +1102,6 @@ def _extract_entity_candidates(text: str) -> List[Dict[str, Any]]:
         r"\b(?:Equation|Eq\.?|Formula|Table|Figure)\s+[0-9]+(?:\.[0-9]+[a-z]?)?\b",
         r"\b[A-Z][A-Za-z]*(?:['\u2019]s)?(?:[- ][A-Za-z][A-Za-z]*(?:['\u2019]s)?){0,4}\s+(?:[Tt]heorem|[Ii]dentity|[Ee]quation|[Rr]ule|[Ll]aw|[Pp]rinciple|[Mm]odel)\b",
         r"\b[A-Z][A-Za-z0-9]*(?:['\u2019]s)?(?:[- ][A-Z][A-Za-z0-9]*(?:['\u2019]s)?){1,5}\b",
-        r"[\u4e00-\u9fff]{2,12}",
     ]
     stopwords = {
         "the", "and", "for", "with", "this", "that", "from", "into", "then", "when",

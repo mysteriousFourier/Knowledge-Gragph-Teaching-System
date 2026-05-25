@@ -7,6 +7,7 @@ import { ConsistencyPanel } from "@/components/common/ConsistencyPanel"
 import { EvidenceSummary } from "@/components/common/EvidenceSummary"
 import { EmptyState } from "@/components/common/EmptyState"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
+import { PlaybackProgress } from "@/components/common/PlaybackProgress"
 import { RichTextContent } from "@/components/renderers/RichTextContent"
 import { useLecturePlayback } from "@/hooks/useLecturePlayback"
 import { cn } from "@/lib/utils"
@@ -31,7 +32,10 @@ function LearnPage() {
   const selectedChapter = chapters.find((chapter) => chapter.id === selectedChapterId)
   const selectedContent = selectedChapter?.lecture_content || selectedChapter?.content || ""
   const selectedProgress = selectedChapter ? progressData?.progress?.chapters?.[selectedChapter.id] : undefined
-  const playback = useLecturePlayback({ segmentCount: selectedContent ? 1 : 0 })
+  const playback = useLecturePlayback({
+    segmentCount: selectedContent ? 1 : 0,
+    getSegmentText: () => selectedContent,
+  })
 
   const handleStatus = async (status: ChapterProgressStatus) => {
     if (!selectedChapter) return
@@ -112,8 +116,8 @@ function LearnPage() {
                     )}
                     title={playback.providerLabel}
                   >
-                    {playback.isPlaying ? <Pause size={14} /> : <Play size={14} />}
-                    {playback.isPlaying ? "暂停" : "播放"}
+                    {playback.isPlaying || playback.isLoadingAudio ? <Pause size={14} /> : <Play size={14} />}
+                    {playback.isPlaying || playback.isLoadingAudio ? "暂停" : "播放"}
                   </button>
                   <button
                     onClick={() => handleStatus("learned")}
@@ -146,7 +150,7 @@ function LearnPage() {
                   当前状态：{statusLabel(selectedProgress.status)} · 正确 {selectedProgress.correct_count || 0} · 错误 {selectedProgress.wrong_count || 0}
                 </div>
               )}
-              <div className="border-b px-4 py-2 text-sm text-muted-foreground">{playback.statusText}</div>
+              <PlaybackProgress progress={playback.progress} statusText={playback.statusText} />
               <div className="p-4">
                 {selectedContent ? (
                   <RichTextContent content={selectedContent} />

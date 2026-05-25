@@ -54,6 +54,14 @@ python backend/education/api_server.py
 - `structured/`
 - 当前知识图谱数据库
 
+线上低资源部署还建议设置：
+
+- `DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS=0`
+- `KGTS_RETRIEVAL_MODE=sparse_hybrid`
+- `KGTS_TTS_ENABLED=0`
+
+这些配置能减少 Azure F1 或 1 GB 免费 VM 的启动压力，同时保留讲稿、问答和练习生成的主要链路。
+
 ## 维护约定
 
 - 改业务逻辑时优先改根目录 `education/`

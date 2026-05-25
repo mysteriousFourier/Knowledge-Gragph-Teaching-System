@@ -1,18 +1,127 @@
-import { useMemo, useState } from "react"
-
-export const ttsProvider = "none" as const
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { getTtsStatus, splitTtsSegments, synthesizeTts } from "@/api/education"
+import type { TtsSegmentItem, TtsSynthesizeResponse } from "@/types/education"
 
 interface UseLecturePlaybackOptions {
   segmentCount: number
   initialSegment?: number
+  getSegmentText?: (segment: number) => string
 }
 
-export function useLecturePlayback({ segmentCount, initialSegment = 0 }: UseLecturePlaybackOptions) {
+type PlaybackProvider = "loading" | "none" | "genie" | "genie_server" | string
+type PlaybackStage = "idle" | "splitting" | "synthesizing" | "playing" | "error"
+
+interface ChunkInfo {
+  current: number
+  total: number
+  prefetching: boolean
+  lastCacheHit: boolean
+  ready: number
+  pending: number
+  cacheHits: number
+  stage: PlaybackStage
+}
+
+export interface PlaybackProgress {
+  cacheHits: number
+  current: number
+  isActive: boolean
+  pending: number
+  percent: number
+  provider: string
+  providerLabel: string
+  ready: number
+  stage: PlaybackStage
+  total: number
+}
+
+const LONG_TEXT_THRESHOLD = 420
+const TTS_CHUNK_CHARS = 260
+const PREFETCH_AHEAD = 2
+const initialChunkInfo: ChunkInfo = {
+  current: 0,
+  total: 0,
+  prefetching: false,
+  lastCacheHit: false,
+  ready: 0,
+  pending: 0,
+  cacheHits: 0,
+  stage: "idle",
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error && typeof error === "object" && "response" in error) {
+    const response = (error as { response?: { status?: number; data?: { detail?: string; error?: string } } }).response
+    const message = response?.data?.detail || response?.data?.error
+    if (message) return message
+    if (response?.status) return `${fallback}，HTTP ${response.status}`
+  }
+  if (error && typeof error === "object" && "request" in error) {
+    const code = (error as { code?: string }).code
+    return code ? `${fallback}，网络错误：${code}` : `${fallback}，无法连接后端`
+  }
+  return error instanceof Error ? error.message : fallback
+}
+
+function getProviderLabel(provider: PlaybackProvider) {
+  if (provider === "gpt_sovits_local") return "GPT-SoVITS 本地推理"
+  if (provider === "gpt_sovits_server") return "GPT-SoVITS 服务推理"
+  if (provider === "genie") return "Genie-TTS 本地推理"
+  if (provider === "genie_server") return "Genie-TTS 服务推理"
+  if (provider === "loading") return "语音状态检测中"
+  if (provider === "none") return "语音接口未接入"
+  return provider
+}
+
+export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmentText }: UseLecturePlaybackOptions) {
   const [isPlaying, setIsPlaying] = useState(false)
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false)
   const [currentSegment, setCurrentSegmentState] = useState(initialSegment)
+  const [provider, setProvider] = useState<PlaybackProvider>("loading")
+  const [providerDetail, setProviderDetail] = useState("")
+  const [playbackError, setPlaybackError] = useState("")
+  const [chunkInfo, setChunkInfo] = useState<ChunkInfo>(initialChunkInfo)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const requestIdRef = useRef(0)
+  const synthesizedRef = useRef(new Map<string, Promise<TtsSynthesizeResponse>>())
 
   const hasSegments = segmentCount > 0
-  const providerLabel = ttsProvider === "none" ? "语音接口未接入" : "语音播放可用"
+  const providerReady = provider !== "loading" && provider !== "none"
+  const providerLabel = providerReady
+    ? `${getProviderLabel(provider)} 可用`
+    : provider === "loading"
+      ? "语音状态检测中"
+      : providerDetail || "语音接口未接入"
+
+  useEffect(() => {
+    let cancelled = false
+    getTtsStatus()
+      .then((status) => {
+        if (cancelled) return
+        if (status.enabled && status.available) {
+          setProvider(status.provider)
+          setProviderDetail(status.detail || "语音播放可用")
+        } else {
+          setProvider("none")
+          setProviderDetail(status.detail || "语音接口未接入")
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setProvider("none")
+        setProviderDetail(getErrorMessage(error, "语音状态接口请求失败"))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const stopAudio = useCallback(() => {
+    if (!audioRef.current) return
+    audioRef.current.pause()
+    audioRef.current.src = ""
+    audioRef.current = null
+  }, [])
 
   const setCurrentSegment = (next: number | ((current: number) => number)) => {
     setCurrentSegmentState((current) => {
@@ -21,43 +130,237 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0 }: UseLect
     })
   }
 
-  const play = () => {
-    if (!hasSegments) return
-    setIsPlaying(true)
-    // TODO: when a real TTS provider is configured, request audio for currentSegment here.
-  }
-
-  const pause = () => {
+  const pause = useCallback(() => {
+    requestIdRef.current += 1
     setIsPlaying(false)
-    // TODO: pause or stop the active provider playback instance here.
-  }
+    setIsLoadingAudio(false)
+    setChunkInfo(initialChunkInfo)
+    stopAudio()
+  }, [stopAudio])
+
+  const synthesizeCached = useCallback((text: string) => {
+    const key = text.trim()
+    const existing = synthesizedRef.current.get(key)
+    if (existing) return existing
+    const promise = synthesizeTts({ text: key, split_sentence: true }).catch((error) => {
+      synthesizedRef.current.delete(key)
+      throw error
+    })
+    synthesizedRef.current.set(key, promise)
+    return promise
+  }, [])
+
+  const play = useCallback(async () => {
+    if (!hasSegments) return
+    setPlaybackError("")
+
+    if (provider === "loading") {
+      setIsPlaying(false)
+      setPlaybackError("语音状态检测中，请稍后再试")
+      return
+    }
+
+    if (!providerReady) {
+      setIsPlaying(false)
+      setPlaybackError(providerDetail || "语音接口未接入")
+      return
+    }
+
+    const sourceText = getSegmentText?.(currentSegment)?.trim()
+    if (!sourceText) {
+      setPlaybackError("当前片段没有可朗读文本")
+      return
+    }
+
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+    setIsPlaying(true)
+    setIsLoadingAudio(true)
+    setChunkInfo({ ...initialChunkInfo, stage: "splitting" })
+    stopAudio()
+
+    try {
+      const splitResult = sourceText.length > LONG_TEXT_THRESHOLD
+        ? await splitTtsSegments({ text: sourceText, max_chars: TTS_CHUNK_CHARS })
+        : {
+            success: true,
+            segments: [{ index: 0, text: sourceText, length: sourceText.length }],
+            detail: undefined,
+            error: undefined,
+          }
+      if (requestIdRef.current !== requestId) return
+      if (!splitResult.success || !splitResult.segments.length) {
+        throw new Error(splitResult.detail || splitResult.error || "语音分段失败")
+      }
+
+      const chunks = splitResult.segments as TtsSegmentItem[]
+      let chunkIndex = 0
+      const pendingIndexes = new Set<number>()
+      const prefetchedIndexes = new Set<number>()
+      const readyIndexes = new Set<number>()
+      const cacheHitIndexes = new Set<number>()
+      setChunkInfo({ ...initialChunkInfo, total: chunks.length, stage: "synthesizing" })
+
+      const syncProgress = (patch: Partial<ChunkInfo> = {}) => {
+        if (requestIdRef.current !== requestId) return
+        setChunkInfo((current) => ({
+          ...current,
+          current: chunkIndex,
+          total: chunks.length,
+          prefetching: pendingIndexes.size > 0,
+          ready: readyIndexes.size,
+          pending: pendingIndexes.size,
+          cacheHits: cacheHitIndexes.size,
+          ...patch,
+        }))
+      }
+
+      const markReady = (index: number, result: TtsSynthesizeResponse) => {
+        readyIndexes.add(index)
+        if (result.cache_hit) cacheHitIndexes.add(index)
+      }
+
+      const prefetchChunk = (index: number) => {
+        const chunk = chunks[index]
+        if (prefetchedIndexes.has(index)) return
+        if (!chunk) return
+        prefetchedIndexes.add(index)
+        pendingIndexes.add(index)
+        syncProgress({ stage: "playing" })
+        void synthesizeCached(chunk.text)
+          .then((result) => {
+            if (requestIdRef.current !== requestId || !result.success || !result.audio_url) return
+            markReady(index, result)
+          })
+          .catch(() => undefined)
+          .finally(() => {
+            pendingIndexes.delete(index)
+            syncProgress({ stage: "playing" })
+          })
+      }
+
+      const prefetchAhead = (fromIndex: number) => {
+        for (let index = fromIndex; index < Math.min(chunks.length, fromIndex + PREFETCH_AHEAD); index += 1) {
+          prefetchChunk(index)
+        }
+      }
+
+      const playChunk = async () => {
+        if (requestIdRef.current !== requestId) return
+        const chunk = chunks[chunkIndex]
+        if (!chunk) {
+          setIsPlaying(false)
+          setIsLoadingAudio(false)
+          setChunkInfo((current) => ({ ...current, prefetching: false, pending: 0, stage: "idle" }))
+          return
+        }
+        pendingIndexes.add(chunkIndex)
+        const currentPromise = synthesizeCached(chunk.text)
+
+        setIsLoadingAudio(true)
+        syncProgress({ stage: "synthesizing" })
+        const result = await currentPromise.finally(() => {
+          pendingIndexes.delete(chunkIndex)
+        })
+        if (requestIdRef.current !== requestId) return
+        if (!result.success || !result.audio_url) {
+          throw new Error(result.detail || result.error || "语音生成失败")
+        }
+        markReady(chunkIndex, result)
+        syncProgress({ lastCacheHit: !!result.cache_hit, stage: "synthesizing" })
+        const audio = new Audio(result.audio_url)
+        audio.preload = "auto"
+        audioRef.current = audio
+        audio.onended = () => {
+          if (requestIdRef.current !== requestId) return
+          chunkIndex += 1
+          void playChunk()
+        }
+        audio.onerror = () => {
+          if (requestIdRef.current !== requestId) return
+          setIsPlaying(false)
+          setIsLoadingAudio(false)
+          setPlaybackError("音频播放失败")
+        }
+        await audio.play()
+        if (requestIdRef.current === requestId) {
+          setIsLoadingAudio(false)
+          syncProgress({ stage: "playing" })
+          prefetchAhead(chunkIndex + 1)
+        }
+      }
+
+      await playChunk()
+    } catch (error) {
+      if (requestIdRef.current !== requestId) return
+      setIsPlaying(false)
+      setIsLoadingAudio(false)
+      setChunkInfo((current) => ({ ...current, prefetching: false, pending: 0, stage: "error" }))
+      setPlaybackError(getErrorMessage(error, "语音生成失败"))
+    }
+  }, [currentSegment, getSegmentText, hasSegments, providerDetail, providerReady, stopAudio, synthesizeCached])
 
   const toggle = () => {
-    if (isPlaying) {
+    if (isPlaying || isLoadingAudio) {
       pause()
     } else {
-      play()
+      void play()
     }
   }
 
   const reset = (segment = 0) => {
-    setIsPlaying(false)
+    pause()
     setCurrentSegmentState(Math.min(Math.max(segment, 0), Math.max(segmentCount - 1, 0)))
   }
 
+  useEffect(() => {
+    return () => pause()
+  }, [pause])
+
   const statusText = useMemo(() => {
     if (!hasSegments) return "暂无可播放内容"
-    if (ttsProvider === "none") return isPlaying ? "播放状态已开启，语音接口未接入" : "语音接口未接入"
+    if (playbackError) return playbackError
+    if (provider === "loading") return "语音状态检测中"
+    if (chunkInfo.stage === "splitting") return "正在切分讲稿，准备语音队列..."
+    if (isLoadingAudio) {
+      if (chunkInfo.total > 1) return `准备第 ${chunkInfo.current + 1}/${chunkInfo.total} 段语音，已就绪 ${chunkInfo.ready}/${chunkInfo.total}`
+      return `语音生成中，使用 ${getProviderLabel(provider)}`
+    }
+    if (!providerReady) return isPlaying ? "播放状态已开启，语音接口未接入" : providerDetail || "语音接口未接入"
+    if (isPlaying && chunkInfo.total > 1) {
+      if (chunkInfo.prefetching) return `播放第 ${chunkInfo.current + 1}/${chunkInfo.total} 段，后台生成 ${chunkInfo.pending} 段，已就绪 ${chunkInfo.ready}/${chunkInfo.total}`
+      if (chunkInfo.lastCacheHit) return `播放第 ${chunkInfo.current + 1}/${chunkInfo.total} 段，从缓存播放，已就绪 ${chunkInfo.ready}/${chunkInfo.total}`
+      return `播放第 ${chunkInfo.current + 1}/${chunkInfo.total} 段，已就绪 ${chunkInfo.ready}/${chunkInfo.total}`
+    }
+    if (isPlaying && chunkInfo.lastCacheHit) return "从缓存播放"
     return isPlaying ? "播放中" : "已暂停"
-  }, [hasSegments, isPlaying])
+  }, [chunkInfo, hasSegments, isLoadingAudio, isPlaying, playbackError, provider, providerDetail, providerReady])
+
+  const progress = useMemo<PlaybackProgress>(() => {
+    const total = chunkInfo.total
+    return {
+      cacheHits: chunkInfo.cacheHits,
+      current: chunkInfo.current,
+      isActive: isLoadingAudio || isPlaying || chunkInfo.pending > 0 || chunkInfo.stage === "splitting",
+      pending: chunkInfo.pending,
+      percent: total > 0 ? Math.round((chunkInfo.ready / total) * 100) : 0,
+      provider,
+      providerLabel,
+      ready: chunkInfo.ready,
+      stage: chunkInfo.stage,
+      total,
+    }
+  }, [chunkInfo, isLoadingAudio, isPlaying, provider, providerLabel])
 
   return {
     currentSegment,
     hasSegments,
+    isLoadingAudio,
     isPlaying,
     pause,
     play,
-    provider: ttsProvider,
+    progress,
+    provider,
     providerLabel,
     reset,
     setCurrentSegment,

@@ -9,6 +9,8 @@
 - `backend/vector_index_system/memory_systems/`
 - `backend/vector_index_system/models/`
 - `backend/vector_index_system/vector_index/`
+- `third_party/Genie-TTS/`
+- `models/tts/`
 
 `.gitignore` 也已经按这个方向配置。
 
@@ -46,6 +48,18 @@
 3. 停止把完整上游源码、模型权重、生成索引直接纳入主仓库
 4. 如果移除了某个提供方，同步检查 `core/memory_runtime.py` 的发现与回退逻辑
 5. 在对应 README 中明确哪些目录是“兼容层”，哪些才是主实现
+
+## 部署边界
+
+Azure App Service F1 和 Azure for Students 免费 VM 的主站部署只应包含 KGTS 自有代码、前端构建产物、结构化课程数据和种子图谱。模型、向量索引、第三方研究仓库和 TTS 运行时应留在本地或独立高资源服务中。
+
+对应轻量配置：
+
+```text
+KGTS_RETRIEVAL_MODE=sparse_hybrid
+KGTS_TTS_ENABLED=0
+KGTS_TTS_PROVIDER=disabled
+```
 
 ## 不再沿用的旧说明
 

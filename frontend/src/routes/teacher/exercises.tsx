@@ -37,7 +37,7 @@ function ExercisesPage() {
     if (!selectedChapterId) return
     const chapterBody = (selectedChapter?.content || selectedChapter?.lecture_content || "").trim()
     if (!chapterBody) {
-      setGenerateStatus("当前章节没有可用内容，无法生成题目。请先导入章节内容、保存授课文案或补充图谱证据。")
+      setGenerateStatus("当前课程没有可用内容，无法生成题目。请先导入课程内容、保存授课文案或补充图谱证据。")
       return
     }
     setGenerateStatus("正在生成 5 道新题，DeepSeek 响应可能较慢，请等待。")
@@ -78,7 +78,7 @@ function ExercisesPage() {
         (typeof responseData?.detail === "string" && responseData.detail) ||
         (typeof responseData?.error === "string" && responseData.error) ||
         (error instanceof Error ? error.message : "") ||
-        "题库生成失败，请检查章节内容和后端日志。"
+        "题库生成失败，请检查课程内容和后端日志。"
       setGenerateStatus(message)
     }
   }
@@ -155,13 +155,13 @@ function ExercisesPage() {
       <div className="bg-card border rounded-xl p-4">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
           <div className="min-w-0 flex-1">
-            <label className="block text-sm font-medium mb-2">选择章节</label>
+            <label className="block text-sm font-medium mb-2">选择课程</label>
             <select
               value={selectedChapterId}
               onChange={(event) => setSelectedChapterId(event.target.value)}
               className="w-full px-3 py-2.5 bg-background border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
             >
-              <option value="">-- 请选择章节 --</option>
+              <option value="">-- 请选择课程 --</option>
               {chapters.map((chapter) => (
                 <option key={chapter.id} value={chapter.id}>
                   {chapter.title}
@@ -185,7 +185,7 @@ function ExercisesPage() {
           {exercises.length === 0 ? (
             <EmptyState
               title="暂无题目"
-              description="该章节暂无练习题，点击上方按钮生成新题。"
+              description="该课程暂无练习题，点击上方按钮生成新题。"
               action={
                 <button
                   onClick={handleGenerate}

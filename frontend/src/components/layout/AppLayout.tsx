@@ -133,12 +133,6 @@ const routeMeta = [
     description: "学生和教师从同一个入口进入，身份决定后续默认工作台。",
   },
   {
-    match: (path: string) => path.startsWith("/teacher/ppt"),
-    key: "ppt",
-    paperTitle: "Slide Manuscript",
-    description: "解析幻灯片标题、正文、备注与表格，再生成逐页讲解文稿。",
-  },
-  {
     match: (path: string) => path.startsWith("/teacher/lecture"),
     key: "lecture",
     paperTitle: "Lecture Mode",
@@ -153,20 +147,20 @@ const routeMeta = [
   {
     match: (path: string) => path.startsWith("/teacher/prepare"),
     key: "prepare",
-    paperTitle: "Prepare Mode",
-    description: "导入图谱文件与章节内容，生成可检查、可保存的授课文稿。",
+    paperTitle: "Prepare Workbench",
+    description: "树选课程内容生成 PPT/TeX 课件，并基于同一证据链生成逐页讲解。",
   },
   {
     match: (path: string) => path.startsWith("/teacher"),
     key: "teacher",
     paperTitle: "Teacher Console",
-    description: "教师端聚合备课、PPT 逐页文稿、授课、题库反馈与图谱管理。",
+    description: "教师端聚合备课工作台、授课、题库反馈与图谱管理。",
   },
   {
     match: (path: string) => path.startsWith("/student/learn"),
     key: "learn",
     paperTitle: "Learning Sheet",
-    description: "围绕章节内容、公式和图谱证据组织学习材料。",
+    description: "围绕课程内容、公式和图谱证据组织学习材料。",
   },
   {
     match: (path: string) => path.startsWith("/student/practice"),

@@ -14,6 +14,7 @@ TOOL_NAMES = [
     "search_nodes",
     "semantic_search",
     "rebuild_vector_index",
+    "rebuild_staging_graph",
     "reset_vector_index",
     "add_memory",
     "update_memory",

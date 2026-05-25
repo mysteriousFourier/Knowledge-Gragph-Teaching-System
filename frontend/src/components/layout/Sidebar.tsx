@@ -1,11 +1,10 @@
 import { Link, useLocation } from "@tanstack/react-router"
-import { BookOpen, Brain, FileText, FileUp, Network, PencilRuler, ShieldCheck } from "lucide-react"
+import { BookOpen, Brain, FileText, Network, PencilRuler, ShieldCheck } from "lucide-react"
 import { useAuth } from "@/hooks/useAuth"
 import { cn } from "@/lib/utils"
 
 const commandItems = [
   { to: "/teacher/prepare", label: "Prepare", icon: PencilRuler, role: "teacher" },
-  { to: "/teacher/ppt", label: "PPT", icon: FileUp, role: "teacher" },
   { to: "/teacher/lecture", label: "Lecture", icon: FileText, role: "teacher" },
   { to: "/teacher/exercises", label: "Exercises", icon: Brain, role: "teacher" },
   { to: "/student/learn", label: "Learn", icon: BookOpen, role: "student" },

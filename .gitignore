@@ -36,6 +36,8 @@ frontend/chapters-cache.json
 frontend/mcp-server/data/
 backend/mcp-server/data/*.db
 backend/mcp-server/data/*.sqlite*
+backend/vector_index_system/knowledge_graph/knowledge_graph.db
+education/beamer_generator_full/uploads/
 
 # Python
 __pycache__/
@@ -98,6 +100,26 @@ backend/vector_index_system/models/
 backend/vector_index_system/memory_systems/
 backend/vector_index_system/knowledge_graph/knowledge_graph/
 backend/vector_index_system/vector_index/
+third_party/Genie-TTS/
+third_party/genie-tts/
+Genie-TTS/
+genie-tts/
+CharacterModels/
+.runtime/tts/
+models/tts/
+models/genie-tts/
+backend/models/tts/
+backend/models/genie-tts/
+**/GenieData/
+**/genie_data/
+**/tts-cache/
+**/tts-output/
+**/tts-audio/
+*.onnx
+*.safetensors
+*.ckpt
+*.pt
+*.pth
 
 # Local databases, caches, and binary indexes
 *.sqlite
@@ -119,6 +141,7 @@ backend/vector_index_system/vector_index/
 # Temporary files
 .tmp/
 .tanstack/
+目录树导出/
 *.tmp
 *.temp
 *.bak
@@ -130,5 +153,6 @@ backend/vector_index_system/vector_index/
 # Local frontend experiments/backups
 frontend-legacy-backup/
 frontend-next-preview-v2/
+archive/frontend/
 frontend-redesign/
 .superdesign/
