@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from KGTS.config import load_root_env
 from KGTS.core.tts_service import (
+    _prepare_genie_runtime,
     _prepare_genie_import_path,
     genie_tts_service,
     get_tts_settings,
@@ -40,6 +41,7 @@ from KGTS.core.tts_text import normalize_tts_text
 
 load_root_env()
 os.environ["KGTS_TTS_PROVIDER"] = "genie"
+_prepare_genie_runtime(get_tts_settings())
 
 _prepare_genie_import_path()
 from KGTS.core.genie_low_memory import patch_genie_tts_low_memory
