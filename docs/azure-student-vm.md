@@ -253,6 +253,7 @@ KGTS_TTS_LANGUAGE=zh
 KGTS_TTS_REFERENCE_AUDIO=models/tts/shu/reference/shu.wav
 KGTS_TTS_REFERENCE_LANGUAGE=zh
 KGTS_TTS_REFERENCE_TEXT=我是谁？答案只在于我所见所遇的一切。
+KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH=1
 ```
 
 创建独立 TTS 服务：
@@ -277,6 +278,7 @@ Environment=NUMEXPR_NUM_THREADS=1
 Environment=TOKENIZERS_PARALLELISM=false
 Environment=KGTS_TTS_GENIE_LOW_MEMORY=1
 Environment=KGTS_TTS_ONNX_CACHE_DIR=/home/azureuser/kgts/.runtime/tts/onnx-fp32-cache
+Environment=KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH=1
 ExecStart=/home/azureuser/kgts/.venv/bin/python scripts/genie_tts_proxy_server.py
 Restart=on-failure
 RestartSec=10
@@ -299,6 +301,8 @@ curl -s http://127.0.0.1:8000/api/tts/status
 free -h
 journalctl -u kgts-tts -n 100 --no-pager
 ```
+
+`KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH=1` 会在每次合成后卸载 Genie 角色模型、HuBERT 和引用音频缓存。实测它能把 1 GB VM 从模型常驻后的低可用内存状态恢复出来，代价是下一次合成需要重新加载模型。
 
 如果合成时出现 OOM，`kgts-tts.service` 会失败或重启，但 `kgts.service` 应继续可用。这说明当前免费 VM 不能稳定承载本地 TTS；可以保留 `genie_server` 配置指向更高内存 VM，或恢复 `KGTS_TTS_ENABLED=0`。
 
