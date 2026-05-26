@@ -99,7 +99,6 @@ const COURSEWARE_ACCEPT = ".ppt,.pptx,.tex,.md,.markdown,.txt,.rst,.csv,.json,.h
 const COURSEWARE_FORMAT_LABEL = "PPT/PPTX、TeX、Markdown、TXT、RST、CSV、JSON、HTML、RTF、DOCX、PDF、ZIP"
 const CANVAS_WIDTH = 1000
 const CANVAS_HEIGHT = 562.5
-const GRAPH_SCOPE_NODE_TYPES = ["part", "chapter", "appendix", "section"]
 
 function normalizeTexNewlines(value: string) {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
@@ -907,7 +906,7 @@ function TeacherPreparePage() {
   const generateSlideLectures = useGenerateSlideLectures()
   const saveChapter = useSaveChapter()
   const saveLecture = useSaveLecture()
-  const { data: nodesData, isLoading: nodesLoading } = useGraphNodes(5000, GRAPH_SCOPE_NODE_TYPES)
+  const { data: nodesData, isLoading: nodesLoading } = useGraphNodes(20000)
   const { data: relationshipsData, isLoading: relationshipsLoading } = useGraphRelationships(100000, "contains")
   const { data: pptNodeContext, isLoading: pptContextLoading } = useGraphNodeContext(pptNodeIds)
   const { data: lectureNodeContext, isLoading: lectureContextLoading } = useGraphNodeContext(lectureNodeIds)

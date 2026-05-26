@@ -38,6 +38,7 @@ from KGTS.maintenance.sync_utils import (
     _relation_payload,
     _section_node_id,
     _sha256_file,
+    resolve_structured_data_dir,
 )
 
 
@@ -47,6 +48,8 @@ _TOC_NODE_BY_STRUCTURED_UNIT: Dict[str, str] = {}
 _TOC_METADATA_BY_NODE_ID: Dict[str, Dict[str, Any]] = {}
 _TOC_HAS_INDEXED_SOURCE = False
 _TOC_FUSION: Optional[TocFusion] = None
+_STRUCTURED_SECTION_BY_SOURCE_UNIT: Dict[str, str] = {}
+_STRUCTURED_SECTION_BY_CHAPTER_HEADING: Dict[str, str] = {}
 
 
 def _reset_toc_index() -> None:
@@ -96,7 +99,7 @@ def _project_relative_path(path: Path) -> str:
         return _normalize_source_name(str(path.resolve().relative_to(Path.cwd().resolve())))
     except ValueError:
         try:
-            return _normalize_source_name(str(path.resolve().relative_to(STRUCTURED_DIR.parent.resolve())))
+            return _normalize_source_name(str(path.resolve().relative_to(resolve_structured_data_dir(STRUCTURED_DIR).parent.resolve())))
         except ValueError:
             return _source_name(path)
 
@@ -121,6 +124,65 @@ def _structured_unit_to_toc_node_id(unit_id: str) -> Optional[str]:
 
 def _toc_metadata_for_node_id(node_id: Optional[str]) -> Dict[str, Any]:
     return dict(_TOC_METADATA_BY_NODE_ID.get(str(node_id or "").strip()) or {})
+
+
+def _structured_heading_key(chapter: str, heading: Any) -> str:
+    normalized_chapter = str(chapter or "").strip().lower()
+    normalized_heading = _normalize_toc_match_text(heading)
+    return f"{normalized_chapter}\0{normalized_heading}" if normalized_chapter and normalized_heading else ""
+
+
+def _index_structured_section_lookup(source_paths: List[Path]) -> None:
+    _STRUCTURED_SECTION_BY_SOURCE_UNIT.clear()
+    _STRUCTURED_SECTION_BY_CHAPTER_HEADING.clear()
+    for path in source_paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        chapter = str(metadata.get("chapter") or path.stem.split("_")[0]).strip()
+        heading_path = _heading_path_from_metadata(metadata)
+        if not chapter or not heading_path:
+            continue
+        deepest_section_id = _section_node_id(chapter, heading_path)
+        source_unit = str(payload.get("id") or path.stem).strip()
+        for key in (source_unit, path.name, path.stem):
+            normalized = str(key or "").strip().lower()
+            if normalized:
+                _STRUCTURED_SECTION_BY_SOURCE_UNIT[normalized] = deepest_section_id
+        for depth, heading in enumerate(heading_path, start=1):
+            key = _structured_heading_key(chapter, heading)
+            if key:
+                _STRUCTURED_SECTION_BY_CHAPTER_HEADING.setdefault(
+                    key,
+                    _section_node_id(chapter, heading_path[:depth]),
+                )
+
+
+def _resource_container_node_id(
+    chapter: str,
+    *,
+    source_unit: Any = None,
+    source_file: Any = None,
+    subsection: Any = None,
+) -> str:
+    candidates = [
+        str(source_unit or "").strip(),
+        str(source_file or "").strip(),
+    ]
+    for value in list(candidates):
+        if value:
+            candidates.append(Path(value).name)
+            candidates.append(Path(value).stem)
+    for candidate in candidates:
+        section_id = _STRUCTURED_SECTION_BY_SOURCE_UNIT.get(candidate.lower())
+        if section_id:
+            return section_id
+    section_id = _STRUCTURED_SECTION_BY_CHAPTER_HEADING.get(_structured_heading_key(chapter, subsection))
+    if section_id:
+        return section_id
+    return _chapter_container_node_id(chapter)
 
 
 def _has_toc_export_outline() -> bool:
@@ -437,21 +499,11 @@ def _build_chunk_source(path: Path) -> SourceSpec:
     previous_block_id: Optional[str] = None
     source_unit = str(payload.get("id") or path.stem)
     toc_unit_id = _structured_unit_to_toc_node_id(source_unit)
-    toc_chapter_id = _structured_chapter_to_toc_node_id(chapter)
     chapter_root_id = _chapter_node_id(chapter)
-    matched_toc_unit_id = (
-        toc_unit_id
-        if toc_unit_id and toc_unit_id not in {chapter_root_id, toc_chapter_id}
-        else None
-    )
-    has_export_outline = _has_toc_export_outline()
-    toc_parent_id = matched_toc_unit_id
-    parent_node_id = toc_parent_id or chapter_root_id
-    toc_parent_metadata = _toc_metadata_for_node_id(toc_parent_id)
+    parent_node_id = chapter_root_id
+    toc_parent_metadata = _toc_metadata_for_node_id(toc_unit_id)
 
     for depth, heading in enumerate(heading_path, start=1):
-        if matched_toc_unit_id and (has_export_outline or depth > 1):
-            continue
         section_path = heading_path[:depth]
         section_id = _section_node_id(chapter, section_path)
         parent_for_section = parent_node_id if depth == 1 else _section_node_id(chapter, heading_path[: depth - 1])
@@ -510,7 +562,7 @@ def _build_chunk_source(path: Path) -> SourceSpec:
                 extra_metadata={
                     "block_index": index,
                     "source_unit": source_unit,
-                    "toc_parent_id": toc_parent_id,
+                    "toc_parent_id": toc_unit_id,
                     **toc_parent_metadata,
                     "section": metadata.get("section"),
                     "subsections": metadata.get("subsections"),
@@ -637,7 +689,11 @@ def _build_formula_source(path: Path) -> SourceSpec:
     for item in payload.get("formulas") or []:
         source = item.get("source") or {}
         chapter = str(source.get("chapter") or "unknown")
-        container_node_id = _chapter_container_node_id(chapter)
+        container_node_id = _resource_container_node_id(
+            chapter,
+            source_unit=source.get("unit_id"),
+            subsection=source.get("subsection"),
+        )
         chapter_title = str(source.get("subsection") or chapter)
         chapters.setdefault(chapter, chapter_title)
         formula_id = str(item.get("id"))
@@ -694,7 +750,11 @@ def _build_table_source(path: Path) -> SourceSpec:
     for item in payload.get("tables") or []:
         source = item.get("source") or {}
         chapter = str(source.get("chapter") or "unknown")
-        container_node_id = _chapter_container_node_id(chapter)
+        container_node_id = _resource_container_node_id(
+            chapter,
+            source_unit=source.get("unit_id"),
+            subsection=source.get("subsection"),
+        )
         chapter_title = str(source.get("subsection") or chapter)
         chapters.setdefault(chapter, chapter_title)
         table_id = str(item.get("id"))
@@ -751,7 +811,10 @@ def _build_example_source(path: Path) -> SourceSpec:
 
     for item in payload.get("examples") or []:
         chapter = str(item.get("chapter") or "unknown")
-        container_node_id = _chapter_container_node_id(chapter)
+        container_node_id = _resource_container_node_id(
+            chapter,
+            source_file=item.get("source_file"),
+        )
         example_id = str(item.get("example_id") or item.get("id") or "").strip()
         if not example_id:
             continue
@@ -1508,6 +1571,7 @@ def _build_chapter_specs(chapters: Dict[str, str]) -> List[SourceSpec]:
 
 def _collect_specs(*, skip_semantic: bool = False) -> tuple[List[SourceSpec], Dict[str, str]]:
     _reset_toc_index()
+    structured_data_dir = resolve_structured_data_dir(STRUCTURED_DIR)
     source_paths: List[Path] = []
     formula_path: Optional[Path] = None
     table_path: Optional[Path] = None
@@ -1515,7 +1579,7 @@ def _collect_specs(*, skip_semantic: bool = False) -> tuple[List[SourceSpec], Di
     figure_path: Optional[Path] = None
     chapters: Dict[str, str] = {}
 
-    for path in sorted(STRUCTURED_DIR.glob("*.json"), key=lambda item: item.name.lower()):
+    for path in sorted(structured_data_dir.glob("*.json"), key=lambda item: item.name.lower()):
         if path.name == "formula_library.json":
             formula_path = path
         elif path.name == "table_library.json":
@@ -1535,9 +1599,11 @@ def _collect_specs(*, skip_semantic: bool = False) -> tuple[List[SourceSpec], Di
             continue
 
     if figure_path is None:
-        fallback_figure_path = STRUCTURED_DIR.parent / "figure_library.json"
+        fallback_figure_path = structured_data_dir.parent / "figure_library.json"
         if fallback_figure_path.exists():
             figure_path = fallback_figure_path
+
+    _index_structured_section_lookup(source_paths)
 
     toc_paths = _toc_export_files()
     if toc_paths:

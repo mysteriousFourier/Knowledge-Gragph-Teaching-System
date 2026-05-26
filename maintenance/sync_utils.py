@@ -31,6 +31,18 @@ REFERENCE_PATTERN = re.compile(r"\[\[(SEE_)?(FORMULA|TABLE|FIGURE|EXAMPLE):([^\]
 FORMULA_REFERENCE_PATTERN = re.compile(r"\[\[(SEE_)?FORMULA:([^\]]+)\]\]", re.I)
 _FORMULA_INDEX: Optional[Dict[str, Dict[str, str]]] = None
 
+
+def resolve_structured_data_dir(base_dir: Optional[Path] = None) -> Path:
+    root = Path(base_dir or STRUCTURED_DIR)
+    nested = root / "structured"
+    if nested.is_dir() and (
+        (nested / "formula_library.json").exists()
+        or any(nested.glob("chapter*_*.json"))
+        or any(nested.glob("appendix*_*.json"))
+    ):
+        return nested
+    return root
+
 SEMANTIC_STOPWORDS = {
     "the", "and", "for", "that", "with", "from", "this", "these", "those", "are", "was",
     "were", "will", "can", "may", "not", "but", "into", "than", "then", "such", "under",
@@ -104,7 +116,7 @@ def _load_formula_index() -> Dict[str, Dict[str, str]]:
     if _FORMULA_INDEX is not None:
         return _FORMULA_INDEX
 
-    payload = _load_json(STRUCTURED_DIR / "formula_library.json")
+    payload = _load_json(resolve_structured_data_dir() / "formula_library.json")
     index: Dict[str, Dict[str, str]] = {}
     for item in payload.get("formulas") or []:
         if not isinstance(item, dict):

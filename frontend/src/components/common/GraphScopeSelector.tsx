@@ -204,12 +204,10 @@ function renderContextTree(tree: GraphContextTreeNode, depth = 0): React.ReactNo
 export function buildGraphScopeTree(nodes: GraphNode[], relationships: GraphRelation[], search: string): GraphScopeTreeNode[] {
   const nodeById = new Map(nodes.map((node) => [node.id, node]))
   const rawChildrenByParent = new Map<string, string[]>()
-  const rawParentByChild = new Map<string, string>()
   relationships.forEach((relation) => {
     if ((relation.relation_type || relation.type) !== "contains") return
     if (!nodeById.has(relation.source_id) || !nodeById.has(relation.target_id)) return
     rawChildrenByParent.set(relation.source_id, [...(rawChildrenByParent.get(relation.source_id) || []), relation.target_id])
-    if (!rawParentByChild.has(relation.target_id)) rawParentByChild.set(relation.target_id, relation.source_id)
   })
 
   const term = search.trim().toLowerCase()
@@ -219,6 +217,8 @@ export function buildGraphScopeTree(nodes: GraphNode[], relationships: GraphRela
         .filter((node) => isGraphScopeDisplayNode(node))
         .map((node) => node.id)
     .sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
+
+  const canonicalChapterForToc = (id: string) => canonicalChapterChildren(id, rawChildrenByParent, nodeById)[0]
 
   const displayChildrenFor = (id: string) => {
     const node = nodeById.get(id)
@@ -232,19 +232,9 @@ export function buildGraphScopeTree(nodes: GraphNode[], relationships: GraphRela
       seen.add(childId)
       displayChildren.push(childId)
     }
-    const addFlattenedTocSectionSiblings = () => {
-      const parentId = rawParentByChild.get(id)
-      if (!parentId) return
-      const siblings = [...(rawChildrenByParent.get(parentId) || [])].sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
-      const start = siblings.indexOf(id)
-      if (start < 0) return
-      for (let index = start + 1; index < siblings.length; index += 1) {
-        const siblingId = siblings[index]
-        const sibling = nodeById.get(siblingId)
-        if (!sibling) continue
-        if (isTocChapterScopeNode(sibling) || hasCanonicalChapterChild(siblingId, rawChildrenByParent, nodeById) || isCanonicalChapterNode(sibling)) break
-        if (isTocSectionNode(sibling)) add(siblingId)
-      }
+    const addTocChildAsScope = (childId: string) => {
+      const canonicalChapterId = canonicalChapterForToc(childId)
+      add(canonicalChapterId || childId)
     }
 
     if (node?.id === "toc::root") {
@@ -256,14 +246,18 @@ export function buildGraphScopeTree(nodes: GraphNode[], relationships: GraphRela
 
     if (isTocPartNode(node)) {
       directChildren.forEach((childId) => {
+        add(canonicalChapterForToc(childId) || (isCanonicalChapterNode(nodeById.get(childId)) ? childId : ""))
+      })
+      if (displayChildren.length) return displayChildren.sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
+      directChildren.forEach((childId) => {
         const child = nodeById.get(childId)
         if (!child) return
         if (isTocChapterScopeNode(child) && (tocEntryType(child) === "chapter" || hasCanonicalChapterChild(childId, rawChildrenByParent, nodeById))) {
-          add(childId)
+          addTocChildAsScope(childId)
           return
         }
         if (hasCanonicalChapterChild(childId, rawChildrenByParent, nodeById)) {
-          add(childId)
+          addTocChildAsScope(childId)
           return
         }
         if (isCanonicalChapterNode(child)) add(childId)
@@ -272,21 +266,31 @@ export function buildGraphScopeTree(nodes: GraphNode[], relationships: GraphRela
     }
 
     if (isTocChapterScopeNode(node) || hasCanonicalChapterChild(id, rawChildrenByParent, nodeById)) {
+      const canonicalChapterId = canonicalChapterForToc(id)
+      if (canonicalChapterId) {
+        displayChildrenFor(canonicalChapterId).forEach(add)
+        return displayChildren.sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
+      }
       directChildren.forEach((childId) => {
         const child = nodeById.get(childId)
-        if (child && isTocSectionNode(child) && !hasCanonicalChapterChild(childId, rawChildrenByParent, nodeById)) add(childId)
-      })
-      if (displayChildren.length) return displayChildren.sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
-      addFlattenedTocSectionSiblings()
-      if (displayChildren.length) return displayChildren.sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
-      canonicalChapterChildren(id, rawChildrenByParent, nodeById).forEach((chapterId) => {
-        headingChildren(chapterId, rawChildrenByParent, nodeById).forEach(add)
+        if (child && isTocSectionNode(child)) add(childId)
       })
       return displayChildren.sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
     }
 
-    if (isCanonicalChapterNode(node) || isHeadingNode(node)) {
-      headingChildren(id, rawChildrenByParent, nodeById).forEach(add)
+    if (isCanonicalChapterNode(node)) {
+      directChildren.forEach((childId) => {
+        const child = nodeById.get(childId)
+        if (child && (isHeadingNode(child) || isKnowledgeContentNode(child))) add(childId)
+      })
+      return displayChildren.sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
+    }
+
+    if (isHeadingNode(node)) {
+      directChildren.forEach((childId) => {
+        const child = nodeById.get(childId)
+        if (child && (isHeadingNode(child) || isKnowledgeContentNode(child))) add(childId)
+      })
       return displayChildren.sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
     }
 
@@ -404,7 +408,7 @@ function isGraphScopeDisplayNode(node?: GraphNode) {
   if (node.id === "toc::root") return true
   if (isTocPartNode(node) || isTocChapterScopeNode(node) || isTocSectionNode(node)) return true
   if (isCanonicalChapterNode(node)) return true
-  return isHeadingNode(node)
+  return isHeadingNode(node) || isKnowledgeContentNode(node)
 }
 
 function isTocEntryNode(node?: GraphNode) {
@@ -443,16 +447,29 @@ function isHeadingNode(node?: GraphNode) {
   return node?.type === "section" && String(node.metadata?.role || "") === "heading"
 }
 
+function isKnowledgeContentNode(node?: GraphNode) {
+  if (!node) return false
+  const nodeType = String(node.type || "")
+  return [
+    "discussion",
+    "proposition",
+    "derivation",
+    "definition",
+    "formula",
+    "note",
+    "table",
+    "figure",
+    "example",
+    "concept",
+  ].includes(nodeType)
+}
+
 function canonicalChapterChildren(parentId: string, childrenByParent: Map<string, string[]>, nodeById: Map<string, GraphNode>) {
   return (childrenByParent.get(parentId) || []).filter((childId) => isCanonicalChapterNode(nodeById.get(childId)))
 }
 
 function hasCanonicalChapterChild(parentId: string, childrenByParent: Map<string, string[]>, nodeById: Map<string, GraphNode>) {
   return canonicalChapterChildren(parentId, childrenByParent, nodeById).length > 0
-}
-
-function headingChildren(parentId: string, childrenByParent: Map<string, string[]>, nodeById: Map<string, GraphNode>) {
-  return (childrenByParent.get(parentId) || []).filter((childId) => isHeadingNode(nodeById.get(childId)))
 }
 
 function graphScopeDisplayType(node: GraphNode, childrenByParent: Map<string, string[]>, nodeById: Map<string, GraphNode>) {

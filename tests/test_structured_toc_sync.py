@@ -17,6 +17,45 @@ from KGTS.maintenance.sync_utils import SourceSpec, _slug_heading
 
 
 class StructuredTocSyncTest(unittest.TestCase):
+    def test_collect_specs_detects_nested_delivery_structured_directory(self):
+        chunk_payload = {
+            "id": "chapter1_001",
+            "metadata": {
+                "chapter": "chapter1",
+                "section": "Chapter 1 Intro",
+                "heading_path": ["Chapter 1 Intro"],
+            },
+            "blocks": [{"type": "discussion", "content": "Nested delivery content."}],
+        }
+        formula_payload = {
+            "formulas": [
+                {
+                    "id": "1.1",
+                    "label_format": "(1.1)",
+                    "latex": "x = y",
+                    "source": {"chapter": "chapter1", "unit_id": "chapter1_001", "subsection": "Chapter 1 Intro"},
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            package_root = Path(tmp) / "structured"
+            nested_dir = package_root / "structured"
+            nested_dir.mkdir(parents=True)
+            (nested_dir / "chapter1_001.json").write_text(json.dumps(chunk_payload, ensure_ascii=False), encoding="utf-8")
+            (nested_dir / "formula_library.json").write_text(json.dumps(formula_payload, ensure_ascii=False), encoding="utf-8")
+
+            with (
+                patch.object(sync_builders, "STRUCTURED_DIR", package_root),
+                patch.object(sync_builders, "TOC_EXPORT_DIR", Path("")),
+            ):
+                specs, chapters = sync_builders._collect_specs(skip_semantic=True)
+
+        node_by_id = {node["id"]: node for spec in specs for node in spec.nodes}
+        self.assertIn("chapter1", chapters)
+        self.assertIn("block::chapter1_001::1", node_by_id)
+        self.assertIn("formula::chapter1::1.1", node_by_id)
+
     def test_toc_exports_are_not_auto_discovered_by_default(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             root = Path(tmp)
@@ -256,7 +295,152 @@ class StructuredTocSyncTest(unittest.TestCase):
         self.assertIn(("toc::root", "contains", "toc::toc_l0_0001"), relation_keys)
         self.assertIn(("toc::toc_l0_0001", "contains", "toc::toc_l1_0002"), relation_keys)
         self.assertIn(("toc::toc_l0_0001", "contains", "chapter::chapter1"), relation_keys)
+        self.assertIn(("chapter::chapter1", "contains", "section::chapter1::a_brief_history"), relation_keys)
         self.assertIn(("section::chapter1::a_brief_history", "contains", "block::chapter1_002::1"), relation_keys)
+        self.assertNotIn(("toc::toc_l2_0003", "contains", "block::chapter1_002::1"), relation_keys)
+
+    def test_library_resources_attach_to_structured_sections(self):
+        chunk_payload = {
+            "id": "chapter2_002",
+            "metadata": {
+                "chapter": "chapter2",
+                "section": "Neutral Evolution in One- and Two-Locus Systems: Introduction",
+                "heading_path": [
+                    "Neutral Evolution in One- and Two-Locus Systems: Introduction",
+                    "THE WRIGHT-FISHER MODEL",
+                ],
+            },
+            "blocks": [{"type": "discussion", "content": "Structured content."}],
+        }
+        formula_payload = {
+            "formulas": [
+                {
+                    "id": "2.1",
+                    "label_format": "(2.1)",
+                    "latex": "P_{ij}",
+                    "source": {"chapter": "chapter2", "unit_id": "chapter2_block_008", "subsection": "THE WRIGHT-FISHER MODEL"},
+                }
+            ]
+        }
+        table_payload = {
+            "tables": [
+                {
+                    "id": "inline_1",
+                    "label_format": "Table inline_1",
+                    "rows": [["x"]],
+                    "source": {"chapter": "chapter2", "unit_id": "chapter2_002", "subsection": "THE WRIGHT-FISHER MODEL"},
+                }
+            ]
+        }
+        example_payload = {
+            "examples": [
+                {
+                    "example_id": "2.1",
+                    "chapter": "chapter2",
+                    "label": "Example 2.1",
+                    "source_file": "chapter2_002.json",
+                    "content_plain": "Example content.",
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            structured_dir = Path(tmp) / "structured"
+            structured_dir.mkdir()
+            (structured_dir / "chapter2_002.json").write_text(json.dumps(chunk_payload, ensure_ascii=False), encoding="utf-8")
+            (structured_dir / "formula_library.json").write_text(json.dumps(formula_payload, ensure_ascii=False), encoding="utf-8")
+            (structured_dir / "table_library.json").write_text(json.dumps(table_payload, ensure_ascii=False), encoding="utf-8")
+            (structured_dir / "example_library.json").write_text(json.dumps(example_payload, ensure_ascii=False), encoding="utf-8")
+
+            with (
+                patch.object(sync_builders, "STRUCTURED_DIR", structured_dir),
+                patch.object(sync_builders, "TOC_EXPORT_DIR", Path("")),
+            ):
+                specs, _ = sync_builders._collect_specs(skip_semantic=True)
+
+        relation_keys = {
+            (relation["source_id"], relation["relation_type"], relation["target_id"])
+            for spec in specs
+            for relation in spec.relations
+        }
+        section_id = "section::chapter2::neutral_evolution_in_one_and_two_locus_systems_introduction__the_wright_fisher_model"
+        self.assertIn((section_id, "contains", "formula::chapter2::2.1"), relation_keys)
+        self.assertIn((section_id, "contains", "table::chapter2::inline_1"), relation_keys)
+        self.assertIn((section_id, "contains", "example::chapter2::2.1"), relation_keys)
+        self.assertNotIn(("chapter::chapter2", "contains", "formula::chapter2::2.1"), relation_keys)
+
+    def test_library_resources_stay_on_structured_sections_with_toc_export(self):
+        toc_payload = {
+            "metadata": {"source_title": "Test Book", "total_nodes": 2, "root_count": 1},
+            "root_nodes": ["toc_l0_0001"],
+            "nodes": {
+                "toc_l0_0001": {
+                    "id": "toc_l0_0001",
+                    "title": "II. EVOLUTION AT ONE AND TWO LOCI",
+                    "level": 0,
+                    "entry_type": "part",
+                    "page": 1,
+                    "parent_id": None,
+                    "children": ["toc_l1_0002"],
+                },
+                "toc_l1_0002": {
+                    "id": "toc_l1_0002",
+                    "title": "2. NEUTRAL EVOLUTION IN ONE- AND TWO-LOCUS SYSTEMS",
+                    "level": 1,
+                    "entry_type": "chapter",
+                    "page": 5,
+                    "parent_id": "toc_l0_0001",
+                    "children": [],
+                },
+            },
+        }
+        chunk_payload = {
+            "id": "chapter2_002",
+            "metadata": {
+                "chapter": "chapter2",
+                "section": "Neutral Evolution in One- and Two-Locus Systems: Introduction",
+                "heading_path": [
+                    "Neutral Evolution in One- and Two-Locus Systems: Introduction",
+                    "THE WRIGHT-FISHER MODEL",
+                ],
+            },
+            "blocks": [{"type": "discussion", "content": "Structured content."}],
+        }
+        formula_payload = {
+            "formulas": [
+                {
+                    "id": "2.1",
+                    "label_format": "(2.1)",
+                    "latex": "P_{ij}",
+                    "source": {"chapter": "chapter2", "unit_id": "chapter2_block_008", "subsection": "THE WRIGHT-FISHER MODEL"},
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            structured_dir = root / "structured"
+            export_dir = root / "目录树导出"
+            structured_dir.mkdir()
+            export_dir.mkdir()
+            (structured_dir / "chapter2_002.json").write_text(json.dumps(chunk_payload, ensure_ascii=False), encoding="utf-8")
+            (structured_dir / "formula_library.json").write_text(json.dumps(formula_payload, ensure_ascii=False), encoding="utf-8")
+            (export_dir / "1目录_toc_tree.json").write_text(json.dumps(toc_payload, ensure_ascii=False), encoding="utf-8")
+
+            with (
+                patch.object(sync_builders, "STRUCTURED_DIR", structured_dir),
+                patch.object(sync_builders, "TOC_EXPORT_DIR", export_dir),
+            ):
+                specs, _ = sync_builders._collect_specs(skip_semantic=True)
+
+        relation_keys = {
+            (relation["source_id"], relation["relation_type"], relation["target_id"])
+            for spec in specs
+            for relation in spec.relations
+        }
+        section_id = "section::chapter2::neutral_evolution_in_one_and_two_locus_systems_introduction__the_wright_fisher_model"
+        self.assertIn((section_id, "contains", "formula::chapter2::2.1"), relation_keys)
+        self.assertNotIn(("chapter::chapter2", "contains", "formula::chapter2::2.1"), relation_keys)
 
     def test_toc_mapped_chapter26_falls_back_to_canonical_chapter_for_weak_match(self):
         toc_payload = {
