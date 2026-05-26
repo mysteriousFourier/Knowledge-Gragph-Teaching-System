@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import gc
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,47 @@ LOW_MEMORY_PATCHED = patch_genie_tts_low_memory()
 app = FastAPI(title="KGTS Genie-TTS Proxy", version="1.0.0")
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _malloc_trim() -> None:
+    if sys.platform.startswith("linux"):
+        try:
+            import ctypes
+
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except Exception:
+            pass
+
+
+def _release_genie_models(character_name: str | None) -> None:
+    try:
+        if character_name:
+            genie_tts_service.unload_character(character_name)
+    except Exception as exc:
+        print(f"[genie-proxy] character unload skipped: {exc}", flush=True)
+    try:
+        genie_tts_service.clear_reference_audio_cache()
+    except Exception as exc:
+        print(f"[genie-proxy] reference cache clear skipped: {exc}", flush=True)
+    try:
+        from genie_tts.ModelManager import model_manager
+
+        model_manager.remove_all_character()
+        model_manager.cn_hubert = None
+        model_manager.speaker_verification_model = None
+        model_manager.roberta_model = None
+        model_manager.roberta_tokenizer = None
+    except Exception as exc:
+        print(f"[genie-proxy] model manager cleanup skipped: {exc}", flush=True)
+    gc.collect()
+    _malloc_trim()
+
+
 class LoadCharacterRequest(BaseModel):
     character_name: str | None = None
     predefined_character: str | None = None
@@ -82,6 +124,7 @@ def health() -> dict[str, Any]:
         "success": True,
         "service": "kgts-genie-tts-proxy",
         "low_memory_patch": LOW_MEMORY_PATCHED,
+        "unload_after_synthesis": _env_flag("KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH", False),
     }
 
 
@@ -90,6 +133,7 @@ def status() -> dict[str, Any]:
     payload = get_tts_status()
     payload["service"] = "kgts-genie-tts-proxy"
     payload["low_memory_patch"] = LOW_MEMORY_PATCHED
+    payload["unload_after_synthesis"] = _env_flag("KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH", False)
     return payload
 
 
@@ -144,6 +188,9 @@ def synthesize(payload: TtsRequest) -> FileResponse:
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        if _env_flag("KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH", False):
+            _release_genie_models(payload.character_name or settings.character_name or settings.predefined_character)
     elapsed = time.perf_counter() - started_at
     print(
         f"[genie-proxy] synthesize done chars={len(normalized.normalized_text)} "
