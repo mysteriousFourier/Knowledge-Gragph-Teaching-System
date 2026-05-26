@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sqlite3
 import sys
 import types
 from collections import Counter
@@ -25,7 +24,6 @@ VECTOR_DIR = BACKEND_DIR / "vector_index_system"
 GRAPH_ADMIN_HTML = VECTOR_DIR / "knowledge_graph" / "backend_admin.html"
 SEED_DIR = ROOT_DIR / "data" / "seed"
 SEED_CHAPTERS_FILE = SEED_DIR / "chapters.json"
-SEED_GRAPH_DB_FILE = SEED_DIR / "knowledge_graph.db"
 SEED_VECTOR_INDEX_DIR = SEED_DIR / "vector_index"
 
 
@@ -58,6 +56,7 @@ from backend.maintenance import api_server as maintenance_api  # noqa: E402
 from core.bridge import delete_generated_lecture_nodes, _is_generated_shell_chapter_node  # noqa: E402
 from education.tts_router import router as tts_router  # noqa: E402
 from core.path_policy import project_local_only  # noqa: E402
+from core.seed import ensure_seed_graph  # noqa: E402
 from core.tts_service import get_tts_status, run_tts_startup_cleanup  # noqa: E402
 
 
@@ -209,74 +208,6 @@ def _ensure_seed_chapters() -> None:
     print(f"[render] seed chapters installed: {len(seed_chapters) - len(empty_seed_ids)} chapter(s)")
 
 
-def _graph_node_count(db_path: Path) -> int:
-    if not db_path.exists():
-        return 0
-    try:
-        with sqlite3.connect(str(db_path)) as conn:
-            row = conn.execute("SELECT count(*) FROM nodes").fetchone()
-    except sqlite3.Error:
-        return 0
-    return int(row[0] if row else 0)
-
-
-def _graph_chapter_tree_health(db_path: Path) -> dict[str, int]:
-    if not db_path.exists():
-        return {"nodes": 0, "chapter_roots": 0, "contains": 0}
-    try:
-        with sqlite3.connect(str(db_path)) as conn:
-            nodes = int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
-            chapter_roots = int(
-                conn.execute(
-                    "SELECT COUNT(*) FROM nodes WHERE type = 'chapter' AND id LIKE 'chapter::chapter%'"
-                ).fetchone()[0]
-            )
-            contains = int(
-                conn.execute(
-                    "SELECT COUNT(*) FROM relationships WHERE type = 'contains'"
-                ).fetchone()[0]
-            )
-    except sqlite3.Error:
-        return {"nodes": 0, "chapter_roots": 0, "contains": 0}
-    return {"nodes": nodes, "chapter_roots": chapter_roots, "contains": contains}
-
-
-def _target_graph_needs_seed(seed_path: Path, target_path: Path) -> tuple[bool, dict[str, int], dict[str, int]]:
-    seed = _graph_chapter_tree_health(seed_path)
-    target = _graph_chapter_tree_health(target_path)
-    if seed["nodes"] <= 0:
-        return False, seed, target
-    if target["nodes"] < seed["nodes"]:
-        return True, seed, target
-    if target["chapter_roots"] < min(seed["chapter_roots"], 30):
-        return True, seed, target
-    if target["contains"] < max(1, int(seed["contains"] * 0.8)):
-        return True, seed, target
-    return False, seed, target
-
-
-def _ensure_seed_graph() -> None:
-    if not _env_flag("APP_BOOTSTRAP_SEED_DATA", True) or not SEED_GRAPH_DB_FILE.exists():
-        return
-
-    graph_db = _graph_db_path()
-    if not graph_db:
-        return
-
-    target_path = Path(graph_db)
-    needs_seed, seed_health, target_health = _target_graph_needs_seed(SEED_GRAPH_DB_FILE, target_path)
-    if not needs_seed:
-        return
-
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(SEED_GRAPH_DB_FILE, target_path)
-    print(
-        "[render] seed graph installed: "
-        f"nodes={seed_health['nodes']}, chapter_roots={seed_health['chapter_roots']}, "
-        f"contains={seed_health['contains']}, previous={target_health}"
-    )
-
-
 def _vector_index_dir() -> Path:
     configured = os.getenv("KGTS_VECTOR_INDEX_DIR")
     if configured:
@@ -304,7 +235,7 @@ def _ensure_seed_vector_index() -> None:
 
 def _ensure_seed_runtime() -> None:
     _ensure_seed_chapters()
-    _ensure_seed_graph()
+    ensure_seed_graph()
     _ensure_seed_vector_index()
     if not _run_startup_maintenance():
         print("[render] startup maintenance skipped")

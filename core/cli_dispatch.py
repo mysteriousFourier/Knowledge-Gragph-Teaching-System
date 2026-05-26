@@ -81,6 +81,7 @@ def dispatch_tool(name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
         return graph.list_nodes(
             limit=int(args.get("limit", 5000)),
             include_content=bool(args.get("include_content", False)),
+            node_types=args.get("node_types"),
         )
     if name == "list_relationships":
         return graph.list_relationships_by_type(

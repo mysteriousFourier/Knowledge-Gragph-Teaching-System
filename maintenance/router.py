@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from KGTS.models.graph import (
     AddNodeRequest,
@@ -180,9 +180,13 @@ async def get_graph():
 
 
 @router.get("/graph/nodes")
-async def list_graph_nodes(limit: int = 5000, include_content: bool = False):
+async def list_graph_nodes(
+    limit: int = 5000,
+    include_content: bool = False,
+    node_type: Optional[List[str]] = Query(default=None),
+):
     try:
-        data = await _list_nodes(limit=limit, include_content=include_content)
+        data = await _list_nodes(limit=limit, include_content=include_content, node_types=node_type)
         return success_response(data=data)
     except Exception as e:
         error_response(f"获取图谱节点失败: {e}")

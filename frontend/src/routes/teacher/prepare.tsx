@@ -99,6 +99,7 @@ const COURSEWARE_ACCEPT = ".ppt,.pptx,.tex,.md,.markdown,.txt,.rst,.csv,.json,.h
 const COURSEWARE_FORMAT_LABEL = "PPT/PPTX、TeX、Markdown、TXT、RST、CSV、JSON、HTML、RTF、DOCX、PDF、ZIP"
 const CANVAS_WIDTH = 1000
 const CANVAS_HEIGHT = 562.5
+const GRAPH_SCOPE_NODE_TYPES = ["part", "chapter", "appendix", "section"]
 
 function normalizeTexNewlines(value: string) {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
@@ -906,7 +907,7 @@ function TeacherPreparePage() {
   const generateSlideLectures = useGenerateSlideLectures()
   const saveChapter = useSaveChapter()
   const saveLecture = useSaveLecture()
-  const { data: nodesData, isLoading: nodesLoading } = useGraphNodes(20000)
+  const { data: nodesData, isLoading: nodesLoading } = useGraphNodes(5000, GRAPH_SCOPE_NODE_TYPES)
   const { data: relationshipsData, isLoading: relationshipsLoading } = useGraphRelationships(100000, "contains")
   const { data: pptNodeContext, isLoading: pptContextLoading } = useGraphNodeContext(pptNodeIds)
   const { data: lectureNodeContext, isLoading: lectureContextLoading } = useGraphNodeContext(lectureNodeIds)
@@ -916,18 +917,17 @@ function TeacherPreparePage() {
   const nodes = useMemo(() => nodesData?.nodes || [], [nodesData?.nodes])
   const relationships = useMemo(() => relationshipsData?.relationships || [], [relationshipsData?.relationships])
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
-  const parentByChild = useMemo(() => buildParentByChild(relationships), [relationships])
   const tree = useMemo(() => buildGraphScopeTree(nodes, relationships, treeSearch), [nodes, relationships, treeSearch])
+  const parentByChild = useMemo(() => buildParentByChild(tree), [tree])
   const defaultExpandedNodeIds = useMemo(() => {
-    if (!nodeById.has("toc::root")) return ["toc::root"]
+    const root = tree.find((node) => node.id === "toc::root")
+    if (!root) return ["toc::root"]
     const next = new Set(["toc::root"])
-    relationships.forEach((relation) => {
-      if ((relation.relation_type || relation.type) === "contains" && relation.source_id === "toc::root") {
-        next.add(relation.target_id)
-      }
+    root.children.forEach((node) => {
+      next.add(node.id)
     })
     return Array.from(next)
-  }, [nodeById, relationships])
+  }, [tree])
   const isGraphLoading = nodesLoading || relationshipsLoading
   const isGeneratingPpt = generatePptTex.isPending || previewPpt.isPending || previewTex.isPending
   const isGeneratingLectures = generateSlideLectures.isPending || generateUploadedPptLectures.isPending

@@ -85,15 +85,62 @@ def ensure_seed_chapters() -> None:
     print(f"[seed] chapters installed: {len(seed_chapters)} chapter(s)")
 
 
-def _graph_node_count(db_path: Path) -> int:
+def _graph_chapter_tree_health(db_path: Path) -> dict[str, int]:
     if not db_path.exists():
-        return 0
+        return {"nodes": 0, "chapter_roots": 0, "contains": 0, "toc_root": 0}
     try:
         with sqlite3.connect(str(db_path)) as conn:
-            row = conn.execute("SELECT count(*) FROM nodes").fetchone()
+            nodes = int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
+            chapter_roots = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM nodes WHERE type = 'chapter' AND id LIKE 'chapter::chapter%'"
+                ).fetchone()[0]
+            )
+            contains = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM relationships WHERE type = 'contains'"
+                ).fetchone()[0]
+            )
+            toc_root = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM nodes WHERE id = 'toc::root'"
+                ).fetchone()[0]
+            )
     except sqlite3.Error:
-        return 0
-    return int(row[0] if row else 0)
+        return {"nodes": 0, "chapter_roots": 0, "contains": 0, "toc_root": 0}
+    return {"nodes": nodes, "chapter_roots": chapter_roots, "contains": contains, "toc_root": toc_root}
+
+
+def _target_graph_needs_seed(seed_path: Path, target_path: Path) -> tuple[bool, dict[str, int], dict[str, int]]:
+    seed = _graph_chapter_tree_health(seed_path)
+    target = _graph_chapter_tree_health(target_path)
+    if seed["nodes"] <= 0:
+        return False, seed, target
+    if target["nodes"] < seed["nodes"]:
+        return True, seed, target
+    if seed["toc_root"] and not target["toc_root"]:
+        return True, seed, target
+    if target["chapter_roots"] < min(seed["chapter_roots"], 30):
+        return True, seed, target
+    if target["contains"] < max(1, int(seed["contains"] * 0.8)):
+        return True, seed, target
+    return False, seed, target
+
+
+def _merge_seed_graph(seed_path: Path, target_path: Path) -> None:
+    with sqlite3.connect(str(seed_path)) as seed_conn, sqlite3.connect(str(target_path)) as target_conn:
+        for table in ("nodes", "relationships"):
+            columns = [row[1] for row in seed_conn.execute(f"PRAGMA table_info({table})").fetchall()]
+            if not columns:
+                continue
+            column_sql = ", ".join(columns)
+            placeholders = ", ".join("?" for _ in columns)
+            rows = seed_conn.execute(f"SELECT {column_sql} FROM {table}").fetchall()
+            target_conn.executemany(
+                f"INSERT OR IGNORE INTO {table} ({column_sql}) VALUES ({placeholders})",
+                rows,
+            )
+        target_conn.commit()
 
 
 def ensure_seed_graph() -> None:
@@ -106,14 +153,22 @@ def ensure_seed_graph() -> None:
         return
 
     target_path = Path(graph_db)
-    seed_nodes = _graph_node_count(SEED_GRAPH_DB_FILE)
-    target_nodes = _graph_node_count(target_path)
-    if seed_nodes <= 0 or target_nodes >= seed_nodes:
+    needs_seed, seed_health, target_health = _target_graph_needs_seed(SEED_GRAPH_DB_FILE, target_path)
+    if not needs_seed:
         return
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(SEED_GRAPH_DB_FILE, target_path)
-    print(f"[seed] graph installed: nodes={seed_nodes}, previous_nodes={target_nodes}")
+    if not target_path.exists() or target_health["nodes"] <= 0:
+        shutil.copy2(SEED_GRAPH_DB_FILE, target_path)
+        action = "installed"
+    else:
+        _merge_seed_graph(SEED_GRAPH_DB_FILE, target_path)
+        action = "merged"
+    print(
+        "[seed] graph "
+        f"{action}: nodes={seed_health['nodes']}, chapter_roots={seed_health['chapter_roots']}, "
+        f"contains={seed_health['contains']}, previous={target_health}"
+    )
 
 
 def ensure_seed_runtime() -> None:

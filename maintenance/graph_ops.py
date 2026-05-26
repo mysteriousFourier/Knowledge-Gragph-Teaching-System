@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from KGTS.core.mcp_client import call_mcp_tool
+from KGTS.core.seed import ensure_seed_graph
 from KGTS.core.bridge import (
     build_frontend_graph,
     call_backend_tool,
@@ -89,13 +90,19 @@ async def get_node(node_id: str) -> Dict[str, Any]:
 
 
 async def get_graph() -> Dict[str, Any]:
+    ensure_seed_graph()
     return build_frontend_graph()
 
 
-async def list_nodes(limit: int = 5000, include_content: bool = False) -> Dict[str, Any]:
+async def list_nodes(
+    limit: int = 5000,
+    include_content: bool = False,
+    node_types: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    ensure_seed_graph()
     result = call_backend_tool(
         "list_nodes",
-        {"limit": limit, "include_content": include_content},
+        {"limit": limit, "include_content": include_content, "node_types": node_types},
     )
     nodes = result if isinstance(result, list) else []
     return {"nodes": [normalize_frontend_node(node) for node in nodes if isinstance(node, dict)], "count": len(nodes)}
@@ -106,6 +113,7 @@ async def list_relationships(
     relation_type: Optional[str] = None,
     include_metadata: bool = False,
 ) -> Dict[str, Any]:
+    ensure_seed_graph()
     result = call_backend_tool(
         "list_relationships",
         {

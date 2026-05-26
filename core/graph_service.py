@@ -399,29 +399,41 @@ class GraphService:
             "target_node": row["target_node"],
         }
 
-    def _fetch_node_rows(self, node_type: Optional[str] = None, limit: Optional[int] = 1000) -> List[sqlite3.Row]:
+    def _fetch_node_rows(
+        self,
+        node_type: Optional[str] = None,
+        node_types: Optional[Iterable[str]] = None,
+        limit: Optional[int] = 1000,
+    ) -> List[sqlite3.Row]:
+        if isinstance(node_types, str):
+            normalized_types = [item.strip() for item in node_types.split(",") if item.strip()]
+        else:
+            normalized_types = [str(item).strip() for item in (node_types or []) if str(item).strip()]
+        if node_type:
+            normalized_types = [node_type]
         with self._connection() as conn:
-            if node_type:
+            if normalized_types:
+                placeholders = ", ".join("?" for _ in normalized_types)
                 if limit is None:
                     rows = conn.execute(
-                        """
+                        f"""
                         SELECT id, label, type, content, metadata_json, source, confidence, created_at, updated_at, reviewed
                         FROM nodes
-                        WHERE type = ?
+                        WHERE type IN ({placeholders})
                         ORDER BY updated_at DESC, created_at DESC
                         """,
-                        (node_type,),
+                        normalized_types,
                     ).fetchall()
                 else:
                     rows = conn.execute(
-                        """
+                        f"""
                         SELECT id, label, type, content, metadata_json, source, confidence, created_at, updated_at, reviewed
                         FROM nodes
-                        WHERE type = ?
+                        WHERE type IN ({placeholders})
                         ORDER BY updated_at DESC, created_at DESC
                         LIMIT ?
                         """,
-                        (node_type, limit),
+                        normalized_types + [limit],
                     ).fetchall()
             else:
                 if limit is None:
@@ -490,9 +502,14 @@ class GraphService:
             "vector_stats": self._vector_stats(),
         }
 
-    def list_nodes(self, limit: int = 5000, include_content: bool = False) -> List[Dict[str, Any]]:
+    def list_nodes(
+        self,
+        limit: int = 5000,
+        include_content: bool = False,
+        node_types: Optional[Iterable[str]] = None,
+    ) -> List[Dict[str, Any]]:
         results: List[Dict[str, Any]] = []
-        for row in self._fetch_node_rows(limit=limit):
+        for row in self._fetch_node_rows(limit=limit, node_types=node_types):
             content = row["content"] or row["label"]
             metadata = _merge_metadata(
                 row,

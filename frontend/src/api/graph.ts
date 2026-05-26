@@ -124,12 +124,15 @@ const isLectureNode = (node: GraphNode) => {
 const getGraph = () =>
   maintenanceClient.get<ApiResponse<GraphData>>("/api/maintenance/graph").then((response) => response.data)
 
-const getGraphNodes = (limit: number) =>
-  maintenanceClient
+const getGraphNodes = (limit: number, nodeTypes?: string[]) => {
+  const params = new URLSearchParams({ limit: String(limit) })
+  ;(nodeTypes || []).forEach((nodeType) => params.append("node_type", nodeType))
+  return maintenanceClient
     .get<ApiResponse<{ nodes: GraphNode[]; count: number }>>(
-      `/api/maintenance/graph/nodes?limit=${encodeURIComponent(limit)}`,
+      `/api/maintenance/graph/nodes?${params.toString()}`,
     )
     .then((response) => response.data)
+}
 
 const getGraphRelationships = (limit: number, relationType?: string) => {
   const params = new URLSearchParams({ limit: String(limit) })
@@ -148,11 +151,11 @@ export const useGraphData = () => {
   })
 }
 
-export const useGraphNodes = (limit = 5000) => {
+export const useGraphNodes = (limit = 5000, nodeTypes?: string[]) => {
   return useQuery({
-    queryKey: ["graph-nodes", limit],
+    queryKey: ["graph-nodes", limit, nodeTypes?.join(",") || "all"],
     queryFn: async () => {
-      const payload = await getGraphNodes(limit)
+      const payload = await getGraphNodes(limit, nodeTypes)
       const nodes = (payload.data?.nodes || []).map(normalizeNode).filter((node) => !isLectureNode(node))
       return { success: payload.success, nodes, count: payload.data?.count ?? nodes.length }
     },
