@@ -113,14 +113,6 @@ const normalizeRelation = (relation: GraphRelation): GraphRelation => {
   }
 }
 
-const graphRelations = (graph?: GraphData): GraphRelation[] => {
-  const relations = graph?.relations
-  if (Array.isArray(relations) && relations.length) return relations
-  const edges = graph?.edges
-  if (Array.isArray(edges)) return edges
-  return []
-}
-
 const isLectureNode = (node: GraphNode) => {
   const metadata = node.metadata || {}
   const label = String(node.label || metadata.label || "")
@@ -131,6 +123,23 @@ const isLectureNode = (node: GraphNode) => {
 
 const getGraph = () =>
   maintenanceClient.get<ApiResponse<GraphData>>("/api/maintenance/graph").then((response) => response.data)
+
+const getGraphNodes = (limit: number) =>
+  maintenanceClient
+    .get<ApiResponse<{ nodes: GraphNode[]; count: number }>>(
+      `/api/maintenance/graph/nodes?limit=${encodeURIComponent(limit)}`,
+    )
+    .then((response) => response.data)
+
+const getGraphRelationships = (limit: number, relationType?: string) => {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (relationType) params.set("relation_type", relationType)
+  return maintenanceClient
+    .get<ApiResponse<{ relationships: GraphRelation[]; count: number }>>(
+      `/api/maintenance/graph/relationships?${params.toString()}`,
+    )
+    .then((response) => response.data)
+}
 
 export const useGraphData = () => {
   return useQuery({
@@ -143,30 +152,29 @@ export const useGraphNodes = (limit = 5000) => {
   return useQuery({
     queryKey: ["graph-nodes", limit],
     queryFn: async () => {
-      const graph = await getGraph()
-      const nodes = (graph.data?.nodes || []).map(normalizeNode).filter((node) => !isLectureNode(node))
-      return { success: graph.success, nodes: nodes.slice(0, limit), count: nodes.length }
+      const payload = await getGraphNodes(limit)
+      const nodes = (payload.data?.nodes || []).map(normalizeNode).filter((node) => !isLectureNode(node))
+      return { success: payload.success, nodes, count: payload.data?.count ?? nodes.length }
     },
   })
 }
 
-export const useGraphRelationships = (limit = 10000) => {
+export const useGraphRelationships = (limit = 10000, relationType?: string) => {
   return useQuery({
-    queryKey: ["graph-relationships", limit],
+    queryKey: ["graph-relationships", limit, relationType || "all"],
     queryFn: async () => {
-      const graph = await getGraph()
-      const visibleNodeIds = new Set((graph.data?.nodes || []).map(normalizeNode).filter((node) => !isLectureNode(node)).map((node) => node.id))
-      const normalizedRelations = graphRelations(graph.data).map(normalizeRelation)
+      const payload = await getGraphRelationships(limit, relationType)
+      const normalizedRelations = (payload.data?.relationships || []).map(normalizeRelation)
       const completeEndpointRelations = normalizedRelations.filter((relation) => relation.source_id && relation.target_id)
-      const relations = completeEndpointRelations.filter((relation) => visibleNodeIds.has(relation.source_id) && visibleNodeIds.has(relation.target_id))
+      const relations = completeEndpointRelations
       const relationships = relations.slice(0, limit)
       return {
-        success: graph.success,
+        success: payload.success,
         relationships,
         count: relations.length,
         rawCount: normalizedRelations.length,
         missingEndpointCount: normalizedRelations.length - completeEndpointRelations.length,
-        missingNodeCount: completeEndpointRelations.length - relations.length,
+        missingNodeCount: 0,
       }
     },
   })
@@ -207,20 +215,11 @@ export const useGraphStats = () => {
   return useQuery({
     queryKey: ["graph-stats"],
     queryFn: async () => {
-      const graph = await getGraph()
-      const nodes = (graph.data?.nodes || []).map(normalizeNode).filter((node) => !isLectureNode(node))
-      const visibleNodeIds = new Set(nodes.map((node) => node.id))
-      const relations = graphRelations(graph.data)
-        .map(normalizeRelation)
-        .filter((relation) => visibleNodeIds.has(relation.source_id) && visibleNodeIds.has(relation.target_id))
-      return {
-        success: graph.success,
-        data: {
-          total_nodes: nodes.length,
-          total_relationships: relations.length,
-          details: graph.data?.stats || {},
-        },
-      }
+      return maintenanceClient
+        .get<ApiResponse<{ total_nodes: number; total_relationships: number; details?: unknown }> & {
+          data?: { total_nodes: number; total_relationships: number; details?: unknown }
+        }>("/api/maintenance/stats")
+        .then((response) => response.data)
     },
   })
 }

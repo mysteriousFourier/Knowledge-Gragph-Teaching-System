@@ -8,6 +8,8 @@ from KGTS.core.bridge import call_backend_tool
 
 TOOL_NAMES = [
     "read_graph",
+    "list_nodes",
+    "list_relationships",
     "get_node",
     "get_relations",
     "get_graph_schema",

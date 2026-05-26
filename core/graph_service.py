@@ -68,6 +68,32 @@ PRESET_RELATION_TYPES = {
     "related",
 }
 
+LIST_NODE_METADATA_KEYS = {
+    "label",
+    "source",
+    "source_file",
+    "confidence",
+    "reviewed",
+    "chapter",
+    "source_unit",
+    "block_index",
+    "toc_page",
+    "toc_level",
+    "toc_node_id",
+    "book_part_id",
+    "part_number",
+    "chapter_number",
+    "role",
+    "outline_source",
+}
+
+LIST_RELATION_METADATA_KEYS = {
+    "description",
+    "source",
+    "source_file",
+    "reviewed",
+}
+
 RELATION_TYPE_ALIASES = {
     "belongsto": "contains",
     "belongs_to": "contains",
@@ -188,6 +214,14 @@ def _merge_metadata(row: sqlite3.Row | Dict[str, Any], base: Dict[str, Any]) -> 
         metadata = _safe_json(row["metadata_json"])
     metadata.update(base)
     return metadata
+
+
+def _compact_metadata(metadata: Dict[str, Any], allowed_keys: Set[str]) -> Dict[str, Any]:
+    return {
+        key: metadata[key]
+        for key in allowed_keys
+        if key in metadata and metadata[key] is not None
+    }
 
 
 def _score_text(query: str, text: str) -> float:
@@ -455,6 +489,110 @@ class GraphService:
             },
             "vector_stats": self._vector_stats(),
         }
+
+    def list_nodes(self, limit: int = 5000, include_content: bool = False) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        for row in self._fetch_node_rows(limit=limit):
+            content = row["content"] or row["label"]
+            metadata = _merge_metadata(
+                row,
+                {
+                    "label": row["label"],
+                    "source": row["source"],
+                    "confidence": row["confidence"],
+                    "reviewed": bool(row["reviewed"]),
+                },
+            )
+            item = {
+                "id": row["id"],
+                "label": row["label"],
+                "type": row["type"],
+                "source": row["source"],
+                "confidence": row["confidence"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "reviewed": bool(row["reviewed"]),
+                "metadata": _compact_metadata(metadata, LIST_NODE_METADATA_KEYS),
+            }
+            if include_content:
+                item["content"] = content
+            results.append(item)
+        return results
+
+    def list_relationships(self, limit: int = 10000, include_metadata: bool = False) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        for row in self._fetch_relation_rows(limit=limit):
+            metadata = _merge_metadata(
+                row,
+                {
+                    "description": row["description"] or "",
+                    "source": row["source"],
+                    "reviewed": bool(row["reviewed"]),
+                },
+            )
+            results.append(
+                {
+                    "id": row["id"],
+                    "source_node": row["source_node"],
+                    "target_node": row["target_node"],
+                    "source_id": row["source_node"],
+                    "target_id": row["target_node"],
+                    "source": row["source_node"],
+                    "target": row["target_node"],
+                    "type": row["type"],
+                    "relation_type": row["type"],
+                    "strength": row["strength"],
+                    "similarity": row["strength"],
+                    "description": row["description"] or "",
+                    "source_file": row["source"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "reviewed": bool(row["reviewed"]),
+                    "metadata": _compact_metadata(metadata, LIST_RELATION_METADATA_KEYS) if include_metadata else {},
+                }
+            )
+        return results
+
+    def list_relationships_by_type(
+        self,
+        relation_type: Optional[str] = None,
+        limit: int = 10000,
+        include_metadata: bool = False,
+    ) -> List[Dict[str, Any]]:
+        if not relation_type:
+            return self.list_relationships(limit=limit, include_metadata=include_metadata)
+        results: List[Dict[str, Any]] = []
+        for row in self._fetch_relation_rows(relation_type=relation_type, limit=limit):
+            metadata = _merge_metadata(
+                row,
+                {
+                    "description": row["description"] or "",
+                    "source": row["source"],
+                    "reviewed": bool(row["reviewed"]),
+                },
+            )
+            results.append(
+                {
+                    "id": row["id"],
+                    "source_node": row["source_node"],
+                    "target_node": row["target_node"],
+                    "source_id": row["source_node"],
+                    "target_id": row["target_node"],
+                    "source": row["source_node"],
+                    "target": row["target_node"],
+                    "type": row["type"],
+                    "relation_type": row["type"],
+                    "strength": row["strength"],
+                    "similarity": row["strength"],
+                    "description": row["description"] or "",
+                    "source_file": row["source"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "reviewed": bool(row["reviewed"]),
+                    "metadata": _compact_metadata(metadata, LIST_RELATION_METADATA_KEYS) if include_metadata else {},
+                }
+            )
+        return results
 
     def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         with self._connection() as conn:

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from KGTS.core.mcp_client import call_mcp_tool
 from KGTS.core.bridge import (
     build_frontend_graph,
+    call_backend_tool,
     get_graph_schema,
     normalize_frontend_node,
     normalize_frontend_relation,
@@ -89,6 +90,39 @@ async def get_node(node_id: str) -> Dict[str, Any]:
 
 async def get_graph() -> Dict[str, Any]:
     return build_frontend_graph()
+
+
+async def list_nodes(limit: int = 5000, include_content: bool = False) -> Dict[str, Any]:
+    result = call_backend_tool(
+        "list_nodes",
+        {"limit": limit, "include_content": include_content},
+    )
+    nodes = result if isinstance(result, list) else []
+    return {"nodes": [normalize_frontend_node(node) for node in nodes if isinstance(node, dict)], "count": len(nodes)}
+
+
+async def list_relationships(
+    limit: int = 10000,
+    relation_type: Optional[str] = None,
+    include_metadata: bool = False,
+) -> Dict[str, Any]:
+    result = call_backend_tool(
+        "list_relationships",
+        {
+            "limit": limit,
+            "relation_type": relation_type,
+            "include_metadata": include_metadata,
+        },
+    )
+    relationships = result if isinstance(result, list) else []
+    return {
+        "relationships": [
+            normalize_frontend_relation(relation)
+            for relation in relationships
+            if isinstance(relation, dict)
+        ],
+        "count": len(relationships),
+    }
 
 
 async def get_relations(

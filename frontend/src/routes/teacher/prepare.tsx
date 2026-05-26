@@ -903,7 +903,7 @@ function TeacherPreparePage() {
   const saveChapter = useSaveChapter()
   const saveLecture = useSaveLecture()
   const { data: nodesData, isLoading: nodesLoading } = useGraphNodes(20000)
-  const { data: relationshipsData, isLoading: relationshipsLoading } = useGraphRelationships(100000)
+  const { data: relationshipsData, isLoading: relationshipsLoading } = useGraphRelationships(100000, "contains")
   const { data: pptNodeContext, isLoading: pptContextLoading } = useGraphNodeContext(pptNodeIds)
   const { data: lectureNodeContext, isLoading: lectureContextLoading } = useGraphNodeContext(lectureNodeIds)
 

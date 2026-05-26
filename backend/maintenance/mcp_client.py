@@ -16,6 +16,8 @@ from vector_backend_bridge import call_backend_tool  # type: ignore  # noqa: E40
 
 TOOL_NAMES = [
     "read_graph",
+    "list_nodes",
+    "list_relationships",
     "get_node",
     "get_relations",
     "get_graph_schema",

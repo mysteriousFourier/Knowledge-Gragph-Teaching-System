@@ -77,6 +77,17 @@ def dispatch_tool(name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
 
     if name == "read_graph":
         return graph.read_graph()
+    if name == "list_nodes":
+        return graph.list_nodes(
+            limit=int(args.get("limit", 5000)),
+            include_content=bool(args.get("include_content", False)),
+        )
+    if name == "list_relationships":
+        return graph.list_relationships_by_type(
+            relation_type=args.get("relation_type"),
+            limit=int(args.get("limit", 10000)),
+            include_metadata=bool(args.get("include_metadata", False)),
+        )
     if name == "get_node":
         return graph.get_node(args["node_id"]) or {}
     if name == "search_nodes":

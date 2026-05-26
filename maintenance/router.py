@@ -35,6 +35,8 @@ from KGTS.maintenance.graph_ops import (
     update_relation as _update_relation,
     get_node as _get_node,
     get_graph as _get_graph,
+    list_nodes as _list_nodes,
+    list_relationships as _list_relationships,
     get_relations as _get_relations,
     get_schema as _get_schema,
     search_nodes as _search_nodes,
@@ -175,6 +177,49 @@ async def get_graph():
         return success_response(data=data)
     except Exception as e:
         error_response(f"获取知识图谱失败: {e}")
+
+
+@router.get("/graph/nodes")
+async def list_graph_nodes(limit: int = 5000, include_content: bool = False):
+    try:
+        data = await _list_nodes(limit=limit, include_content=include_content)
+        return success_response(data=data)
+    except Exception as e:
+        error_response(f"获取图谱节点失败: {e}")
+
+
+@router.get("/graph/relationships")
+async def list_graph_relationships(
+    limit: int = 10000,
+    relation_type: Optional[str] = None,
+    include_metadata: bool = False,
+):
+    try:
+        data = await _list_relationships(
+            limit=limit,
+            relation_type=relation_type,
+            include_metadata=include_metadata,
+        )
+        return success_response(data=data)
+    except Exception as e:
+        error_response(f"获取图谱关系失败: {e}")
+
+
+@router.get("/stats")
+async def get_graph_stats():
+    try:
+        from KGTS.core.bridge import call_backend_tool
+
+        stats = call_backend_tool("get_graph_statistics")
+        return success_response(
+            data={
+                "total_nodes": (stats.get("nodes") or {}).get("total", 0),
+                "total_relationships": (stats.get("relations") or {}).get("total", 0),
+                "details": stats,
+            }
+        )
+    except Exception as e:
+        error_response(f"获取图谱统计失败: {e}")
 
 
 @router.post("/import-graph")
