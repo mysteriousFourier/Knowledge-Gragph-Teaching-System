@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from KGTS.core.mcp_client import call_mcp_tool
@@ -218,6 +219,232 @@ async def get_scope_tree() -> Dict[str, Any]:
         "relationships": relationships,
         "count": len(nodes),
         "relationship_count": len(relationships),
+    }
+
+
+def _node_metadata_subset(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    keys = {
+        "label",
+        "source",
+        "source_file",
+        "chapter",
+        "source_unit",
+        "block_index",
+        "toc_page",
+        "toc_level",
+        "toc_node_id",
+        "toc_entry_type",
+        "heading_depth",
+        "book_part_id",
+        "chapter_number",
+        "role",
+    }
+    return {key: value for key, value in metadata.items() if key in keys and value is not None}
+
+
+def _visualization_node(item: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = item.get("metadata") or {}
+    label = item.get("label") or metadata.get("label") or item.get("id") or ""
+    content = str(item.get("content") or "")
+    return {
+        "id": str(item.get("id") or ""),
+        "label": label,
+        "type": item.get("type") or "concept",
+        "content": content[:800],
+        "source": item.get("source") or metadata.get("source"),
+        "confidence": item.get("confidence", metadata.get("confidence", 1.0)),
+        "reviewed": bool(item.get("reviewed") or metadata.get("reviewed")),
+        "metadata": _node_metadata_subset(metadata),
+    }
+
+
+def _visualization_relation(relation: Dict[str, Any]) -> Dict[str, Any]:
+    source_id = str(relation.get("source_id") or relation.get("source_node") or relation.get("source") or "")
+    target_id = str(relation.get("target_id") or relation.get("target_node") or relation.get("target") or "")
+    relation_type = str(relation.get("relation_type") or relation.get("type") or "related")
+    description = str(relation.get("description") or "")
+    return {
+        "id": str(relation.get("id") or f"{source_id}->{relation_type}->{target_id}"),
+        "source_id": source_id,
+        "target_id": target_id,
+        "relation_type": relation_type,
+        "similarity": relation.get("similarity", relation.get("strength", 1.0)),
+        "description": description[:240],
+        "reviewed": bool(relation.get("reviewed")),
+        "metadata": {},
+    }
+
+
+def _visualization_relation_priority(
+    relation: Dict[str, Any],
+    node_by_id: Dict[str, Dict[str, Any]],
+    degree: Counter[str],
+) -> int:
+    relation_type = str(relation.get("relation_type") or relation.get("type") or "related")
+    type_weight = {
+        "precedes": 9000,
+        "references_formula": 8400,
+        "references_table": 8200,
+        "references_figure": 8100,
+        "references_example": 8000,
+        "derives": 7600,
+        "defines": 7000,
+        "explains": 6200,
+        "depends_on": 5800,
+        "example_of": 5200,
+        "supports": 4600,
+        "causes": 4400,
+        "contrasts_with": 3600,
+        "related": 2200,
+        "contains": 1200,
+    }.get(relation_type, 2400)
+    source_id = str(relation.get("source_id") or "")
+    target_id = str(relation.get("target_id") or "")
+    source_type = str((node_by_id.get(source_id) or {}).get("type") or "")
+    target_type = str((node_by_id.get(target_id) or {}).get("type") or "")
+    endpoint_weight = 0
+    if source_type in {"chapter", "appendix", "part"}:
+        endpoint_weight += 140
+    if target_type in {"chapter", "appendix", "part"}:
+        endpoint_weight += 140
+    if source_type in {"formula", "theorem", "table", "example"}:
+        endpoint_weight += 220
+    if target_type in {"formula", "theorem", "table", "example"}:
+        endpoint_weight += 220
+    return type_weight + endpoint_weight + (degree[source_id] + degree[target_id]) * 3
+
+
+async def get_visualization_graph(
+    node_limit: int = 1500,
+    relationship_limit: int = 5000,
+) -> Dict[str, Any]:
+    ensure_seed_graph()
+    graph = GraphService()
+    node_limit = max(10, min(int(node_limit or 1500), 3000))
+    relationship_limit = max(20, min(int(relationship_limit or 5000), 12000))
+
+    raw_nodes = graph.list_nodes(limit=20000, include_content=False)
+    raw_relations = graph.list_relationships(limit=50000, include_metadata=False)
+    node_by_id = {str(node.get("id") or ""): node for node in raw_nodes if node.get("id")}
+
+    valid_relations = []
+    degree: Counter[str] = Counter()
+    type_counts: Counter[str] = Counter()
+    for relation in raw_relations:
+        normalized = _visualization_relation(relation)
+        source_id = normalized["source_id"]
+        target_id = normalized["target_id"]
+        if not source_id or not target_id or source_id not in node_by_id or target_id not in node_by_id:
+            continue
+        valid_relations.append(normalized)
+        degree[source_id] += 1
+        degree[target_id] += 1
+        type_counts[normalized["relation_type"]] += 1
+
+    selected_node_ids: set[str] = set()
+    for node in raw_nodes:
+        node_id = str(node.get("id") or "")
+        node_type = str(node.get("type") or "")
+        metadata = node.get("metadata") or {}
+        if (
+            node_id == "toc::root"
+            or node_id.startswith("toc::")
+            or node_type in {"part", "chapter", "appendix"}
+            or metadata.get("role") == "chapter_root"
+        ):
+            selected_node_ids.add(node_id)
+
+    relation_type_quotas = {
+        "precedes": 1600,
+        "references_formula": 900,
+        "references_table": 500,
+        "references_figure": 400,
+        "references_example": 400,
+        "derives": 700,
+        "defines": 600,
+        "explains": 600,
+        "depends_on": 600,
+        "example_of": 500,
+        "supports": 400,
+        "causes": 260,
+        "contrasts_with": 240,
+        "related": 600,
+        "contains": 2200,
+    }
+    selected_relations: list[Dict[str, Any]] = []
+    selected_relation_keys: set[tuple[str, str, str]] = set()
+    for relation_type, quota in relation_type_quotas.items():
+        candidates = [
+            relation
+            for relation in valid_relations
+            if relation["relation_type"] == relation_type
+        ]
+        candidates.sort(key=lambda item: _visualization_relation_priority(item, node_by_id, degree), reverse=True)
+        for relation in candidates[:quota]:
+            key = (relation["source_id"], relation["relation_type"], relation["target_id"])
+            if key in selected_relation_keys:
+                continue
+            selected_relation_keys.add(key)
+            selected_relations.append(relation)
+            selected_node_ids.add(relation["source_id"])
+            selected_node_ids.add(relation["target_id"])
+
+    if len(selected_node_ids) > node_limit:
+        required_ids = {
+            node_id
+            for node_id in selected_node_ids
+            if node_id == "toc::root"
+            or node_id.startswith("toc::")
+            or str((node_by_id.get(node_id) or {}).get("type") or "") in {"part", "chapter", "appendix"}
+        }
+        ranked_ids = sorted(
+            selected_node_ids - required_ids,
+            key=lambda node_id: (
+                degree[node_id],
+                str((node_by_id.get(node_id) or {}).get("type") or ""),
+                node_id,
+            ),
+            reverse=True,
+        )
+        selected_node_ids = set(list(required_ids) + ranked_ids[: max(0, node_limit - len(required_ids))])
+
+    selected_relations = [
+        relation
+        for relation in selected_relations
+        if relation["source_id"] in selected_node_ids and relation["target_id"] in selected_node_ids
+    ]
+    selected_relations.sort(key=lambda item: _visualization_relation_priority(item, node_by_id, degree), reverse=True)
+    selected_relations = selected_relations[:relationship_limit]
+
+    nodes = [
+        _visualization_node(node_by_id[node_id])
+        for node_id in selected_node_ids
+        if node_id in node_by_id
+    ]
+    nodes.sort(
+        key=lambda node: (
+            0 if node["id"] == "toc::root" else 1,
+            str(node.get("type") or ""),
+            str((node.get("metadata") or {}).get("chapter") or ""),
+            str(node.get("label") or node.get("id") or ""),
+        )
+    )
+
+    return {
+        "nodes": nodes,
+        "relationships": selected_relations,
+        "relations": selected_relations,
+        "edges": selected_relations,
+        "count": len(nodes),
+        "relationship_count": len(selected_relations),
+        "stats": {
+            "node_count": len(raw_nodes),
+            "relation_count": len(valid_relations),
+            "returned_node_count": len(nodes),
+            "returned_relation_count": len(selected_relations),
+            "truncated": len(raw_nodes) > len(nodes) or len(valid_relations) > len(selected_relations),
+            "relation_type_counts": dict(sorted(type_counts.items())),
+        },
     }
 
 

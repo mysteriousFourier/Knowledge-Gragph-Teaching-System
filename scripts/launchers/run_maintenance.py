@@ -13,13 +13,14 @@ import uvicorn
 from fastapi import FastAPI
 
 from KGTS.config import DEFAULT_MAINTENANCE_API_PORT, get_bind_host, get_env_int, load_root_env
-from KGTS.middleware import setup_cors
+from KGTS.middleware import setup_cors, setup_gzip
 from KGTS.maintenance.router import router as maintenance_router
 
 load_root_env()
 
 app = FastAPI(title="KGTS Maintenance API", version="2.0.0")
 setup_cors(app)
+setup_gzip(app)
 
 app.include_router(maintenance_router)
 

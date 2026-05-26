@@ -18,7 +18,7 @@ import {
   Sparkles,
   Waypoints,
 } from "lucide-react"
-import { useGraphNodes, useGraphRelations, useGraphRelationships, useGraphStats } from "@/api/graph"
+import { useGraphRelations, useGraphStats, useGraphVisualization } from "@/api/graph"
 import { useUpdateNode } from "@/api/maintenance"
 import { EmptyState } from "@/components/common/EmptyState"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
@@ -119,10 +119,8 @@ const EDGE_ROUTE_LANE_GAP = 34
 const EDGE_ROUTE_CORRIDOR_PADDING = 360
 const EDGE_ROUTE_OBSTACLE_LIMIT = 64
 const EDGE_PORT_SPACING = 18
-const LIMITED_NODE_FETCH_LIMIT = 5000
-const LIMITED_RELATION_FETCH_LIMIT = 50000
-const ALL_NODE_FETCH_LIMIT = 10000
-const ALL_RELATION_FETCH_LIMIT = 50000
+const GRAPH_VISUALIZATION_NODE_LIMIT = 1200
+const GRAPH_VISUALIZATION_RELATION_LIMIT = 5000
 const STRUCTURAL_RELATION_TYPES = new Set(["contains"])
 const PATH_RELATION_TYPES = new Set(["precedes"])
 const FORMULA_RELATION_TYPES = new Set(["references_formula", "references_table", "references_figure", "references_example"])
@@ -163,23 +161,24 @@ function GraphPage() {
   const [layoutStatus, setLayoutStatus] = useState("")
   const [editMessage, setEditMessage] = useState("")
 
-  const showAllNodes = viewMode === "overview" || viewMode === "chapterPath"
-  const { data: nodesData, isLoading: nodesLoading } = useGraphNodes(showAllNodes ? ALL_NODE_FETCH_LIMIT : LIMITED_NODE_FETCH_LIMIT)
-  const { data: relationshipsData, isLoading: relationshipsLoading } = useGraphRelationships(showAllNodes ? ALL_RELATION_FETCH_LIMIT : LIMITED_RELATION_FETCH_LIMIT)
+  const { data: graphVisualizationData, isLoading: graphVisualizationLoading } = useGraphVisualization(
+    GRAPH_VISUALIZATION_NODE_LIMIT,
+    GRAPH_VISUALIZATION_RELATION_LIMIT,
+  )
   const { data: selectedRelationsData } = useGraphRelations(selectedNodeId || "")
   const { data: statsData } = useGraphStats()
   const updateNode = useUpdateNode()
 
-  const rawNodes = useMemo(() => nodesData?.nodes || [], [nodesData?.nodes])
+  const rawNodes = useMemo(() => graphVisualizationData?.nodes || [], [graphVisualizationData?.nodes])
   const selectedRelations = useMemo(
     () => (selectedRelationsData?.nodeId === selectedNodeId ? selectedRelationsData.relations : []),
     [selectedNodeId, selectedRelationsData?.nodeId, selectedRelationsData?.relations],
   )
   const rawRelationships = useMemo(
-    () => mergeRelations(relationshipsData?.relationships || [], selectedRelations),
-    [relationshipsData?.relationships, selectedRelations],
+    () => mergeRelations(graphVisualizationData?.relationships || [], selectedRelations),
+    [graphVisualizationData?.relationships, selectedRelations],
   )
-  const graphRelationships = useMemo(() => relationshipsData?.relationships || [], [relationshipsData?.relationships])
+  const graphRelationships = useMemo(() => graphVisualizationData?.relationships || [], [graphVisualizationData?.relationships])
   const stats = statsData?.data
   const nodeById = useMemo(() => new Map(rawNodes.map((node) => [node.id, node])), [rawNodes])
   const degreeById = useMemo(() => buildDegreeMap(rawRelationships), [rawRelationships])
@@ -362,9 +361,9 @@ function GraphPage() {
         graphFocusNodeId,
         anchorNodeId: graphSubgraph.anchorNodeId,
         viewMode,
-        rawRelationshipPayload: relationshipsData?.rawCount ?? rawRelationships.length,
-        missingEndpointRelationships: relationshipsData?.missingEndpointCount ?? 0,
-        missingNodeRelationships: relationshipsData?.missingNodeCount ?? 0,
+        rawRelationshipPayload: graphVisualizationData?.rawCount ?? rawRelationships.length,
+        missingEndpointRelationships: graphVisualizationData?.missingEndpointCount ?? 0,
+        missingNodeRelationships: graphVisualizationData?.missingNodeCount ?? 0,
         rawNodes: rawNodes.length,
         rawRelationships: rawRelationships.length,
         contentRelationships: graphContentRelations.length,
@@ -404,9 +403,9 @@ function GraphPage() {
     rawNodes.length,
     rawRelationships.length,
     renderedCanvasEdges.length,
-    relationshipsData?.missingEndpointCount,
-    relationshipsData?.missingNodeCount,
-    relationshipsData?.rawCount,
+    graphVisualizationData?.missingEndpointCount,
+    graphVisualizationData?.missingNodeCount,
+    graphVisualizationData?.rawCount,
     renderRelationships.length,
     selectedNeighborIds.size,
     selectedNodeId,
@@ -450,7 +449,7 @@ function GraphPage() {
   }, [layoutSignature])
 
   const selectedNode = selectedNodeId ? nodeById.get(selectedNodeId) : recommendedNodes[0]
-  const isLoading = nodesLoading || relationshipsLoading
+  const isLoading = graphVisualizationLoading
   const hiddenCount = Math.max(0, baseFilteredNodes.length - visibleNodes.length)
 
   const handleSaveNode = async (nodeId: string, content: string) => {

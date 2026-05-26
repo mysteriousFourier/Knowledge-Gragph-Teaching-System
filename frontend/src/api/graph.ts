@@ -151,6 +151,29 @@ const getGraphScopeTree = () =>
     )
     .then((response) => response.data)
 
+const getGraphVisualization = (nodeLimit: number, relationshipLimit: number) => {
+  const params = new URLSearchParams({
+    node_limit: String(nodeLimit),
+    relationship_limit: String(relationshipLimit),
+  })
+  return maintenanceClient
+    .get<ApiResponse<{
+      nodes: GraphNode[]
+      relationships?: GraphRelation[]
+      relations?: GraphRelation[]
+      count: number
+      relationship_count: number
+      stats?: {
+        node_count?: number
+        relation_count?: number
+        returned_node_count?: number
+        returned_relation_count?: number
+        truncated?: boolean
+      }
+    }>>(`/api/maintenance/graph/visualization?${params.toString()}`)
+    .then((response) => response.data)
+}
+
 export const useGraphData = () => {
   return useQuery({
     queryKey: ["graph-data"],
@@ -204,6 +227,33 @@ export const useGraphScopeTree = () => {
         relationships,
         count: payload.data?.count ?? nodes.length,
         relationshipCount: payload.data?.relationship_count ?? relationships.length,
+      }
+    },
+  })
+}
+
+export const useGraphVisualization = (nodeLimit = 1500, relationshipLimit = 5000) => {
+  return useQuery({
+    queryKey: ["graph-visualization", nodeLimit, relationshipLimit],
+    queryFn: async () => {
+      const payload = await getGraphVisualization(nodeLimit, relationshipLimit)
+      const nodes = (payload.data?.nodes || []).map(normalizeNode).filter((node) => !isLectureNode(node))
+      const normalizedRelations = (payload.data?.relationships || payload.data?.relations || []).map(normalizeRelation)
+      const nodeIds = new Set(nodes.map((node) => node.id))
+      const completeEndpointRelations = normalizedRelations.filter((relation) => relation.source_id && relation.target_id)
+      const relationships = completeEndpointRelations.filter(
+        (relation) => nodeIds.has(relation.source_id) && nodeIds.has(relation.target_id),
+      )
+      return {
+        success: payload.success,
+        nodes,
+        relationships,
+        count: payload.data?.count ?? nodes.length,
+        relationshipCount: payload.data?.relationship_count ?? relationships.length,
+        stats: payload.data?.stats,
+        rawCount: normalizedRelations.length,
+        missingEndpointCount: normalizedRelations.length - completeEndpointRelations.length,
+        missingNodeCount: completeEndpointRelations.length - relationships.length,
       }
     },
   })

@@ -663,19 +663,16 @@
             showLoading(true);
 
             try {
-                const [nodesRes, relsRes] = await Promise.all([
-                    fetch('/api/nodes'),
-                    fetch('/api/relationships')
-                ]);
+                const graphRes = await fetch('/api/graph/visualization?node_limit=1200&relationship_limit=5000');
 
-                if (!nodesRes.ok || !relsRes.ok) {
+                if (!graphRes.ok) {
                     throw new Error('API request failed');
                 }
 
-                const nodesData = await nodesRes.json();
-                const relsData = await relsRes.json();
+                const graphData = await graphRes.json();
+                const graphPayload = graphData.data || {};
 
-                nodes = nodesData.nodes || [];
+                nodes = graphPayload.nodes || [];
                 
                 // 确保节点ID是字符串类型
                 nodes.forEach(node => {
@@ -689,7 +686,7 @@
                 });
                 
                 console.log('节点ID映射:', Array.from(nodeMap.keys()).slice(0, 10));
-                const rawRelationships = relsData.relationships || [];
+                const rawRelationships = graphPayload.relationships || graphPayload.relations || graphPayload.edges || [];
                 console.log('原始关系数据:', rawRelationships.slice(0, 5));
                 
                 const normalizedRelationships = rawRelationships.map(normalizeLink);

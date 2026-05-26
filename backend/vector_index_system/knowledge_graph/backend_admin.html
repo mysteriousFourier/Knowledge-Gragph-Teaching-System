@@ -779,7 +779,7 @@
     async function loadGraph() {
       document.getElementById("status").textContent = "正在加载图谱";
       const [graphResponse, auditResponse] = await Promise.all([
-        fetch("/api/graph"),
+        fetch("/api/graph/visualization?node_limit=1200&relationship_limit=5000"),
         fetch("/api/relation-audit")
       ]);
       const result = await graphResponse.json();
@@ -793,7 +793,9 @@
       renderAudit();
       render();
       const dropped = graphDiagnostics.missingEndpoint + graphDiagnostics.missingNode;
-      document.getElementById("status").textContent = `已加载 ${graph.nodes.length} 个节点 / ${graph.relations.length} 条关系${dropped ? `，已跳过 ${dropped} 条异常关系` : ""}`;
+      const stats = (result.data && result.data.stats) || {};
+      const truncated = stats.truncated ? `；总图 ${stats.node_count || graph.nodes.length} 节点 / ${stats.relation_count || graph.relations.length} 关系，当前显示轻量子图` : "";
+      document.getElementById("status").textContent = `已加载 ${graph.nodes.length} 个节点 / ${graph.relations.length} 条关系${dropped ? `，已跳过 ${dropped} 条异常关系` : ""}${truncated}`;
     }
 
     function renderAudit() {

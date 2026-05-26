@@ -38,6 +38,7 @@ from KGTS.maintenance.graph_ops import (
     list_nodes as _list_nodes,
     list_relationships as _list_relationships,
     get_scope_tree as _get_scope_tree,
+    get_visualization_graph as _get_visualization_graph,
     get_relations as _get_relations,
     get_schema as _get_schema,
     search_nodes as _search_nodes,
@@ -217,6 +218,21 @@ async def get_graph_scope_tree():
         return success_response(data=data)
     except Exception as e:
         error_response(f"获取章节树失败: {e}")
+
+
+@router.get("/graph/visualization")
+async def get_graph_visualization(
+    node_limit: int = 1500,
+    relationship_limit: int = 5000,
+):
+    try:
+        data = await _get_visualization_graph(
+            node_limit=node_limit,
+            relationship_limit=relationship_limit,
+        )
+        return success_response(data=data)
+    except Exception as e:
+        error_response(f"获取图谱可视化数据失败: {e}")
 
 
 @router.get("/stats")

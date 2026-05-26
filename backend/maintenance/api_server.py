@@ -25,7 +25,7 @@ from app_config import (
     get_env_int,
     load_root_env,
 )
-from KGTS.middleware import setup_cors
+from KGTS.middleware import setup_cors, setup_gzip
 from KGTS.maintenance.router import router as maintenance_router
 
 load_root_env()
@@ -37,6 +37,7 @@ app = FastAPI(
 )
 
 setup_cors(app)
+setup_gzip(app)
 
 app.include_router(maintenance_router)
 

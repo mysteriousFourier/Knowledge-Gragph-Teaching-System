@@ -11,6 +11,7 @@ from typing import Any, Iterable
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -73,6 +74,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(tts_router)
 
 
@@ -458,6 +460,14 @@ async def legacy_graph_admin_dir() -> RedirectResponse:
     return RedirectResponse("/admin", status_code=307)
 
 
+@app.get("/viz", include_in_schema=False)
+async def legacy_graph_visualization_page() -> FileResponse:
+    graph_viz_html = VECTOR_DIR / "knowledge_graph" / "graph_viz.html"
+    if not graph_viz_html.exists():
+        raise HTTPException(status_code=404, detail="Graph visualization page is missing.")
+    return _frontend_file_response(graph_viz_html, "text/html; charset=utf-8")
+
+
 @app.get("/api/graph")
 async def graph_data() -> dict[str, Any]:
     try:
@@ -469,6 +479,22 @@ async def graph_data() -> dict[str, Any]:
     from core.bridge import build_frontend_graph
 
     return {"success": True, "data": build_frontend_graph(_graph().read_graph())}
+
+
+@app.get("/api/graph/visualization")
+async def graph_visualization_data(
+    node_limit: int = 1500,
+    relationship_limit: int = 5000,
+) -> dict[str, Any]:
+    from KGTS.maintenance.graph_ops import get_visualization_graph
+
+    return {
+        "success": True,
+        "data": await get_visualization_graph(
+            node_limit=node_limit,
+            relationship_limit=relationship_limit,
+        ),
+    }
 
 
 @app.get("/api/relation-audit")
