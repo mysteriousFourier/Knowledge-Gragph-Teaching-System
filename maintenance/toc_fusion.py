@@ -236,6 +236,21 @@ def _best_match(queries: Iterable[str], candidates: Iterable[Dict[str, Any]]) ->
     return best_score, best_node
 
 
+def _best_unit_toc_match(unit: StructuredUnit, candidates: Iterable[Dict[str, Any]]) -> tuple[float, Optional[Dict[str, Any]]]:
+    queries = [heading for heading in unit.headings if not _is_intro_heading(heading)]
+    if not queries:
+        return 0.0, None
+    candidate_items = list(candidates)
+
+    # Structured heading paths often contain a broad section followed by the
+    # actual TOC leaf. Prefer the most specific heading first so chapters do not
+    # collapse content back onto a parent section with an equally good score.
+    score, node = _best_match([queries[-1]], candidate_items)
+    if score >= 0.88:
+        return score, node
+    return _best_match(reversed(queries), candidate_items)
+
+
 def _ancestor_ids(toc_id: str, toc_by_id: Dict[str, Dict[str, Any]]) -> List[str]:
     ancestors: List[str] = []
     visited: set[str] = set()
@@ -446,7 +461,7 @@ def _map_units_to_toc(
             if not queries:
                 result[unit_key] = chapter_toc_id
                 continue
-            score, best_node = _best_match(queries, descendant_items)
+            score, best_node = _best_unit_toc_match(unit, descendant_items)
             toc_id = str((best_node or {}).get("id") or "").strip()
             nearest = _nearest_chapter_or_appendix(toc_id, toc_by_id) if toc_id else None
             if toc_id and nearest == chapter_toc_id and score >= 0.88:

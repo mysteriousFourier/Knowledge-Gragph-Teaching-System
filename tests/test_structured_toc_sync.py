@@ -74,6 +74,26 @@ class StructuredTocSyncTest(unittest.TestCase):
             ):
                 self.assertEqual(sync_builders._toc_export_files(), [])
 
+    def test_toc_exports_default_to_structured_package_outline(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            package_root = root / "structured"
+            structured_dir = package_root / "structured"
+            export_dir = package_root / "目录树导出"
+            structured_dir.mkdir(parents=True)
+            export_dir.mkdir()
+            toc_path = export_dir / "1目录_toc_tree.json"
+            toc_path.write_text(
+                json.dumps({"nodes": {}, "root_nodes": []}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(sync_builders, "STRUCTURED_DIR", package_root),
+                patch.object(sync_builders, "TOC_EXPORT_DIR", Path("")),
+            ):
+                self.assertEqual(sync_builders._toc_export_files(), [toc_path])
+
     def test_build_toc_source_preserves_export_tree(self):
         payload = {
             "metadata": {
@@ -147,6 +167,93 @@ class StructuredTocSyncTest(unittest.TestCase):
         self.assertIn((sync_builders.TOC_ROOT_NODE_ID, "contains", "toc::toc_l0_0001"), relation_keys)
         self.assertIn(("toc::toc_l0_0001", "contains", "toc::toc_l1_0002"), relation_keys)
         self.assertEqual(spec.chapters, {})
+
+    def test_canonical_chapter_uses_exported_toc_sections_as_children(self):
+        toc_payload = {
+            "metadata": {"source_title": "Test Book", "total_nodes": 4, "root_count": 1},
+            "root_nodes": ["toc_l0_0001"],
+            "nodes": {
+                "toc_l0_0001": {
+                    "id": "toc_l0_0001",
+                    "title": "II. EVOLUTION AT ONE AND TWO LOCI",
+                    "level": 0,
+                    "entry_type": "part",
+                    "page": 1,
+                    "parent_id": None,
+                    "children": ["toc_l1_0002"],
+                },
+                "toc_l1_0002": {
+                    "id": "toc_l1_0002",
+                    "title": "2. NEUTRAL EVOLUTION IN ONE- AND TWO-LOCUS SYSTEMS",
+                    "level": 1,
+                    "entry_type": "chapter",
+                    "page": 5,
+                    "parent_id": "toc_l0_0001",
+                    "children": ["toc_l2_0003", "toc_l2_0004"],
+                },
+                "toc_l2_0003": {
+                    "id": "toc_l2_0003",
+                    "title": "The Wright-Fisher Model",
+                    "level": 2,
+                    "entry_type": "section",
+                    "page": 6,
+                    "parent_id": "toc_l1_0002",
+                    "children": [],
+                },
+                "toc_l2_0004": {
+                    "id": "toc_l2_0004",
+                    "title": "Loss of Heterozygosity by Random Genetic Drift",
+                    "level": 2,
+                    "entry_type": "section",
+                    "page": 8,
+                    "parent_id": "toc_l1_0002",
+                    "children": [],
+                },
+            },
+        }
+        chunk_payload = {
+            "id": "chapter2_002",
+            "metadata": {
+                "chapter": "chapter2",
+                "section": "Neutral Evolution in One- and Two-Locus Systems: Introduction",
+                "heading_path": [
+                    "Neutral Evolution in One- and Two-Locus Systems: Introduction",
+                    "THE WRIGHT-FISHER MODEL",
+                ],
+            },
+            "blocks": [{"type": "discussion", "content": "Structured content."}],
+        }
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            structured_dir = root / "structured"
+            export_dir = root / "目录树导出"
+            structured_dir.mkdir()
+            export_dir.mkdir()
+            (export_dir / "1目录_toc_tree.json").write_text(json.dumps(toc_payload, ensure_ascii=False), encoding="utf-8")
+            (structured_dir / "chapter2_002.json").write_text(json.dumps(chunk_payload, ensure_ascii=False), encoding="utf-8")
+
+            with (
+                patch.object(sync_builders, "STRUCTURED_DIR", structured_dir),
+                patch.object(sync_builders, "TOC_EXPORT_DIR", export_dir),
+            ):
+                specs, _ = sync_builders._collect_specs(skip_semantic=True)
+
+        relation_keys = {
+            (relation["source_id"], relation["relation_type"], relation["target_id"])
+            for spec in specs
+            for relation in spec.relations
+        }
+        structured_section_id = (
+            "section::chapter2::"
+            "neutral_evolution_in_one_and_two_locus_systems_introduction__the_wright_fisher_model"
+        )
+        self.assertIn(("toc::toc_l1_0002", "contains", "chapter::chapter2"), relation_keys)
+        self.assertIn(("chapter::chapter2", "contains", "toc::toc_l2_0003"), relation_keys)
+        self.assertIn(("chapter::chapter2", "contains", "toc::toc_l2_0004"), relation_keys)
+        self.assertIn(("toc::toc_l2_0003", "contains", "block::chapter2_002::1"), relation_keys)
+        self.assertNotIn(("chapter::chapter2", "contains", structured_section_id), relation_keys)
+        self.assertNotIn((structured_section_id, "contains", "block::chapter2_002::1"), relation_keys)
 
     def test_toc_mapped_structured_chapter_keeps_canonical_chapter_container(self):
         toc_payload = {

@@ -148,6 +148,9 @@ backend/models/genie-tts/
 .tmp/
 .tanstack/
 目录树导出/
+!目录树导出/
+目录树导出/*
+!目录树导出/*_toc_tree.json
 *.tmp
 *.temp
 *.bak

@@ -219,6 +219,12 @@ export function buildGraphScopeTree(nodes: GraphNode[], relationships: GraphRela
     .sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
 
   const canonicalChapterForToc = (id: string) => canonicalChapterChildren(id, rawChildrenByParent, nodeById)[0]
+  const tocSectionsForCanonicalChapter = (id: string) => {
+    return (rawChildrenByParent.get(id) || []).filter((childId) => {
+      const child = nodeById.get(childId)
+      return isTocSectionNode(child)
+    })
+  }
 
   const displayChildrenFor = (id: string) => {
     const node = nodeById.get(id)
@@ -279,6 +285,11 @@ export function buildGraphScopeTree(nodes: GraphNode[], relationships: GraphRela
     }
 
     if (isCanonicalChapterNode(node)) {
+      const tocSectionChildren = tocSectionsForCanonicalChapter(id)
+      if (tocSectionChildren.length) {
+        tocSectionChildren.forEach(add)
+        return displayChildren.sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
+      }
       directChildren.forEach((childId) => {
         const child = nodeById.get(childId)
         if (child && (isHeadingNode(child) || isKnowledgeContentNode(child))) add(childId)

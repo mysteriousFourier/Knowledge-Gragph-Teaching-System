@@ -27,6 +27,7 @@ from KGTS.maintenance.toc_fusion import (
 )
 from KGTS.maintenance.sync_utils import (
     SourceSpec,
+    PROJECT_ROOT,
     STRUCTURED_DIR,
     TOC_EXPORT_DIR,
     _chapter_label,
@@ -48,8 +49,11 @@ _TOC_NODE_BY_STRUCTURED_UNIT: Dict[str, str] = {}
 _TOC_METADATA_BY_NODE_ID: Dict[str, Dict[str, Any]] = {}
 _TOC_HAS_INDEXED_SOURCE = False
 _TOC_FUSION: Optional[TocFusion] = None
+_TOC_CHILDREN_BY_NODE_ID: Dict[str, List[str]] = {}
 _STRUCTURED_SECTION_BY_SOURCE_UNIT: Dict[str, str] = {}
 _STRUCTURED_SECTION_BY_CHAPTER_HEADING: Dict[str, str] = {}
+_STRUCTURED_SECTION_TO_TOC_NODE: Dict[str, str] = {}
+_RESOURCE_CONTAINER_BY_NODE_ID: Dict[str, str] = {}
 
 
 def _reset_toc_index() -> None:
@@ -57,6 +61,9 @@ def _reset_toc_index() -> None:
     _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER.clear()
     _TOC_NODE_BY_STRUCTURED_UNIT.clear()
     _TOC_METADATA_BY_NODE_ID.clear()
+    _TOC_CHILDREN_BY_NODE_ID.clear()
+    _STRUCTURED_SECTION_TO_TOC_NODE.clear()
+    _RESOURCE_CONTAINER_BY_NODE_ID.clear()
     _TOC_HAS_INDEXED_SOURCE = False
     _TOC_FUSION = None
 
@@ -126,6 +133,10 @@ def _toc_metadata_for_node_id(node_id: Optional[str]) -> Dict[str, Any]:
     return dict(_TOC_METADATA_BY_NODE_ID.get(str(node_id or "").strip()) or {})
 
 
+def _toc_children_for_node_id(node_id: Optional[str]) -> List[str]:
+    return list(_TOC_CHILDREN_BY_NODE_ID.get(str(node_id or "").strip()) or [])
+
+
 def _structured_heading_key(chapter: str, heading: Any) -> str:
     normalized_chapter = str(chapter or "").strip().lower()
     normalized_heading = _normalize_toc_match_text(heading)
@@ -183,6 +194,39 @@ def _resource_container_node_id(
     if section_id:
         return section_id
     return _chapter_container_node_id(chapter)
+
+
+def _resource_toc_container_node_id(
+    chapter: str,
+    fallback_container_node_id: str,
+    *,
+    source_unit: Any = None,
+    source_file: Any = None,
+    subsection: Any = None,
+) -> str:
+    if not _has_toc_export_outline():
+        return fallback_container_node_id
+    candidates = [
+        str(source_unit or "").strip(),
+        str(source_file or "").strip(),
+    ]
+    for value in list(candidates):
+        if value:
+            candidates.append(Path(value).name)
+            candidates.append(Path(value).stem)
+    for candidate in candidates:
+        structured_section_id = _STRUCTURED_SECTION_BY_SOURCE_UNIT.get(candidate.lower())
+        toc_node_id = _STRUCTURED_SECTION_TO_TOC_NODE.get(structured_section_id or "")
+        if toc_node_id:
+            return toc_node_id
+        direct_toc_id = _structured_unit_to_toc_node_id(candidate)
+        if direct_toc_id and direct_toc_id != _structured_chapter_to_toc_node_id(chapter):
+            return direct_toc_id
+    structured_section_id = _STRUCTURED_SECTION_BY_CHAPTER_HEADING.get(_structured_heading_key(chapter, subsection))
+    toc_node_id = _STRUCTURED_SECTION_TO_TOC_NODE.get(structured_section_id or "")
+    if toc_node_id:
+        return toc_node_id
+    return fallback_container_node_id
 
 
 def _has_toc_export_outline() -> bool:
@@ -499,49 +543,52 @@ def _build_chunk_source(path: Path) -> SourceSpec:
     previous_block_id: Optional[str] = None
     source_unit = str(payload.get("id") or path.stem)
     toc_unit_id = _structured_unit_to_toc_node_id(source_unit)
+    toc_chapter_node_id = _structured_chapter_to_toc_node_id(chapter)
+    use_toc_leaf_container = bool(toc_unit_id and toc_unit_id != toc_chapter_node_id)
     chapter_root_id = _chapter_node_id(chapter)
-    parent_node_id = chapter_root_id
+    parent_node_id = toc_unit_id if use_toc_leaf_container else chapter_root_id
     toc_parent_metadata = _toc_metadata_for_node_id(toc_unit_id)
 
-    for depth, heading in enumerate(heading_path, start=1):
-        section_path = heading_path[:depth]
-        section_id = _section_node_id(chapter, section_path)
-        parent_for_section = parent_node_id if depth == 1 else _section_node_id(chapter, heading_path[: depth - 1])
-        _append_unique_node(
-            nodes,
-            seen_node_ids,
-            _node_payload(
-                node_id=section_id,
-                content=heading,
-                node_type="section",
-                label=heading,
-                chapter=chapter,
-                source_file=source_file,
-                extra_metadata={
-                    "role": "heading",
-                    "heading": heading,
-                    "heading_path": section_path,
-                    "heading_depth": depth,
-                    "source_unit": source_unit,
-                    "section": metadata.get("section"),
-                    "display_heading": metadata.get("display_heading"),
-                },
-            ),
-        )
-        _append_unique_relation(
-            relations,
-            seen_relation_ids,
-            _relation_payload(
-                f"rel::{parent_for_section}::contains::{section_id}",
-                parent_for_section,
-                section_id,
-                "contains",
-                description="heading tree contains subsection",
-                chapter=chapter,
-                source_file=source_file,
-            ),
-        )
-        parent_node_id = section_id
+    if not use_toc_leaf_container:
+        for depth, heading in enumerate(heading_path, start=1):
+            section_path = heading_path[:depth]
+            section_id = _section_node_id(chapter, section_path)
+            parent_for_section = parent_node_id if depth == 1 else _section_node_id(chapter, heading_path[: depth - 1])
+            _append_unique_node(
+                nodes,
+                seen_node_ids,
+                _node_payload(
+                    node_id=section_id,
+                    content=heading,
+                    node_type="section",
+                    label=heading,
+                    chapter=chapter,
+                    source_file=source_file,
+                    extra_metadata={
+                        "role": "heading",
+                        "heading": heading,
+                        "heading_path": section_path,
+                        "heading_depth": depth,
+                        "source_unit": source_unit,
+                        "section": metadata.get("section"),
+                        "display_heading": metadata.get("display_heading"),
+                    },
+                ),
+            )
+            _append_unique_relation(
+                relations,
+                seen_relation_ids,
+                _relation_payload(
+                    f"rel::{parent_for_section}::contains::{section_id}",
+                    parent_for_section,
+                    section_id,
+                    "contains",
+                    description="heading tree contains subsection",
+                    chapter=chapter,
+                    source_file=source_file,
+                ),
+            )
+            parent_node_id = section_id
 
     for index, block in enumerate(payload.get("blocks") or [], start=1):
         block_type = str(block.get("type") or "concept")
@@ -605,6 +652,7 @@ def _build_chunk_source(path: Path) -> SourceSpec:
         for formula_id in references["formula"]:
             formula_chapter = _reference_chapter(chapter, formula_id)
             formula_node_id = f"formula::{formula_chapter}::{formula_id}"
+            _RESOURCE_CONTAINER_BY_NODE_ID.setdefault(formula_node_id, parent_node_id)
             _append_unique_relation(
                 relations,
                 seen_relation_ids,
@@ -621,6 +669,7 @@ def _build_chunk_source(path: Path) -> SourceSpec:
         for table_id in references["table"]:
             table_chapter = _reference_chapter(chapter, table_id)
             table_node_id = f"table::{table_chapter}::{table_id}"
+            _RESOURCE_CONTAINER_BY_NODE_ID.setdefault(table_node_id, parent_node_id)
             _append_unique_relation(
                 relations,
                 seen_relation_ids,
@@ -637,6 +686,7 @@ def _build_chunk_source(path: Path) -> SourceSpec:
         for figure_id in references["figure"]:
             figure_chapter = _reference_chapter(chapter, figure_id)
             figure_node_id = f"figure::{figure_chapter}::{figure_id}"
+            _RESOURCE_CONTAINER_BY_NODE_ID.setdefault(figure_node_id, parent_node_id)
             _append_unique_relation(
                 relations,
                 seen_relation_ids,
@@ -653,6 +703,7 @@ def _build_chunk_source(path: Path) -> SourceSpec:
         for example_id in references["example"]:
             example_chapter = _reference_chapter(chapter, example_id)
             example_node_id = f"example::{example_chapter}::{example_id}"
+            _RESOURCE_CONTAINER_BY_NODE_ID.setdefault(example_node_id, parent_node_id)
             _append_unique_relation(
                 relations,
                 seen_relation_ids,
@@ -689,8 +740,14 @@ def _build_formula_source(path: Path) -> SourceSpec:
     for item in payload.get("formulas") or []:
         source = item.get("source") or {}
         chapter = str(source.get("chapter") or "unknown")
-        container_node_id = _resource_container_node_id(
+        structured_container_node_id = _resource_container_node_id(
             chapter,
+            source_unit=source.get("unit_id"),
+            subsection=source.get("subsection"),
+        )
+        container_node_id = _resource_toc_container_node_id(
+            chapter,
+            structured_container_node_id,
             source_unit=source.get("unit_id"),
             subsection=source.get("subsection"),
         )
@@ -698,6 +755,7 @@ def _build_formula_source(path: Path) -> SourceSpec:
         chapters.setdefault(chapter, chapter_title)
         formula_id = str(item.get("id"))
         node_id = f"formula::{chapter}::{formula_id}"
+        container_node_id = _RESOURCE_CONTAINER_BY_NODE_ID.get(node_id, container_node_id)
         label = str(item.get("label_format") or f"Formula {formula_id}")
         content = str(item.get("latex") or "")
         nodes.append(
@@ -750,8 +808,14 @@ def _build_table_source(path: Path) -> SourceSpec:
     for item in payload.get("tables") or []:
         source = item.get("source") or {}
         chapter = str(source.get("chapter") or "unknown")
-        container_node_id = _resource_container_node_id(
+        structured_container_node_id = _resource_container_node_id(
             chapter,
+            source_unit=source.get("unit_id"),
+            subsection=source.get("subsection"),
+        )
+        container_node_id = _resource_toc_container_node_id(
+            chapter,
+            structured_container_node_id,
             source_unit=source.get("unit_id"),
             subsection=source.get("subsection"),
         )
@@ -759,6 +823,7 @@ def _build_table_source(path: Path) -> SourceSpec:
         chapters.setdefault(chapter, chapter_title)
         table_id = str(item.get("id"))
         node_id = f"table::{chapter}::{table_id}"
+        container_node_id = _RESOURCE_CONTAINER_BY_NODE_ID.get(node_id, container_node_id)
         label = str(item.get("label_format") or item.get("title") or f"Table {table_id}")
         content = json.dumps(item.get("rows") or item.get("html") or [], ensure_ascii=False)
         from KGTS.maintenance.sync_utils import _truncate
@@ -811,8 +876,13 @@ def _build_example_source(path: Path) -> SourceSpec:
 
     for item in payload.get("examples") or []:
         chapter = str(item.get("chapter") or "unknown")
-        container_node_id = _resource_container_node_id(
+        structured_container_node_id = _resource_container_node_id(
             chapter,
+            source_file=item.get("source_file"),
+        )
+        container_node_id = _resource_toc_container_node_id(
+            chapter,
+            structured_container_node_id,
             source_file=item.get("source_file"),
         )
         example_id = str(item.get("example_id") or item.get("id") or "").strip()
@@ -820,6 +890,7 @@ def _build_example_source(path: Path) -> SourceSpec:
             continue
         chapters.setdefault(chapter, chapter)
         node_id = f"example::{chapter}::{example_id}"
+        container_node_id = _RESOURCE_CONTAINER_BY_NODE_ID.get(node_id, container_node_id)
         label = str(item.get("label") or f"Example {example_id}")
         content = str(item.get("content_markdown") or item.get("content_plain") or item.get("title") or "")
         nodes.append(
@@ -926,6 +997,7 @@ def _build_figure_source(path: Path) -> SourceSpec:
             continue
         chapters.setdefault(chapter, chapter)
         node_id = f"figure::{chapter}::{figure_id}"
+        container_node_id = _RESOURCE_CONTAINER_BY_NODE_ID.get(node_id, container_node_id)
         label = str(item.get("label") or f"Figure {figure_id}")
         content = str(item.get("caption") or label)
         nodes.append(
@@ -1163,6 +1235,20 @@ def _index_toc_chapter_mapping(path: Path, source_paths: List[Path]) -> None:
             _TOC_NODE_BY_STRUCTURED_UNIT[unit_id.lower()] = _toc_node_id(toc_id)
     for toc_id, metadata in fusion.metadata_by_toc_id.items():
         _TOC_METADATA_BY_NODE_ID[_toc_node_id(toc_id)] = metadata
+        item = fusion.toc_by_id.get(toc_id) or {}
+        _TOC_CHILDREN_BY_NODE_ID[_toc_node_id(toc_id)] = [
+            _toc_node_id(str(child_id or "").strip())
+            for child_id in (item.get("children") or [])
+            if str(child_id or "").strip()
+        ]
+    for unit in structured_units:
+        unit_key = unit.unit_id.strip().lower()
+        toc_id = fusion.unit_to_toc_id.get(unit_key)
+        chapter_toc_id = fusion.chapter_to_toc_id.get(unit.chapter.strip().lower())
+        if not toc_id or toc_id == chapter_toc_id:
+            continue
+        section_id = _section_node_id(unit.chapter, list(unit.headings))
+        _STRUCTURED_SECTION_TO_TOC_NODE[section_id] = _toc_node_id(toc_id)
     return
 
 
@@ -1171,14 +1257,25 @@ def _toc_export_files() -> List[Path]:
     if configured == ".":
         configured = ""
     candidates: List[Path] = []
-    if not configured:
-        return []
-
-    export_path = Path(configured)
-    if export_path.is_file():
-        candidates.append(export_path)
-    elif export_path.exists():
-        candidates.extend(export_path.glob("*_toc_tree.json"))
+    if configured:
+        export_path = Path(configured)
+        if export_path.is_file():
+            candidates.append(export_path)
+        elif export_path.exists():
+            candidates.extend(export_path.glob("*_toc_tree.json"))
+    else:
+        structured_root = Path(STRUCTURED_DIR)
+        structured_data_dir = resolve_structured_data_dir(structured_root)
+        package_root = structured_root if structured_data_dir.parent == structured_root else structured_data_dir
+        fallback_dirs = [package_root / "目录树导出"]
+        try:
+            if structured_root.resolve() == (PROJECT_ROOT / "structured").resolve():
+                fallback_dirs.append(PROJECT_ROOT / "目录树导出")
+        except OSError:
+            pass
+        for export_path in fallback_dirs:
+            if export_path.exists():
+                candidates.extend(export_path.glob("*_toc_tree.json"))
 
     resolved: Dict[str, Path] = {}
     for candidate in candidates:
@@ -1519,6 +1616,22 @@ def _build_chapter_specs(chapters: Dict[str, str]) -> List[SourceSpec]:
                 source_file="structured_sync",
             )
         )
+        if has_export_outline and toc_node_id:
+            for child_toc_node_id in _toc_children_for_node_id(toc_node_id):
+                child_metadata = _toc_metadata_for_node_id(child_toc_node_id)
+                child_entry_type = str(child_metadata.get("toc_entry_type") or "").strip().lower()
+                if child_entry_type in {"section", "subsection"}:
+                    relations.append(
+                        _relation_payload(
+                            f"rel::{node_id}::contains::{child_toc_node_id}",
+                            node_id,
+                            child_toc_node_id,
+                            "contains",
+                            description="structured chapter contains exported TOC section",
+                            chapter=chapter,
+                            source_file="structured_sync",
+                        )
+                    )
         previous_map = previous_by_toc_parent if has_export_outline else previous_by_part
         previous_sibling_id = previous_map.get(parent_part_id)
         if previous_sibling_id:
@@ -1609,6 +1722,18 @@ def _collect_specs(*, skip_semantic: bool = False) -> tuple[List[SourceSpec], Di
     if toc_paths:
         _index_toc_chapter_mapping(toc_paths[0], source_paths)
 
+    toc_specs: List[SourceSpec] = []
+    for path in toc_paths:
+        spec = _build_toc_source(path)
+        spec = _without_toc_export_outline_edges(spec)
+        toc_specs.append(spec)
+        for chapter, title in spec.chapters.items():
+            chapters.setdefault(chapter, title)
+
+    chunk_specs: List[SourceSpec] = []
+    for path in source_paths:
+        chunk_specs.append(_build_chunk_source(path))
+
     library_specs: List[SourceSpec] = []
     for builder, path in (
         (_build_formula_source, formula_path),
@@ -1623,18 +1748,7 @@ def _collect_specs(*, skip_semantic: bool = False) -> tuple[List[SourceSpec], Di
         for chapter, title in spec.chapters.items():
             chapters.setdefault(chapter, title)
 
-    toc_specs: List[SourceSpec] = []
-    for path in toc_paths:
-        spec = _build_toc_source(path)
-        spec = _without_toc_export_outline_edges(spec)
-        toc_specs.append(spec)
-        for chapter, title in spec.chapters.items():
-            chapters.setdefault(chapter, title)
-
-    specs: List[SourceSpec] = [*toc_specs]
-    for path in source_paths:
-        specs.append(_build_chunk_source(path))
-    specs.extend(library_specs)
+    specs: List[SourceSpec] = [*toc_specs, *chunk_specs, *library_specs]
 
     chapter_specs = _build_chapter_specs(chapters)
     for spec in specs:
