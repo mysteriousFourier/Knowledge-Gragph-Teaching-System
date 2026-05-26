@@ -283,7 +283,7 @@ Environment=KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH=1
 Environment=KGTS_TTS_PROXY_EXIT_AFTER_SYNTH=1
 ExecStart=/home/azureuser/kgts/.venv/bin/python scripts/genie_tts_proxy_server.py
 Restart=always
-RestartSec=10
+RestartSec=2
 OOMPolicy=stop
 
 [Install]
