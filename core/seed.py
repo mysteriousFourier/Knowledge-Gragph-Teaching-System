@@ -116,13 +116,15 @@ def _target_graph_needs_seed(seed_path: Path, target_path: Path) -> tuple[bool, 
     target = _graph_chapter_tree_health(target_path)
     if seed["nodes"] <= 0:
         return False, seed, target
-    if target["nodes"] < seed["nodes"]:
+    if target["nodes"] <= 0:
         return True, seed, target
     if seed["toc_root"] and not target["toc_root"]:
         return True, seed, target
     if target["chapter_roots"] < min(seed["chapter_roots"], 30):
         return True, seed, target
     if target["contains"] < max(1, int(seed["contains"] * 0.8)):
+        return True, seed, target
+    if not seed["toc_root"] and target["nodes"] < seed["nodes"]:
         return True, seed, target
     return False, seed, target
 
