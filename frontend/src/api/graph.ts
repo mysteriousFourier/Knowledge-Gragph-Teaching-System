@@ -144,6 +144,13 @@ const getGraphRelationships = (limit: number, relationType?: string) => {
     .then((response) => response.data)
 }
 
+const getGraphScopeTree = () =>
+  maintenanceClient
+    .get<ApiResponse<{ nodes: GraphNode[]; relationships: GraphRelation[]; count: number; relationship_count: number }>>(
+      "/api/maintenance/graph/scope-tree",
+    )
+    .then((response) => response.data)
+
 export const useGraphData = () => {
   return useQuery({
     queryKey: ["graph-data"],
@@ -178,6 +185,25 @@ export const useGraphRelationships = (limit = 10000, relationType?: string) => {
         rawCount: normalizedRelations.length,
         missingEndpointCount: normalizedRelations.length - completeEndpointRelations.length,
         missingNodeCount: 0,
+      }
+    },
+  })
+}
+
+export const useGraphScopeTree = () => {
+  return useQuery({
+    queryKey: ["graph-scope-tree"],
+    queryFn: async () => {
+      const payload = await getGraphScopeTree()
+      const nodes = (payload.data?.nodes || []).map(normalizeNode).filter((node) => !isLectureNode(node))
+      const normalizedRelations = (payload.data?.relationships || []).map(normalizeRelation)
+      const relationships = normalizedRelations.filter((relation) => relation.source_id && relation.target_id)
+      return {
+        success: payload.success,
+        nodes,
+        relationships,
+        count: payload.data?.count ?? nodes.length,
+        relationshipCount: payload.data?.relationship_count ?? relationships.length,
       }
     },
   })

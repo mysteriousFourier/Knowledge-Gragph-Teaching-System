@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from KGTS.core.mcp_client import call_mcp_tool
 from KGTS.core.seed import ensure_seed_graph
+from KGTS.core.graph_service import GraphService
 from KGTS.core.bridge import (
     build_frontend_graph,
     call_backend_tool,
@@ -130,6 +131,93 @@ async def list_relationships(
             if isinstance(relation, dict)
         ],
         "count": len(relationships),
+    }
+
+
+async def get_scope_tree() -> Dict[str, Any]:
+    ensure_seed_graph()
+    graph = GraphService()
+    scope_types = {"appendix", "chapter", "part", "section"}
+    scope_metadata_keys = {
+        "label",
+        "chapter",
+        "source_unit",
+        "block_index",
+        "toc_page",
+        "toc_level",
+        "toc_node_id",
+        "toc_entry_type",
+        "toc_parent_id",
+        "heading_level",
+        "heading_depth",
+        "book_part_id",
+        "part_number",
+        "chapter_number",
+        "role",
+    }
+    nodes = []
+    node_ids = set()
+    for item in graph.list_nodes(limit=20000, include_content=False):
+        metadata = item.get("metadata") or {}
+        node_id = str(item.get("id") or "")
+        if not node_id:
+            continue
+        if (
+            node_id == "toc::root"
+            or node_id.startswith("toc::")
+            or str(item.get("type") or "") in scope_types
+            or str(metadata.get("role") or "") in {"chapter_root", "heading", "toc_entry"}
+        ):
+            node_ids.add(node_id)
+            nodes.append(
+                {
+                    "id": node_id,
+                    "label": item.get("label") or node_id,
+                    "type": item.get("type") or "concept",
+                    "confidence": item.get("confidence", 1.0),
+                    "reviewed": bool(item.get("reviewed")),
+                    "metadata": {
+                        key: value
+                        for key, value in metadata.items()
+                        if key in scope_metadata_keys
+                    },
+                }
+            )
+
+    relationships = []
+    seen = set()
+    for relation in graph.list_relationships_by_type("contains", limit=50000, include_metadata=False):
+        source_id = str(relation.get("source_id") or relation.get("source_node") or "")
+        target_id = str(relation.get("target_id") or relation.get("target_node") or "")
+        if source_id not in node_ids or target_id not in node_ids:
+            continue
+        key = (source_id, target_id, str(relation.get("relation_type") or relation.get("type") or "contains"))
+        if key in seen:
+            continue
+        seen.add(key)
+        relationships.append(
+            {
+                "id": relation.get("id"),
+                "source_id": source_id,
+                "target_id": target_id,
+                "source": source_id,
+                "target": target_id,
+                "source_node": source_id,
+                "target_node": target_id,
+                "type": "contains",
+                "relation_type": "contains",
+                "similarity": relation.get("similarity", 1.0),
+                "description": "",
+                "reviewed": bool(relation.get("reviewed")),
+                "metadata": {},
+            }
+        )
+
+    return {
+        "nodes": nodes,
+        "relationships": relationships,
+        "count": len(nodes),
+        "relationship_count": len(relationships),
     }
 
 

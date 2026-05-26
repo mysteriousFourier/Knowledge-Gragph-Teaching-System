@@ -34,7 +34,7 @@ import {
   useUploadCoursewareAssets,
   useUploadCoursewareStyleReference,
 } from "@/api/education"
-import { useGraphNodes, useGraphRelationships } from "@/api/graph"
+import { useGraphScopeTree } from "@/api/graph"
 import { useSaveChapter, useSaveLecture } from "@/api/teacher"
 import {
   GraphContextPanel,
@@ -906,15 +906,14 @@ function TeacherPreparePage() {
   const generateSlideLectures = useGenerateSlideLectures()
   const saveChapter = useSaveChapter()
   const saveLecture = useSaveLecture()
-  const { data: nodesData, isLoading: nodesLoading } = useGraphNodes(20000)
-  const { data: relationshipsData, isLoading: relationshipsLoading } = useGraphRelationships(100000, "contains")
+  const { data: scopeTreeData, isLoading: scopeTreeLoading } = useGraphScopeTree()
   const { data: pptNodeContext, isLoading: pptContextLoading } = useGraphNodeContext(pptNodeIds)
   const { data: lectureNodeContext, isLoading: lectureContextLoading } = useGraphNodeContext(lectureNodeIds)
 
   const selectedSlide = preview?.slides.find((slide) => slide.index === selectedIndex)
   const selectedLecture = slideLectures.find((lecture) => lecture.index === selectedIndex)
-  const nodes = useMemo(() => nodesData?.nodes || [], [nodesData?.nodes])
-  const relationships = useMemo(() => relationshipsData?.relationships || [], [relationshipsData?.relationships])
+  const nodes = useMemo(() => scopeTreeData?.nodes || [], [scopeTreeData?.nodes])
+  const relationships = useMemo(() => scopeTreeData?.relationships || [], [scopeTreeData?.relationships])
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
   const tree = useMemo(() => buildGraphScopeTree(nodes, relationships, treeSearch), [nodes, relationships, treeSearch])
   const parentByChild = useMemo(() => buildParentByChild(tree), [tree])
@@ -927,7 +926,7 @@ function TeacherPreparePage() {
     })
     return Array.from(next)
   }, [tree])
-  const isGraphLoading = nodesLoading || relationshipsLoading
+  const isGraphLoading = scopeTreeLoading
   const isGeneratingPpt = generatePptTex.isPending || previewPpt.isPending || previewTex.isPending
   const isGeneratingLectures = generateSlideLectures.isPending || generateUploadedPptLectures.isPending
   const lectureStatusText = isGeneratingLectures ? "正在生成" : selectedLecture?.lecture ? "已生成" : "未生成"

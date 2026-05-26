@@ -37,6 +37,7 @@ from KGTS.maintenance.graph_ops import (
     get_graph as _get_graph,
     list_nodes as _list_nodes,
     list_relationships as _list_relationships,
+    get_scope_tree as _get_scope_tree,
     get_relations as _get_relations,
     get_schema as _get_schema,
     search_nodes as _search_nodes,
@@ -207,6 +208,15 @@ async def list_graph_relationships(
         return success_response(data=data)
     except Exception as e:
         error_response(f"获取图谱关系失败: {e}")
+
+
+@router.get("/graph/scope-tree")
+async def get_graph_scope_tree():
+    try:
+        data = await _get_scope_tree()
+        return success_response(data=data)
+    except Exception as e:
+        error_response(f"获取章节树失败: {e}")
 
 
 @router.get("/stats")
