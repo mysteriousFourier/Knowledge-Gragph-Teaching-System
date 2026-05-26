@@ -4,7 +4,7 @@
 
 当前推荐的运行方式是根目录的单端口模式：React 构建产物、教学 API、维护 API 和图谱管理页统一由 `render_app.py` 托管，便于本地测试和部署，实际并不使用render免费版的全栈部署，因为需要信用卡进行验证。
 
-> [演示站点浏览，可进行知识图谱体验](kgts.southeastasia.cloudapp.azure.com)
+> [演示站点浏览，可进行知识图谱体验](http://kgts.southeastasia.cloudapp.azure.com)
 
 ## 当前实现状态
 
