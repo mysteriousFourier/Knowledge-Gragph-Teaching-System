@@ -35,7 +35,8 @@ backend/                      兼容旧目录结构的启动器、shim 和图谱
 structured/                   可公开提交的结构化课程数据
 data/seed/                    可提交的启动种子数据
 render_app.py                 当前推荐的单端口入口
-start.bat / start.ps1         Windows 一键启动脚本
+scripts/launchers/            其他启动脚本和实验脚本
+requirements/                 可选依赖清单：向量检索、TTS 等
 ```
 
 `education/`、`maintenance/`、`mcp_server/`、`core/` 是当前主实现；`backend/` 主要保留兼容入口和仍在运行时使用的旧目录资产。
@@ -47,16 +48,26 @@ start.bat / start.ps1         Windows 一键启动脚本
 在仓库根目录运行：
 
 ```powershell
-.\start.ps1
+.\scripts\launchers\start.ps1
 ```
 
 或：
 
 ```bat
-start.bat
+scripts\launchers\start.bat
 ```
 
 脚本会自动检查 Python 依赖、前端构建产物，并在需要时执行安装与构建。
+其他实验启动脚本位于 `scripts/launchers/`，避免根目录继续膨胀。
+
+`start.bat` 默认打开 `http://127.0.0.1:8000/`。如果需要本地 HTTPS，把证书放到：
+
+```text
+.runtime/certs/localhost.pem
+.runtime/certs/localhost-key.pem
+```
+
+再次运行 `scripts\launchers\start.bat` 时会自动改用 `https://127.0.0.1:8000/`。本地开发建议用 `mkcert` 生成受信任证书；Azure 公网部署仍建议由 Nginx + Certbot 或 Azure 平台证书终止 HTTPS，再反代到本机服务。
 
 ### 方式二：手动启动
 
@@ -170,13 +181,13 @@ Azure 冷启动健康探测时间有限，默认会跳过结构化图谱重建�
 本地默认使用真正的 `hybrid` GraphRAG：图谱节点 embedding + FAISS 向量索引召回，再用图关系补充公式、例题、表格和前后置节点。先安装可选向量依赖：
 
 ```bash
-python -m pip install -r requirements-vector.txt
+python -m pip install -r requirements/vector.txt
 ```
 
 在低内存 Linux VM 上不要直接让 PyPI 解析 torch，否则可能拉取 CUDA 版依赖。改用 CPU-only 文件：
 
 ```bash
-python -m pip install -r requirements-vector-cpu.txt
+python -m pip install -r requirements/vector-cpu.txt
 ```
 
 默认环境变量：
@@ -193,55 +204,51 @@ KGTS_VECTOR_STARTUP_ENSURE=0
 
 ### Azure F1 检索配置
 
-Azure F1 免费实例不要安装本地 embedding 大模型，也不要上传 `backend/vector_index_system/models/`。生产部署默认可保持：
+Azure F1 部署保持 `hybrid` 神经向量检索能力，但按低内存方式运行：安装 CPU-only 向量依赖，不在启动时预热 embedding，查询或重建后释放模型引用。生产默认：
 
 ```text
-KGTS_RETRIEVAL_MODE=graph_db
+KGTS_RETRIEVAL_MODE=hybrid
+KGTS_VECTOR_STARTUP_ENSURE=0
+KGTS_VECTOR_UNLOAD_AFTER_QUERY=1
+KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
+KGTS_VECTOR_HASH_FALLBACK=1
 ```
 
-如果希望在 F1 上启用免费的“图谱 + 向量式”检索，可设置：
-
-```text
-KGTS_RETRIEVAL_MODE=sparse_hybrid
-```
-
-`sparse_hybrid` 使用标准库 token/字符 n-gram 稀疏向量 + 图谱关系分重排，不依赖 FAISS、torch、sentence-transformers 或外部 API。真正的神经向量检索仍可在本地或高资源环境使用：
-
-```bash
-python -m pip install -r requirements-vector.txt
-```
-
-然后设置 `KGTS_RETRIEVAL_MODE=hybrid` 并提供匹配的模型和 FAISS 索引。GitHub Actions 部署包会继续排除 `backend/vector_index_system/models/` 和 `backend/vector_index_system/vector_index/`，避免 F1 重新部署时上传大文件。
+GitHub Actions 会安装 `requirements/vector-cpu.txt`，并继续排除 `backend/vector_index_system/models/`、`backend/vector_index_system/vector_index/` 和大模型权重，避免部署包膨胀。若线上没有可用 embedding 缓存，系统会保留 hybrid 接口并使用 hashing fallback，不会把功能关掉。
 
 ### 可选本地语音推理
 
-项目预留了 `/api/tts/*` 接口，本地默认 provider 是 `genie`，使用项目内 `third_party/Genie-TTS` 推理特化和 `models/tts/shu` 中的 `shu` ONNX 模型推理。Azure F1 默认禁用，部署包会排除模型、缓存和生成音频。
-
-本地启用方式见 [本地语音推理](docs/tts-genie.md)。F1 上建议保持：
+项目预留了 `/api/tts/*` 接口，本地可用 `genie` provider 加载项目内模型。Azure F1 主站不直接加载本地 TTS 权重，但 TTS 功能保持启用，通过 server provider 调用独立推理服务：
 
 ```text
-KGTS_TTS_ENABLED=0
-KGTS_TTS_PROVIDER=disabled
+KGTS_TTS_ENABLED=1
+KGTS_TTS_PROVIDER=genie_server
+KGTS_TTS_SERVER_URL=http://127.0.0.1:9880
 ```
 
-如果需要线上语音，推荐使用有足够内存/磁盘的 VM，或把 TTS 单独部署为外部推理服务，再配置对应的 server provider 和 `KGTS_TTS_SERVER_URL`，不要把模型放进 F1 主站。Azure for Students 1 GB VM 只能作为实验环境：可用 `scripts/genie_tts_proxy_server.py` 单独运行 Genie 代理并把主站设为 `KGTS_TTS_PROVIDER=genie_server`，但模型加载后的常驻内存仍可能超过免费 VM。
+部署包会排除 TTS 模型、缓存和生成音频。线上语音需要把 Genie/GPT-SoVITS 放在独立进程、独立 VM 或外部推理服务里，再把 `KGTS_TTS_SERVER_URL` 指向该服务。本地启用方式见 [本地语音推理](docs/tts-genie.md)。
 
 ## Azure for Students VM 部署
 
 如果要部署到 Azure for Students 免费 VM，优先选择 `Standard_B2ats_v2`；它是 AMD x86-64、2 vCPU / 1 GB RAM，在当前免费 VM 候选里比 `Standard_B1s` 更适合 KGTS，同时比 Arm 规格更少依赖兼容风险。若目标地区没有该 SKU 或订阅无配额，再退回 `Standard_B1s`。
 
-免费 VM 线上配置必须保持轻量：
+免费 VM 线上配置必须保持功能开启但低内存：
 
 ```text
-KGTS_RETRIEVAL_MODE=sparse_hybrid
-KGTS_TTS_ENABLED=0
-KGTS_TTS_PROVIDER=disabled
+KGTS_RETRIEVAL_MODE=hybrid
+KGTS_VECTOR_STARTUP_ENSURE=0
+KGTS_VECTOR_UNLOAD_AFTER_QUERY=1
+KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
+KGTS_VECTOR_HASH_FALLBACK=1
+KGTS_TTS_ENABLED=1
+KGTS_TTS_PROVIDER=genie_server
+KGTS_TTS_SERVER_URL=http://127.0.0.1:9880
 APP_RUN_STARTUP_MAINTENANCE=0
 RENDER_AUTO_SYNC_STRUCTURED=0
 APP_BOOTSTRAP_SEED_DATA=1
 ```
 
-如果需要在同一台 1 GB VM 上实验本地 Genie-TTS 和神经向量检索，按错峰运行处理：TTS 只用于朗读课件，向量检索只用于备课/问答；不要让两者同时常驻。向量依赖使用 `requirements-vector-cpu.txt`，并开启：
+如果需要在同一台 1 GB VM 上实验本地 Genie-TTS 和神经向量检索，按错峰运行处理：TTS 只用于朗读课件，向量检索只用于备课/问答；不要让两者同时常驻。向量依赖使用 `requirements/vector-cpu.txt`，并开启：
 
 ```text
 KGTS_RETRIEVAL_MODE=hybrid
@@ -261,7 +268,7 @@ KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
 - [Azure for Students VM 部署](docs/azure-student-vm.md)
 - [数据目录说明](data/README.md)
 - [结构化数据说明](structured/README.md)
-- [第三方依赖迁移说明](THIRD_PARTY_MIGRATION.md)
+- [第三方依赖迁移说明](docs/THIRD_PARTY_MIGRATION.md)
 
 ## 运行截图演示
 

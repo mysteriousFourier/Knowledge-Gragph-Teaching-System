@@ -1,4 +1,4 @@
-# 图谱与向量子系统
+﻿# 图谱与向量子系统
 
 `backend/vector_index_system/` 保存知识图谱后台页面、默认图谱数据库位置，以及一部分历史遗留的图谱/向量/记忆子系统资产。
 
@@ -50,15 +50,19 @@ python backend/vector_index_system/backend_admin.py --port 8080
 
 ## 部署边界
 
-Azure App Service F1 和 Azure for Students 免费 VM 不应上传 `models/`、`vector_index/` 或大型 embedding 缓存。线上默认用：
+Azure App Service F1 和 Azure for Students 免费 VM 不应上传 `models/`、`vector_index/` 或大型 embedding 缓存。线上默认保留 `hybrid`，但用低内存配置：
 
 ```text
-KGTS_RETRIEVAL_MODE=sparse_hybrid
+KGTS_RETRIEVAL_MODE=hybrid
+KGTS_VECTOR_STARTUP_ENSURE=0
+KGTS_VECTOR_UNLOAD_AFTER_QUERY=1
+KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
+KGTS_VECTOR_HASH_FALLBACK=1
 ```
 
-只有本地或高资源 VM 才建议安装 `requirements-vector.txt` 并启用 `hybrid`。
+本地安装 `requirements/vector.txt`；Azure/Linux 低资源部署安装 `requirements/vector-cpu.txt`，避免拉取 CUDA 版 torch。
 
 ## 相关说明
 
-- [第三方依赖迁移说明](../../THIRD_PARTY_MIGRATION.md)
+- [第三方依赖迁移说明](../../docs/THIRD_PARTY_MIGRATION.md)
 - [检索模式说明](../../docs/retrieval-modes.md)

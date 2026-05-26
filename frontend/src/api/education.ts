@@ -3,6 +3,7 @@ import { educationClient } from "./client"
 import type {
   CoursewareAsset,
   CoursewareProject,
+  CoursewareStyleReferenceResponse,
   EditableSlideModel,
   GenerateLectureRequest,
   GenerateLectureResponse,
@@ -195,6 +196,21 @@ export const useUploadCoursewareAssets = () => {
             timeout: 60000,
           },
         )
+        .then((r) => r.data)
+    },
+  })
+}
+
+export const useUploadCoursewareStyleReference = () => {
+  return useMutation({
+    mutationFn: (file: File) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      return educationClient
+        .post<CoursewareStyleReferenceResponse>("/api/education/courseware/style-reference", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+          timeout: 60000,
+        })
         .then((r) => r.data)
     },
   })

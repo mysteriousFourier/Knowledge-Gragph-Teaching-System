@@ -78,6 +78,7 @@ from KGTS.education.courseware_editor import (
     save_courseware_project,
     serialize_editable_model_to_tex,
 )
+from KGTS.education.courseware_style import build_style_reference_guidance, build_style_reference_profile
 
 load_root_env()
 
@@ -394,6 +395,7 @@ async def generate_ppt_tex(request: GeneratePptTexRequest):
         formula_context = graphrag_context.get("formula_context") or formula_context_for_text(context_content, limit=12)
         raw_slides: Any = None
         warning = ""
+        style_reference_guidance = build_style_reference_guidance(request.style_reference)
         try:
             client = DeepSeekAPIClient(
                 api_key=request.api_key,
@@ -407,6 +409,7 @@ async def generate_ppt_tex(request: GeneratePptTexRequest):
                 formula_context=formula_context,
                 style=request.style,
                 teacher_guidance=str(request.teacher_guidance or "").strip(),
+                style_reference_guidance=style_reference_guidance,
                 max_slides=request.max_slides,
             )
             raw_slides = await client._call_deepseek(
@@ -431,14 +434,14 @@ async def generate_ppt_tex(request: GeneratePptTexRequest):
             fallback_content=context_content,
             max_slides=max(1, min(int(request.max_slides or 12), 30)),
         )
-        tex_content = build_tex_from_slides(chapter_title, slides)
+        tex_content = build_tex_from_slides(chapter_title, slides, style_reference=request.style_reference)
         editable_model = build_editable_model_from_slide_details(
             slides,
             title=chapter_title,
             source_tex=tex_content,
             tex_source_file="generated.tex",
         )
-        artifact = build_pptx_artifact(chapter_title, slides, source_node_ids=source_node_ids)
+        artifact = build_pptx_artifact(chapter_title, slides, source_node_ids=source_node_ids, style_reference=request.style_reference)
         artifact["tex_content_hash"] = hashlib.md5(tex_content.encode("utf-8")).hexdigest()
         artifact.pop("tex_content", None)
         return {
@@ -464,6 +467,7 @@ async def generate_ppt_tex(request: GeneratePptTexRequest):
             "source_node_ids": source_node_ids,
             "source_scope": selected_context.get("scope"),
             "style": request.style,
+            "style_reference": request.style_reference,
             "model": model_name,
             "generated_at": datetime.now().isoformat(),
             **({"warning": warning} if warning else {}),
@@ -488,7 +492,13 @@ async def generate_slide_lectures(request: GenerateSlideLecturesRequest):
         if not selected_context.get("success"):
             raise HTTPException(status_code=404, detail=selected_context.get("error") or "Graph node not found")
         chapter_title = request.chapter_title or selected_context.get("chapter_title") or "图谱生成课件"
-        base_query = "\n\n".join(str(slide.get("raw_text") or slide.get("content") or slide.get("title") or "") for slide in request.slides)[:1400]
+        target_slide_indices = _normalize_target_slide_indices(request.target_slide_indices, request.slides)
+        base_query_slides = [
+            slide
+            for slide in request.slides
+            if not target_slide_indices or int(slide.get("index")) in set(target_slide_indices)
+        ]
+        base_query = "\n\n".join(str(slide.get("raw_text") or slide.get("content") or slide.get("title") or "") for slide in base_query_slides)[:1400]
         graphrag_context = build_graphrag_context(
             f"{chapter_title}\n{base_query}",
             seed_node_ids=source_node_ids,
@@ -502,6 +512,7 @@ async def generate_slide_lectures(request: GenerateSlideLecturesRequest):
             api_key=request.api_key,
             model=request.model or get_deepseek_model("pro"),
         )
+        style_reference_guidance = build_style_reference_guidance(request.style_reference)
         slide_lectures = await _generate_per_slide_lectures(
             client,
             request.slides,
@@ -512,7 +523,15 @@ async def generate_slide_lectures(request: GenerateSlideLecturesRequest):
             selected_graph_context=graph_context_content,
             source_node_ids=source_node_ids,
             teacher_guidance=str(request.teacher_guidance or "").strip(),
+            style_reference_guidance=style_reference_guidance,
+            target_slide_indices=target_slide_indices,
         )
+        if target_slide_indices:
+            slide_lectures = _merge_existing_slide_lectures(
+                request.existing_slide_lectures,
+                slide_lectures,
+                request.slides,
+            )
         merged_lecture = _merge_slide_lectures(slide_lectures)
         learning_plan = _build_ppt_learning_plan(
             chapter_title=chapter_title,
@@ -546,6 +565,8 @@ async def generate_slide_lectures(request: GenerateSlideLecturesRequest):
             "drift_report": drift_report,
             "warning": drift_report.get("warning") or None,
             "style": request.style,
+            "style_reference": request.style_reference,
+            "regenerated_slide_indices": target_slide_indices or [int(slide.get("index")) for slide in request.slides if isinstance(slide.get("index"), int)],
             "model": client.model,
             "generated_at": datetime.now().isoformat(),
         }
@@ -561,6 +582,25 @@ async def generate_slide_lectures(request: GenerateSlideLecturesRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"逐页讲解生成失败: {str(e)}")
+
+
+@router.post("/education/courseware/style-reference")
+async def upload_courseware_style_reference(file: UploadFile = File(...)):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="未提供文件名")
+    lower_name = file.filename.lower()
+    if not lower_name.endswith((".zip", ".tex")):
+        raise HTTPException(status_code=400, detail="参考风格文件仅支持 .zip 或 .tex")
+    try:
+        file_bytes = await file.read()
+        profile = build_style_reference_profile(file_bytes, file.filename)
+        if not profile.get("success"):
+            raise HTTPException(status_code=400, detail=profile.get("error") or "参考风格解析失败")
+        return profile
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"参考风格解析失败: {str(e)}")
 
 
 def _normalize_source_node_ids(source_node_id: Optional[str], source_node_ids: Optional[List[str]]) -> List[str]:
@@ -612,9 +652,11 @@ def _build_ppt_tex_prompt(
     formula_context: List[Dict[str, Any]],
     style: str,
     teacher_guidance: str,
+    style_reference_guidance: str = "",
     max_slides: int,
 ) -> str:
     guidance = f"\nTeacher guidance:\n{teacher_guidance[:1600]}\n" if teacher_guidance else ""
+    reference_guidance = f"\nReference courseware style guidance:\n{style_reference_guidance[:2000]}\n" if style_reference_guidance else ""
     return f"""Generate a classroom PPT/TeX slide plan from the selected graph subtree.
 
 Return only valid JSON in this exact shape:
@@ -635,7 +677,9 @@ Rules:
 4. Do not invent concepts outside the selected graph context.
 5. Make slide titles specific enough to map back to the source nodes.
 6. The teaching style is: {style}.
+7. If reference style guidance is provided, transfer only visual/pacing conventions; never copy reference course content, people, dates, logos, or figures.
 {guidance}
+{reference_guidance}
 Chapter title:
 {chapter_title}
 
@@ -674,6 +718,69 @@ def _merge_slide_lectures(slide_lectures: List[Dict[str, Any]]) -> str:
         f"## 第 {item.get('index')} 页：{item.get('title') or ''}\n\n{str(item.get('lecture') or '').strip() or '_本页未生成文案_'}"
         for item in slide_lectures
     )
+
+
+def _normalize_target_slide_indices(target_slide_indices: Optional[List[int]], slides: List[Dict[str, Any]]) -> Optional[List[int]]:
+    if not target_slide_indices:
+        return None
+    valid_indices = {
+        int(slide.get("index"))
+        for slide in slides
+        if isinstance(slide, dict) and isinstance(slide.get("index"), int)
+    }
+    normalized: List[int] = []
+    seen = set()
+    for raw_index in target_slide_indices:
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="target_slide_indices 必须是页面编号数组")
+        if index not in valid_indices:
+            raise HTTPException(status_code=400, detail=f"页面 {index} 不存在，无法重生成")
+        if index in seen:
+            continue
+        seen.add(index)
+        normalized.append(index)
+    return normalized or None
+
+
+def _merge_existing_slide_lectures(
+    existing_slide_lectures: Optional[List[Dict[str, Any]]],
+    generated_slide_lectures: List[Dict[str, Any]],
+    slides: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    generated_by_index = {
+        int(item.get("index")): item
+        for item in generated_slide_lectures
+        if isinstance(item, dict) and isinstance(item.get("index"), int)
+    }
+    existing_by_index = {
+        int(item.get("index")): item
+        for item in (existing_slide_lectures or [])
+        if isinstance(item, dict) and isinstance(item.get("index"), int)
+    }
+    merged: List[Dict[str, Any]] = []
+    for slide in slides:
+        if not isinstance(slide, dict) or not isinstance(slide.get("index"), int):
+            continue
+        index = int(slide["index"])
+        if index in generated_by_index:
+            merged.append(generated_by_index[index])
+        elif index in existing_by_index:
+            existing = dict(existing_by_index[index])
+            if not existing.get("title") and slide.get("title"):
+                existing["title"] = slide.get("title", "")
+            merged.append(existing)
+        else:
+            merged.append(
+                {
+                    "index": index,
+                    "title": slide.get("title", ""),
+                    "lecture": "",
+                    "skipped": True,
+                }
+            )
+    return merged
 
 
 def _build_source_drift_report(ppt_source_node_ids: List[str], lecture_source_node_ids: List[str]) -> Dict[str, Any]:
@@ -1337,9 +1444,15 @@ async def _generate_per_slide_lectures(
     selected_graph_context: str = "",
     source_node_ids: Optional[List[str]] = None,
     teacher_guidance: str = "",
+    style_reference_guidance: str = "",
+    target_slide_indices: Optional[List[int]] = None,
 ) -> List[Dict]:
     results = []
+    target_set = set(target_slide_indices or [])
     for slide in slide_details:
+        slide_index = slide.get("index")
+        if target_set and slide_index not in target_set:
+            continue
         content_parts = []
         if slide.get("title"):
             content_parts.append(f"标题: {slide['title']}")
@@ -1449,6 +1562,11 @@ async def _generate_per_slide_lectures(
             requirements.append(
                 "Teacher guidance for emphasis, selection, and pacing. Treat it as generation guidance only; it must not override source/graph facts:\n"
                 + teacher_guidance[:1600]
+            )
+        if style_reference_guidance:
+            requirements.append(
+                "Reference courseware style guidance. Use it for pacing, visual-language-aware wording, and classroom tone only; do not copy reference facts, dates, authors, logos, or figures:\n"
+                + style_reference_guidance[:2000]
             )
         requirement_text = "\n".join(
             f"{index}. {item}" for index, item in enumerate(requirements, start=1)

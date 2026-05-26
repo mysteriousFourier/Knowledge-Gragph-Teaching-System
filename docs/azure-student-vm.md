@@ -1,4 +1,4 @@
-# Azure for Students VM 部署
+﻿# Azure for Students VM 部署
 
 > 最后核对：2026-05-26。Azure 免费服务和地区 SKU 可用性会变，创建资源前以 Azure Portal 的 Free services、Cost Management 和 Pricing Calculator 为准。
 
@@ -24,19 +24,24 @@ Azure for Students 当前包含 12 个月内的免费 VM 小规格和 100 美元
 | `Standard_B2pts_v2` | Arm64 | 2 vCPU / 1 GB RAM | 备选。部分 Python/Node 依赖在 Arm 上更容易遇到 wheel 或构建问题。 |
 | `Standard_B1s` | x86-64 | 1 vCPU / 1 GB RAM | 最稳妥兼容兜底，但构建和冷启动更慢。 |
 
-KGTS 的完整本地能力，包括神经向量检索和 Genie-TTS，不适合在 1 GB 免费 VM 上同时常驻运行。免费 VM 线上部署应优先使用轻量配置：
+KGTS 的完整本地能力，包括神经向量检索和 Genie-TTS，不适合在 1 GB 免费 VM 上同时常驻运行。免费 VM 线上部署保持功能开启，但必须使用低内存配置：
 
 ```text
-KGTS_RETRIEVAL_MODE=sparse_hybrid
-KGTS_TTS_ENABLED=0
-KGTS_TTS_PROVIDER=disabled
+KGTS_RETRIEVAL_MODE=hybrid
+KGTS_VECTOR_STARTUP_ENSURE=0
+KGTS_VECTOR_UNLOAD_AFTER_QUERY=1
+KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
+KGTS_VECTOR_HASH_FALLBACK=1
+KGTS_TTS_ENABLED=1
+KGTS_TTS_PROVIDER=genie_server
+KGTS_TTS_SERVER_URL=http://127.0.0.1:9880
 APP_RUN_STARTUP_MAINTENANCE=0
 RENDER_AUTO_SYNC_STRUCTURED=0
 APP_BOOTSTRAP_SEED_DATA=1
 DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS=0
 ```
 
-如果要实验本地 TTS，必须把它作为独立服务运行，并让主站使用 `genie_server` 代理。不要在主 `kgts.service` 里直接使用 `KGTS_TTS_PROVIDER=genie`。
+TTS 必须作为独立服务运行，并让主站使用 `genie_server` 代理。不要在主 `kgts.service` 里直接使用 `KGTS_TTS_PROVIDER=genie`。
 
 如果同时要实验本地 TTS 和神经向量检索，把它们按错峰任务处理：TTS 只用于朗读课件，向量检索只用于备课/问答。不要在 TTS 合成时跑 embedding，也不要让 Web 启动时预热向量模型。
 
@@ -131,13 +136,13 @@ NODE_OPTIONS=--max-old-space-size=1536 npm run build
 cd ..
 ```
 
-前端生产构建默认不生成 sourcemap，以降低 1 GB 免费 VM 的构建内存和磁盘压力。如需调试线上 bundle，可临时执行 `VITE_BUILD_SOURCEMAP=1 npm run build`。
+前端生产构建默认不生成 sourcemap，以降低 1 GB 免费 VM 的构建内存和磁盘压力。如需调试线上 bundle，可临时执行 `VITE_BUILD_SOURCEMAP=1 npm run build`。`npm ci` 也会安装公式朗读用的 MathJax/Speech Rule Engine；主站会在 TTS 合成前调用它们把 LaTeX 转成朗读文本，失败时自动回退到 Python 内置转换。
 
-如果要启用本地神经向量检索，使用 CPU-only 依赖文件，避免 PyPI 自动安装 CUDA 版 torch：
+启用本地神经向量检索时使用 CPU-only 依赖文件，避免 PyPI 自动安装 CUDA 版 torch：
 
 ```bash
 . .venv/bin/activate
-python -m pip install -r requirements-vector-cpu.txt
+python -m pip install -r requirements/vector-cpu.txt
 ```
 
 创建生产环境配置：
@@ -148,9 +153,16 @@ APP_BIND_HOST=127.0.0.1
 APP_BOOTSTRAP_SEED_DATA=1
 APP_RUN_STARTUP_MAINTENANCE=0
 RENDER_AUTO_SYNC_STRUCTURED=0
-KGTS_RETRIEVAL_MODE=sparse_hybrid
-KGTS_TTS_ENABLED=0
-KGTS_TTS_PROVIDER=disabled
+KGTS_RETRIEVAL_MODE=hybrid
+KGTS_VECTOR_STARTUP_ENSURE=0
+KGTS_VECTOR_UNLOAD_AFTER_QUERY=1
+KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
+KGTS_VECTOR_HASH_FALLBACK=1
+KGTS_TTS_ENABLED=1
+KGTS_TTS_PROVIDER=genie_server
+KGTS_TTS_SERVER_URL=http://127.0.0.1:9880
+KGTS_TTS_FORMULA_ENGINE=sre
+KGTS_TTS_FORMULA_TIMEOUT_SECONDS=3
 DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS=0
 DEEPSEEK_API_KEY=
 EOF
@@ -158,7 +170,7 @@ EOF
 
 把 `DEEPSEEK_API_KEY` 改成实际值；不要提交 `.env`。
 
-同一台 1 GB VM 需要同时保留 TTS 和神经向量检索能力时，可把检索配置改为低内存 hybrid：
+同一台 1 GB VM 需要同时保留 TTS 和神经向量检索能力时，检索配置保持低内存 hybrid：
 
 ```text
 KGTS_RETRIEVAL_MODE=hybrid
@@ -256,7 +268,7 @@ cd ~/kgts
 git pull --ff-only origin main
 . .venv/bin/activate
 python -m pip install -r requirements.txt
-python -m pip install -r requirements-vector-cpu.txt
+python -m pip install -r requirements/vector-cpu.txt
 cd frontend
 npm ci
 NODE_OPTIONS=--max-old-space-size=1536 npm run build
@@ -269,11 +281,9 @@ sudo systemctl restart kgts
 sudo journalctl -u kgts -n 80 --no-pager
 ```
 
-如果线上只使用 `sparse_hybrid` 或 `graph_db`，可以跳过 `requirements-vector-cpu.txt`。
-
 ## 可选：本地图结构向量检索
 
-这不是推荐的常驻生产配置，只用于备课和问答。运行前建议先停 TTS 代理：
+1 GB VM 上向量模型不应常驻，只用于备课和问答。运行前建议让 TTS 代理空闲，必要时先停 TTS 代理：
 
 ```bash
 sudo systemctl stop kgts-tts
@@ -371,7 +381,7 @@ journalctl -u kgts-tts -n 100 --no-pager
 
 `KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH=1` 会在每次合成后卸载 Genie 角色模型、HuBERT 和引用音频缓存。ONNX Runtime 在 1 GB VM 上不一定把全部内存还给系统，因此更稳的配置是同时开启 `KGTS_TTS_PROXY_EXIT_AFTER_SYNTH=1`，让代理在响应发出后退出并由 systemd 拉起一个空闲新进程。这个模式需要 `Restart=always`。代价是每次合成都接近冷启动。
 
-如果合成时出现 OOM，`kgts-tts.service` 会失败或重启，但 `kgts.service` 应继续可用。这说明当前免费 VM 不能稳定承载本地 TTS；可以保留 `genie_server` 配置指向更高内存 VM，或恢复 `KGTS_TTS_ENABLED=0`。
+如果合成时出现 OOM，`kgts-tts.service` 会失败或重启，但 `kgts.service` 应继续可用。这说明当前免费 VM 不能稳定承载本地 TTS；保留 `KGTS_TTS_ENABLED=1` 和 `KGTS_TTS_PROVIDER=genie_server`，把 `KGTS_TTS_SERVER_URL` 指向更高内存 VM 或外部推理服务。
 
 ## 官方参考
 

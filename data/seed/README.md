@@ -8,6 +8,7 @@
 | --- | --- |
 | `chapters.json` | 初始章节内容与练习题种子 |
 | `knowledge_graph.db` | 可分发的种子图谱数据库 |
+| `vector_index/` | 与种子图谱对应的预建向量索引 |
 
 像 `chapters.json.bak-*` 这样的备份文件只是本地工作副本，不属于规范化种子集。
 
@@ -19,6 +20,7 @@
 
 1. 把 `chapters.json` 合并到运行时章节文件
 2. 在显式设置 `APP_DATA_DIR` 或 `GRAPH_DB_PATH` 时，必要时复制 `knowledge_graph.db`
+3. 在显式设置 `KGTS_VECTOR_INDEX_DIR` 或使用默认运行时目录时，必要时复制 `vector_index/`
 
 如果没有显式指定运行时图谱数据库路径，项目默认仍会读取旧路径下的图谱数据库，并在节点过少时尝试从 `structured/` 自动重建图谱。
 

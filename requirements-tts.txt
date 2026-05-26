@@ -1,5 +1,0 @@
-# Local-only optional TTS dependencies.
-# Do not install this file in Azure F1 or add it to the GitHub Actions deploy workflow.
-# Clone https://github.com/High-Logic/Genie-TTS.git to third_party/Genie-TTS first.
--r third_party/Genie-TTS/requirements.txt
--e third_party/Genie-TTS

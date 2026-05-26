@@ -81,17 +81,9 @@ def fallback_slides_from_context(title: str, content: str, *, max_slides: int = 
     return slides[:max_slides]
 
 
-def build_tex_from_slides(title: str, slides: Iterable[Dict[str, Any]]) -> str:
-    lines = [
-        r"\documentclass[aspectratio=169]{beamer}",
-        r"\usetheme{Madrid}",
-        r"\usepackage{amsmath,amssymb}",
-        r"\usepackage{ctex}",
-        r"\title{" + _tex_escape(title or "图谱生成课件") + "}",
-        r"\date{}",
-        r"\begin{document}",
-        r"\frame{\titlepage}",
-    ]
+def build_tex_from_slides(title: str, slides: Iterable[Dict[str, Any]], *, style_reference: Optional[Dict[str, Any]] = None) -> str:
+    style_profile = _style_profile(style_reference)
+    lines = _tex_preamble(title, style_profile)
     for slide in slides:
         slide_title = _tex_escape(str(slide.get("title") or f"第 {slide.get('index', '')} 页"))
         lines.append(r"\begin{frame}{" + slide_title + "}")
@@ -112,12 +104,18 @@ def build_tex_from_slides(title: str, slides: Iterable[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def build_pptx_artifact(title: str, slides: List[Dict[str, Any]], *, source_node_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+def build_pptx_artifact(
+    title: str,
+    slides: List[Dict[str, Any]],
+    *,
+    source_node_ids: Optional[List[str]] = None,
+    style_reference: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     slug = hashlib.md5(f"{title}:{datetime.now().isoformat()}".encode("utf-8")).hexdigest()[:12]
     pptx_path = ARTIFACT_DIR / f"generated_{slug}.pptx"
     tex_path = ARTIFACT_DIR / f"generated_{slug}.tex"
-    tex_content = build_tex_from_slides(title, slides)
+    tex_content = build_tex_from_slides(title, slides, style_reference=style_reference)
     tex_path.write_text(tex_content, encoding="utf-8")
 
     prs = Presentation()
@@ -149,6 +147,119 @@ def build_pptx_artifact(title: str, slides: List[Dict[str, Any]], *, source_node
         "source_node_ids": source_node_ids or [],
         "generated_at": datetime.now().isoformat(),
     }
+
+
+def _style_profile(style_reference: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(style_reference, dict):
+        return {}
+    profile = style_reference.get("profile") if isinstance(style_reference.get("profile"), dict) else style_reference
+    return profile if isinstance(profile, dict) else {}
+
+
+def _tex_preamble(title: str, style_profile: Dict[str, Any]) -> List[str]:
+    document_class = str(style_profile.get("document_class") or "beamer").strip()
+    document_options = [
+        str(item).strip()
+        for item in (style_profile.get("document_options") or [])
+        if str(item).strip()
+    ]
+    if "aspectratio=169" not in document_options:
+        document_options.append("aspectratio=169")
+    if document_class not in {"beamer", "ctexbeamer"}:
+        document_class = "beamer"
+
+    lines = [
+        r"\documentclass[" + ",".join(document_options[:6]) + "]{" + document_class + "}",
+    ]
+    theme = _theme_value(style_profile, "usetheme") or "Madrid"
+    lines.append(r"\usetheme{" + _tex_escape(theme) + "}")
+    lines.extend(
+        [
+            r"\usepackage{amsmath,amssymb}",
+            r"\usepackage{graphicx}",
+            r"\usepackage{tikz}",
+            r"\usetikzlibrary{positioning}",
+        ]
+    )
+    if document_class != "ctexbeamer":
+        lines.append(r"\usepackage{ctex}")
+
+    color_names = set()
+    for color in style_profile.get("colors") or []:
+        if not isinstance(color, dict):
+            continue
+        name = _safe_tex_name(str(color.get("name") or ""))
+        model = str(color.get("model") or "").strip()
+        value = str(color.get("value") or "").strip()
+        if not name or not re.match(r"^[A-Za-z]+$", model) or not re.match(r"^[0-9A-Za-z, .!+-]+$", value):
+            continue
+        lines.append(r"\definecolor{" + name + "}{" + model + "}{" + value + "}")
+        color_names.add(name)
+    if "myline" in color_names:
+        line_color = "myline"
+    else:
+        lines.append(r"\definecolor{kgtsline}{RGB}{0,116,112}")
+        line_color = "kgtsline"
+
+    signals = {str(item) for item in (style_profile.get("style_signals") or [])}
+    templates = {str(item) for item in (style_profile.get("beamertemplates") or [])}
+    if "thin top rule under frame titles" in signals or "frametitle" in templates:
+        lines.append(r"\setbeamercolor{whitebg}{bg=white,fg=black}")
+        lines.extend(
+            [
+                r"\setbeamertemplate{frametitle}{%",
+                r"  \vspace*{0.2cm}%",
+                r"  \begin{beamercolorbox}[wd=\paperwidth,leftskip=0.5cm,rightskip=0.5cm,ht=0.3cm,dp=0pt]{whitebg}%",
+                r"    \usebeamerfont{frametitle}\textcolor{black}{\insertframetitle}%",
+                r"  \end{beamercolorbox}%",
+                r"  \begin{tikzpicture}[remember picture,overlay]",
+                rf"    \draw[{line_color},line width=1.5pt] ([yshift=-1.3cm] current page.north west) -- ([yshift=-1.3cm] current page.north east);",
+                r"  \end{tikzpicture}%",
+                r"  \vspace{0.1cm}%",
+                r"}",
+            ]
+        )
+    if "white title blocks with black text" in signals or "title page" in templates:
+        lines.extend(
+            [
+                r"\setbeamertemplate{title page}{%",
+                r"  \begin{tikzpicture}[remember picture,overlay]",
+                rf"    \draw[line width=1.5pt,color={line_color}] ([yshift=-40pt] current page.north west) -- ([yshift=-40pt] current page.north east);",
+                r"  \end{tikzpicture}%",
+                r"  \vspace*{36pt}",
+                r"  \begin{center}",
+                r"    \begin{tikzpicture}",
+                r"      \node[draw=none,inner sep=8pt,fill=white,text=black,align=center,font=\Huge\bfseries] (titlebox) {\inserttitle};",
+                r"      \node[draw=none,rounded corners=2pt,inner sep=8pt,fill=white,text=black,align=center,font=\large,below=5pt of titlebox] {\insertdate};",
+                r"    \end{tikzpicture}",
+                r"  \end{center}",
+                r"}",
+            ]
+        )
+
+    lines.extend(
+        [
+            r"\title{" + _tex_escape(title or "图谱生成课件") + "}",
+            r"\date{}",
+            r"\begin{document}",
+            r"\frame{\titlepage}",
+        ]
+    )
+    return lines
+
+
+def _theme_value(style_profile: Dict[str, Any], command: str) -> str:
+    prefix = f"{command}:"
+    for theme in style_profile.get("themes") or []:
+        text = str(theme or "")
+        if text.startswith(prefix):
+            return text[len(prefix):].strip()
+    return ""
+
+
+def _safe_tex_name(value: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9@]+", "", value)
+    return text[:40]
 
 
 def _coerce_slides(raw: Any) -> List[Any]:

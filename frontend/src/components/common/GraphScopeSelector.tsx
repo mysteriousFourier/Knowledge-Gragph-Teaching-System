@@ -13,7 +13,7 @@ export type GraphScopeTreeNode = {
 }
 
 const RESOURCE_TYPES = new Set(["formula", "note", "table", "figure", "example"])
-const STRUCTURAL_TYPES = new Set(["part", "chapter", "section"])
+const STRUCTURAL_TYPES = new Set(["part", "chapter", "appendix", "section"])
 
 export function GraphTreePanel({
   tree,
@@ -214,9 +214,11 @@ export function buildGraphScopeTree(nodes: GraphNode[], relationships: GraphRela
   })
 
   const term = search.trim().toLowerCase()
-  const rootIds = nodes
-    .filter((node) => !childIds.has(node.id) && (node.type === "chapter" || childrenByParent.has(node.id)))
-    .map((node) => node.id)
+  const rootIds = nodeById.has("toc::root")
+    ? ["toc::root"]
+    : nodes
+        .filter((node) => !childIds.has(node.id) && (node.type === "part" || node.type === "chapter" || node.type === "appendix" || childrenByParent.has(node.id)))
+        .map((node) => node.id)
     .sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
 
   const build = (id: string): GraphScopeTreeNode | null => {
@@ -301,7 +303,10 @@ function graphScopeNodeOrderKey(node?: GraphNode) {
   const chapter = String(metadata.chapter || node?.id || "")
   const sourceUnit = String(metadata.source_unit || metadata.source || "")
   const blockIndex = Number(metadata.block_index || 0)
-  const typeRank = node?.type === "part" ? 0 : node?.type === "chapter" ? 1 : node?.type === "section" ? 2 : 3
+  const partId = String(metadata.book_part_id || "")
+  const partRank = partId ? partId.replace("part::appendices", "part::999") : ""
+  const typeRank = node?.type === "part" ? 0 : node?.type === "chapter" ? 1 : node?.type === "appendix" ? 1 : node?.type === "section" ? 2 : 3
+  if (partRank) return `${partRank}|${chapter}|${typeRank}|${sourceUnit}|${String(blockIndex).padStart(5, "0")}|${node?.label || ""}`
   return `${chapter}|${typeRank}|${sourceUnit}|${String(blockIndex).padStart(5, "0")}|${node?.label || ""}`
 }
 
@@ -309,6 +314,7 @@ function typeLabel(type: string) {
   const labels: Record<string, string> = {
     part: "篇章",
     chapter: "章节",
+    appendix: "附录",
     section: "小节",
     discussion: "正文",
     proposition: "命题",

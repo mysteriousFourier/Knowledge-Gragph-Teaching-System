@@ -32,6 +32,7 @@ import {
   usePreviewPpt,
   useSaveCoursewareProject,
   useUploadCoursewareAssets,
+  useUploadCoursewareStyleReference,
 } from "@/api/education"
 import { useGraphNodes, useGraphRelationships } from "@/api/graph"
 import { useSaveChapter, useSaveLecture } from "@/api/teacher"
@@ -48,6 +49,7 @@ import { RichTextContent } from "@/components/renderers/RichTextContent"
 import type {
   GraphSourceScope,
   CoursewareAsset,
+  CoursewareStyleReference,
   EditableSlideModel,
   EditableSlideObject,
   PptArtifact,
@@ -887,6 +889,7 @@ function TeacherPreparePage() {
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set(["toc::root"]))
   const [treeSearch, setTreeSearch] = useState("")
   const [teacherGuidance, setTeacherGuidance] = useState("")
+  const [styleReference, setStyleReference] = useState<CoursewareStyleReference | null>(null)
   const [pptSourceScope, setPptSourceScope] = useState<GraphSourceScope | null>(null)
   const [lectureSourceScope, setLectureSourceScope] = useState<GraphSourceScope | null>(null)
   const [driftReport, setDriftReport] = useState<SourceDriftReport | null>(null)
@@ -895,6 +898,7 @@ function TeacherPreparePage() {
   const previewPpt = usePreviewPpt()
   const previewTex = usePreviewTex()
   const uploadCoursewareAssets = useUploadCoursewareAssets()
+  const uploadCoursewareStyleReference = useUploadCoursewareStyleReference()
   const saveCoursewareProject = useSaveCoursewareProject()
   const exportCoursewarePptx = useExportCoursewarePptx()
   const generateUploadedPptLectures = useGeneratePptLectures()
@@ -1030,6 +1034,7 @@ function TeacherPreparePage() {
       source_node_ids: pptNodeIds,
       graph_scope: "subtree",
       teacher_guidance: teacherGuidance,
+      style_reference: styleReference,
       max_slides: 12,
     })
     applyPreviewResult({
@@ -1073,7 +1078,7 @@ function TeacherPreparePage() {
     if (!preview?.slides.length) return
     setStatus("")
     if (mode === "upload" && file && !texContent) {
-      const result = await generateUploadedPptLectures.mutateAsync({
+  const result = await generateUploadedPptLectures.mutateAsync({
         file,
         style,
         sourceNodeIds: lectureNodeIds.length ? lectureNodeIds : pptNodeIds,
@@ -1108,6 +1113,7 @@ function TeacherPreparePage() {
       source_node_ids: sourceNodeIds,
       graph_scope: "subtree",
       teacher_guidance: teacherGuidance,
+      style_reference: styleReference,
       ppt_source_node_ids: pptNodeIds,
       ppt_source_scope: pptSourceScope,
     })
@@ -1115,6 +1121,30 @@ function TeacherPreparePage() {
     setLectureSourceScope(result.source_scope || null)
     setDriftReport(result.drift_report || null)
     setStatus(result.warning || "已根据页面内容和图谱范围生成逐页讲解")
+  }
+
+  const handleRegenerateCurrentLecture = async () => {
+    if (!preview?.slides.length || !selectedSlide) return
+    setStatus("")
+    const sourceNodeIds = lectureNodeIds.length ? lectureNodeIds : pptNodeIds
+    const result = await generateSlideLectures.mutateAsync({
+      chapter_title: preview.chapter_title || chapterTitle,
+      slides: preview.slides,
+      tex_content: texContent,
+      style,
+      source_node_ids: sourceNodeIds,
+      graph_scope: "subtree",
+      teacher_guidance: teacherGuidance,
+      style_reference: styleReference,
+      target_slide_indices: [selectedSlide.index],
+      existing_slide_lectures: slideLectures,
+      ppt_source_node_ids: pptNodeIds,
+      ppt_source_scope: pptSourceScope,
+    })
+    setSlideLectures(result.slide_lectures || [])
+    setLectureSourceScope(result.source_scope || null)
+    setDriftReport(result.drift_report || null)
+    setStatus(result.warning || `已重生成第 ${selectedSlide.index} 页讲解`)
   }
 
   const handleApplyTexDraft = async () => {
@@ -1378,6 +1408,28 @@ function TeacherPreparePage() {
     setStatus(`已导入 ${result.asset_count || Object.keys(nextAssets).length} 个图片资源`)
   }
 
+  const handleStyleReferenceUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0]
+    event.target.value = ""
+    if (!selectedFile) return
+    const result = await uploadCoursewareStyleReference.mutateAsync(selectedFile)
+    setStyleReference(result)
+    resetGeneratedLectures()
+    const profile = result.profile || {}
+    const theme = profile.themes?.[0]?.replace(/^usetheme:/, "")
+    const frameCount = profile.layout_summary?.frame_count
+    setStatus(
+      result.warning ||
+        `已读取参考风格：${profile.document_class || "Beamer"}${theme ? ` / ${theme}` : ""}${frameCount ? `，${frameCount} 页样例` : ""}`,
+    )
+  }
+
+  const handleClearStyleReference = () => {
+    setStyleReference(null)
+    resetGeneratedLectures()
+    setStatus("已移除参考风格约束")
+  }
+
   const handleSaveCoursewareProject = async () => {
     if (!editableModel) return
     const title = preview?.chapter_title || chapterTitle || file?.name.replace(/\.[^.]+$/, "") || "未命名课件"
@@ -1497,6 +1549,14 @@ function TeacherPreparePage() {
             生成逐页讲解
           </button>
           <button
+            onClick={handleRegenerateCurrentLecture}
+            disabled={!selectedSlide || !preview?.slides.length || isGeneratingLectures}
+            className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50"
+          >
+            {isGeneratingLectures ? <LoadingSpinner size={16} /> : <RotateCcw size={16} />}
+            重生成当前页
+          </button>
+          <button
             onClick={handleSave}
             disabled={!preview || !mergedLecture.trim() || saveChapter.isPending || saveLecture.isPending}
             className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50"
@@ -1590,7 +1650,7 @@ function TeacherPreparePage() {
             <FileText size={18} />
             课件设置
           </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(260px,0.45fr)_minmax(0,1fr)_auto]">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(260px,0.45fr)_minmax(0,1fr)_auto_auto_auto]">
             <input
               value={chapterTitle}
               onChange={(event) => setChapterTitle(event.target.value)}
@@ -1609,11 +1669,36 @@ function TeacherPreparePage() {
               <input type="file" accept={COURSEWARE_ACCEPT} onChange={handleFileChange} className="hidden" />
             </label>
             <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent">
+              {uploadCoursewareStyleReference.isPending ? <LoadingSpinner size={16} /> : <Wand2 size={16} />}
+              参考风格
+              <input type="file" accept=".zip,.tex" onChange={handleStyleReferenceUpload} className="hidden" />
+            </label>
+            <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent">
               {uploadCoursewareAssets.isPending ? <LoadingSpinner size={16} /> : <ImagePlus size={16} />}
               图片包
               <input type="file" accept=".zip,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff,.svg" onChange={handleAssetUpload} className="hidden" />
             </label>
           </div>
+            {styleReference?.profile ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">参考风格</span>
+                <span>{styleReference.profile.document_class || "Beamer"}</span>
+                {styleReference.profile.themes?.[0] ? <span>{styleReference.profile.themes[0].replace(/^usetheme:/, "")}</span> : null}
+              {styleReference.profile.layout_summary?.frame_count ? <span>{styleReference.profile.layout_summary.frame_count} 页样例</span> : null}
+              {styleReference.profile.style_signals?.slice(0, 3).map((signal) => (
+                <span key={signal} className="rounded border bg-background px-2 py-0.5">
+                  {signal}
+                </span>
+              ))}
+                <button onClick={handleClearStyleReference} className="ml-auto inline-flex items-center gap-1 rounded px-2 py-1 hover:bg-accent">
+                  <Trash2 size={13} />
+                  移除
+                </button>
+              </div>
+            ) : null}
+            {styleReference && file ? (
+              <div className="mt-2 text-xs text-muted-foreground">参考风格会用于图谱生成 PPT/TeX 和逐页讲解；上传已有课件时保留原课件样式。</div>
+            ) : null}
           {file ? (
             <div className="mt-3 text-xs text-muted-foreground">
               已选择：{file.name}。支持 {COURSEWARE_FORMAT_LABEL}。

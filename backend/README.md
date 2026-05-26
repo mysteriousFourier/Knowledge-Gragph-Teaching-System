@@ -1,4 +1,4 @@
-# `backend/`
+﻿# `backend/`
 
 `backend/` 主要保存兼容旧目录结构的启动器、shim 和仍在运行时使用的图谱后台资产。它不是仓库里唯一的后端实现来源，也不是 React 前端目录。
 
@@ -31,7 +31,7 @@ python render_app.py
 或使用 Windows 启动脚本：
 
 ```powershell
-.\start.ps1
+.\scripts\launchers\start.ps1
 ```
 
 需要排查 API 报错时，优先在前台运行上述命令，让日志直接输出到当前终端。不要把长期服务静默放到后台，否则题目生成、图谱上传等问题难以及时看到 traceback。

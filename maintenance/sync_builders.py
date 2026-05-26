@@ -11,6 +11,20 @@ from typing import Any, Dict, List, Optional
 
 from KGTS.core.graph_service import normalize_relation_type
 
+from KGTS.maintenance.book_outline import (
+    APPENDICES_PART_ID,
+    APPENDICES_PART_LABEL,
+    BOOK_PARTS,
+    BOOK_TITLE,
+    CANONICAL_CHAPTER_TITLES,
+    appendix_number,
+    part_for_chapter,
+)
+from KGTS.maintenance.toc_fusion import (
+    TocFusion,
+    build_structured_units,
+    fuse_toc_with_structured_units,
+)
 from KGTS.maintenance.sync_utils import (
     SourceSpec,
     STRUCTURED_DIR,
@@ -32,14 +46,16 @@ _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER: Dict[str, str] = {}
 _TOC_NODE_BY_STRUCTURED_UNIT: Dict[str, str] = {}
 _TOC_METADATA_BY_NODE_ID: Dict[str, Dict[str, Any]] = {}
 _TOC_HAS_INDEXED_SOURCE = False
+_TOC_FUSION: Optional[TocFusion] = None
 
 
 def _reset_toc_index() -> None:
-    global _TOC_HAS_INDEXED_SOURCE
+    global _TOC_HAS_INDEXED_SOURCE, _TOC_FUSION
     _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER.clear()
     _TOC_NODE_BY_STRUCTURED_UNIT.clear()
     _TOC_METADATA_BY_NODE_ID.clear()
     _TOC_HAS_INDEXED_SOURCE = False
+    _TOC_FUSION = None
 
 
 def _reference_chapter(default_chapter: str, reference_id: str) -> str:
@@ -107,8 +123,38 @@ def _toc_metadata_for_node_id(node_id: Optional[str]) -> Dict[str, Any]:
     return dict(_TOC_METADATA_BY_NODE_ID.get(str(node_id or "").strip()) or {})
 
 
+def _has_toc_export_outline() -> bool:
+    return _TOC_FUSION is not None and bool(_TOC_FUSION.toc_by_id)
+
+
+def _export_toc_part_node_id_for_chapter(chapter: str) -> Optional[str]:
+    if not _TOC_FUSION:
+        return None
+    title = ""
+    part = part_for_chapter(chapter)
+    if part is not None:
+        title = part.label
+    elif _structured_appendix_number(chapter) is not None:
+        title = APPENDICES_PART_LABEL
+    if not title:
+        return None
+    for toc_id, item in _TOC_FUSION.toc_by_id.items():
+        if str(item.get("entry_type") or "").strip().lower() != "part":
+            continue
+        if _normalize_toc_match_text(item.get("title")) == _normalize_toc_match_text(title):
+            return _toc_node_id(toc_id)
+    return None
+
+
 def _chapter_container_node_id(chapter: str) -> str:
     return _chapter_node_id(chapter)
+
+
+def _canonical_chapter_title(chapter: str, fallback: Optional[str] = None) -> str:
+    title = CANONICAL_CHAPTER_TITLES.get(str(chapter or "").strip().lower())
+    if title:
+        return title
+    return str(fallback or chapter)
 
 
 def _toc_entry_node_type(entry_type: str) -> str:
@@ -393,13 +439,18 @@ def _build_chunk_source(path: Path) -> SourceSpec:
     toc_unit_id = _structured_unit_to_toc_node_id(source_unit)
     toc_chapter_id = _structured_chapter_to_toc_node_id(chapter)
     chapter_root_id = _chapter_node_id(chapter)
-    matched_toc_unit_id = toc_unit_id if toc_unit_id and toc_unit_id != chapter_root_id else None
+    matched_toc_unit_id = (
+        toc_unit_id
+        if toc_unit_id and toc_unit_id not in {chapter_root_id, toc_chapter_id}
+        else None
+    )
+    has_export_outline = _has_toc_export_outline()
     toc_parent_id = matched_toc_unit_id
     parent_node_id = toc_parent_id or chapter_root_id
     toc_parent_metadata = _toc_metadata_for_node_id(toc_parent_id)
 
     for depth, heading in enumerate(heading_path, start=1):
-        if matched_toc_unit_id:
+        if matched_toc_unit_id and (has_export_outline or depth > 1):
             continue
         section_path = heading_path[:depth]
         section_id = _section_node_id(chapter, section_path)
@@ -1031,441 +1082,25 @@ def _build_toc_source(path: Path) -> SourceSpec:
 
 
 def _index_toc_chapter_mapping(path: Path, source_paths: List[Path]) -> None:
-    global _TOC_HAS_INDEXED_SOURCE
+    global _TOC_HAS_INDEXED_SOURCE, _TOC_FUSION
     _reset_toc_index()
-    if not source_paths:
-        return
     _TOC_HAS_INDEXED_SOURCE = True
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    raw_nodes = payload.get("nodes") if isinstance(payload.get("nodes"), dict) else {}
-    toc_items: List[Dict[str, Any]] = []
-    toc_by_id: Dict[str, Dict[str, Any]] = {}
-    children_by_parent: Dict[str, List[str]] = {}
-    for raw_id, item in raw_nodes.items():
-        if not isinstance(item, dict):
-            continue
-        toc_id = str(item.get("id") or raw_id or "").strip()
-        if not toc_id:
-            continue
-        normalized = dict(item)
-        normalized["id"] = toc_id
-        toc_items.append(normalized)
-        toc_by_id[toc_id] = normalized
-        parent_id = str(normalized.get("parent_id") or "").strip()
-        if parent_id:
-            children_by_parent.setdefault(parent_id, []).append(toc_id)
+    structured_units = build_structured_units(
+        source_paths,
+        heading_path_from_metadata=_heading_path_from_metadata,
+    )
+    fusion = fuse_toc_with_structured_units(path, structured_units)
+    _TOC_FUSION = fusion
 
-    def sort_key(item: Dict[str, Any]) -> tuple[int, int, str]:
-        try:
-            page = int(item.get("page") or 0)
-        except (TypeError, ValueError):
-            page = 0
-        try:
-            level = int(item.get("level") or 0)
-        except (TypeError, ValueError):
-            level = 0
-        return (page, level, str(item.get("id") or ""))
-
-    toc_items.sort(key=sort_key)
-    for siblings in children_by_parent.values():
-        siblings.sort(key=lambda toc_id: sort_key(toc_by_id.get(toc_id, {"id": toc_id})))
-
-    def descendants_of(toc_id: str, *, include_self: bool = True) -> List[Dict[str, Any]]:
-        ordered: List[Dict[str, Any]] = []
-        visited: set[str] = set()
-
-        def visit(current_id: str) -> None:
-            if current_id in visited:
-                return
-            visited.add(current_id)
-            current = toc_by_id.get(current_id)
-            if not current:
-                return
-            ordered.append(current)
-            explicit_children = [
-                str(child_id or "").strip()
-                for child_id in (current.get("children") or [])
-                if str(child_id or "").strip()
-            ]
-            child_ids = explicit_children or children_by_parent.get(current_id, [])
-            for child_id in child_ids:
-                visit(child_id)
-
-        if include_self:
-            visit(toc_id)
-        else:
-            for child_id in children_by_parent.get(toc_id, []):
-                visit(child_id)
-        return ordered
-
-    def ancestor_ids(toc_id: str) -> List[str]:
-        ancestors: List[str] = []
-        visited: set[str] = set()
-        current_id = toc_id
-        while current_id and current_id in toc_by_id and current_id not in visited:
-            visited.add(current_id)
-            parent_id = str(toc_by_id[current_id].get("parent_id") or "").strip()
-            if not parent_id:
-                break
-            ancestors.append(parent_id)
-            current_id = parent_id
-        return ancestors
-
-    def nearest_chapter_or_appendix(toc_id: str) -> Optional[str]:
-        for candidate_id in [toc_id, *ancestor_ids(toc_id)]:
-            item = toc_by_id.get(candidate_id)
-            entry_type = str((item or {}).get("entry_type") or "").strip().lower()
-            if entry_type in {"chapter", "appendix"}:
-                return candidate_id
-        return None
-
-    descendants_cache: Dict[str, List[Dict[str, Any]]] = {}
-
-    def cached_descendants_of(toc_id: str) -> List[Dict[str, Any]]:
-        if toc_id not in descendants_cache:
-            descendants_cache[toc_id] = descendants_of(toc_id)
-        return descendants_cache[toc_id]
-
-    toc_match_items = [
-        item
-        for item in toc_items
-        if str(item.get("entry_type") or "").strip().lower() not in {"index", "literature_cited"}
-    ]
-    chapter_items = [
-        item
-        for item in toc_items
-        if str(item.get("entry_type") or "").strip().lower() in {"chapter", "appendix"}
-    ]
-
-    for item in toc_items:
-        toc_id = str(item.get("id") or "").strip()
-        if not toc_id:
-            continue
-        _TOC_METADATA_BY_NODE_ID[_toc_node_id(toc_id)] = {
-            "toc_node_id": toc_id,
-            "toc_title": item.get("title"),
-            "toc_entry_type": item.get("entry_type"),
-            "toc_level": item.get("level"),
-            "toc_page": item.get("page"),
-            "toc_parent_id": item.get("parent_id"),
-            "toc_path": [
-                str((toc_by_id.get(ancestor) or {}).get("title") or "").strip()
-                for ancestor in reversed(ancestor_ids(toc_id))
-                if str((toc_by_id.get(ancestor) or {}).get("title") or "").strip()
-            ] + [str(item.get("title") or "").strip()],
-        }
-
-    paths_by_chapter: Dict[str, List[Path]] = {}
-    for source_path in source_paths:
-        chapter = source_path.stem.split("_")[0]
-        paths_by_chapter.setdefault(chapter, []).append(source_path)
-
-    chapter_intro_by_name: Dict[str, str] = {}
-    chapter_section_hits: Dict[str, Dict[str, int]] = {}
-    unit_queries_by_path: Dict[Path, List[str]] = {}
-    unit_id_by_path: Dict[Path, str] = {}
-    for chapter, paths in paths_by_chapter.items():
-        section_hits: Dict[str, int] = {}
-        for source_path in paths:
-            item_payload = json.loads(source_path.read_text(encoding="utf-8"))
-            unit_id_by_path[source_path] = str(item_payload.get("id") or source_path.stem).strip().lower()
-            metadata = item_payload.get("metadata") or {}
-            heading_path = _heading_path_from_metadata(metadata)
-            raw_queries = [
-                str(item or "").strip()
-                for item in [metadata.get("display_heading"), *(heading_path or []), metadata.get("section")]
-                if str(item or "").strip()
-            ]
-            unit_queries_by_path[source_path] = raw_queries
-            if source_path.stem.endswith("_001"):
-                for query in raw_queries:
-                    if query and not _is_generic_toc_query(query):
-                        chapter_intro_by_name[chapter] = query
-                        break
-            for query in raw_queries:
-                normalized_query = _normalize_toc_match_text(query)
-                if not normalized_query:
-                    continue
-                section_hits[normalized_query] = section_hits.get(normalized_query, 0) + 1
-        chapter_section_hits[chapter] = section_hits
-
-    chapter_sequence = sorted(paths_by_chapter, key=_structured_chapter_sort_key)
-    chapter_number_to_name: Dict[int, str] = {}
-    appendix_number_to_name: Dict[int, str] = {}
-    for chapter in chapter_sequence:
-        chapter_number = _structured_chapter_number(chapter)
-        if chapter_number is not None:
-            chapter_number_to_name[chapter_number] = chapter
-            continue
-        appendix_number = _structured_appendix_number(chapter)
-        if appendix_number is not None:
-            appendix_number_to_name[appendix_number] = chapter
-
-    def fallback_numbered_mapping() -> None:
-        for chapter in chapter_sequence:
-            if chapter.lower() in _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER:
-                continue
-            chapter_number = _structured_chapter_number(chapter)
-            appendix_number = _structured_appendix_number(chapter)
-            if chapter_number is None and appendix_number is None:
-                continue
-            candidate = None
-            if chapter_number is not None:
-                candidate = next(
-                    (
-                        item
-                        for item in chapter_items
-                        if str(item.get("entry_type") or "").strip().lower() == "chapter"
-                        and re.match(
-                            rf"^\s*0*{chapter_number}(?:[.\s]|$)",
-                            str(item.get("title") or ""),
-                        )
-                    ),
-                    None,
-                )
-            elif appendix_number is not None:
-                candidate = next(
-                    (
-                        item
-                        for item in toc_items
-                        if re.match(
-                            rf"^\s*A0*{appendix_number}(?:[.\s]|$)",
-                            str(item.get("title") or ""),
-                            flags=re.I,
-                        )
-                    ),
-                    None,
-                )
-            if candidate:
-                _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER[chapter.lower()] = _toc_node_id(
-                    str(candidate.get("id") or "")
-                )
-
-    def fallback_single_chapter_mapping() -> None:
-        if len(paths_by_chapter) != 1:
-            return
-        if len(chapter_items) != 1:
-            return
-        chapter = next(iter(paths_by_chapter))
-        if chapter.lower() in _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER:
-            return
-        _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER[chapter.lower()] = _toc_node_id(
-            str(chapter_items[0].get("id") or "")
-        )
-
-    normalized_title_by_id = {
-        str(item.get("id") or ""): _normalize_toc_match_text(item.get("title"))
-        for item in toc_items
-    }
-    normalized_query_cache: Dict[str, str] = {}
-    term_cache: Dict[str, set[str]] = {}
-    score_cache: Dict[tuple[str, str], float] = {}
-
-    def terms_for(value: str) -> set[str]:
-        cached = term_cache.get(value)
-        if cached is None:
-            cached = set(value.split())
-            term_cache[value] = cached
-        return cached
-
-    def title_score(query: str, item: Dict[str, Any]) -> float:
-        query_norm = normalized_query_cache.get(query)
-        if query_norm is None:
-            query_norm = _normalize_toc_match_text(query)
-            normalized_query_cache[query] = query_norm
-        title_norm = normalized_title_by_id.get(str(item.get("id") or ""), "")
-        key = (query_norm, title_norm)
-        cached = score_cache.get(key)
-        if cached is not None:
-            return cached
-        if not query_norm or not title_norm:
-            score = 0.0
-        elif query_norm == title_norm:
-            score = 1.0
-        else:
-            left_terms = terms_for(query_norm)
-            right_terms = terms_for(title_norm)
-            if not left_terms or not right_terms:
-                score = 0.0
-            else:
-                query_coverage = len(left_terms & right_terms) / len(left_terms)
-                target_coverage = len(left_terms & right_terms) / len(right_terms)
-                harmonic = (
-                    (2 * query_coverage * target_coverage) / (query_coverage + target_coverage)
-                    if query_coverage + target_coverage
-                    else 0.0
-                )
-                sequence = SequenceMatcher(None, query_norm, title_norm).ratio()
-                contains = (
-                    0.96
-                    if (query_norm in title_norm or title_norm in query_norm)
-                    and min(len(left_terms), len(right_terms)) >= 3
-                    else 0.0
-                )
-                score = max(harmonic, sequence, contains)
-        score_cache[key] = score
-        return score
-
-    def token_title_score(query: str, item: Dict[str, Any]) -> float:
-        query_norm = normalized_query_cache.get(query)
-        if query_norm is None:
-            query_norm = _normalize_toc_match_text(query)
-            normalized_query_cache[query] = query_norm
-        title_norm = normalized_title_by_id.get(str(item.get("id") or ""), "")
-        if not query_norm or not title_norm:
-            return 0.0
-        if query_norm == title_norm:
-            return 1.0
-        left_terms = terms_for(query_norm)
-        right_terms = terms_for(title_norm)
-        if not left_terms or not right_terms:
-            return 0.0
-        query_coverage = len(left_terms & right_terms) / len(left_terms)
-        target_coverage = len(left_terms & right_terms) / len(right_terms)
-        harmonic = (
-            (2 * query_coverage * target_coverage) / (query_coverage + target_coverage)
-            if query_coverage + target_coverage
-            else 0.0
-        )
-        contains = (
-            0.96
-            if (query_norm in title_norm or title_norm in query_norm)
-            and min(len(left_terms), len(right_terms)) >= 3
-            else 0.0
-        )
-        return max(harmonic, contains)
-
-    def best_match(queries: List[str], candidates: List[Dict[str, Any]]) -> tuple[float, Optional[Dict[str, Any]]]:
-        deduped_queries = list(dict.fromkeys(str(query or "").strip() for query in queries if str(query or "").strip()))
-        best_score = 0.0
-        best_node: Optional[Dict[str, Any]] = None
-        for item in candidates:
-            score = max((title_score(query, item) for query in deduped_queries), default=0.0)
-            if score > best_score:
-                best_score = score
-                best_node = item
-        return best_score, best_node
-
-    def apply_explicit_toc_mapping() -> None:
-        fallback_numbered_mapping()
-        fallback_single_chapter_mapping()
-        chapter_like_nodes = [
-            item
-            for item in toc_items
-            if str(item.get("entry_type") or "").strip().lower() in {"chapter", "appendix"}
-            and str(item.get("unit_id") or "").strip()
-        ]
-        for item in chapter_like_nodes:
-            toc_id = str(item.get("id") or "").strip()
-            if not toc_id:
-                continue
-            title = str(item.get("title") or "")
-            entry_type = str(item.get("entry_type") or "").strip().lower()
-            explicit_chapter = None
-            title_number = re.match(r"^\s*0*([0-9]+)(?:[.\s]|$)", title)
-            appendix_number = re.match(r"^\s*A0*([0-9]+)(?:[.\s]|$)", title, flags=re.I)
-            if entry_type == "appendix" and appendix_number:
-                explicit_chapter = appendix_number_to_name.get(int(appendix_number.group(1)))
-            elif entry_type == "chapter" and title_number:
-                explicit_chapter = chapter_number_to_name.get(int(title_number.group(1)))
-
-            if explicit_chapter is None:
-                scored: List[tuple[float, str]] = []
-                descendant_items = cached_descendants_of(toc_id)
-                for chapter, intro in chapter_intro_by_name.items():
-                    queries = [intro, *chapter_section_hits.get(chapter, {}).keys()]
-                    score, _ = best_match(queries, descendant_items)
-                    if score >= 0.96:
-                        scored.append((score, chapter))
-                if len(scored) == 1:
-                    explicit_chapter = scored[0][1]
-
-            if explicit_chapter and explicit_chapter.lower() not in _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER:
-                _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER[explicit_chapter.lower()] = _toc_node_id(toc_id)
-
-        for chapter in chapter_sequence:
-            if chapter.lower() in _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER:
-                continue
-            appendix_number = _structured_appendix_number(chapter)
-            if appendix_number is not None:
-                appendix_candidate = next(
-                    (
-                        item
-                        for item in toc_items
-                        if re.match(
-                            rf"^\s*A0*{appendix_number}(?:[.\s]|$)",
-                            str(item.get("title") or ""),
-                            flags=re.I,
-                        )
-                    ),
-                    None,
-                )
-                if appendix_candidate:
-                    _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER[chapter.lower()] = _toc_node_id(
-                        str(appendix_candidate.get("id") or "")
-                    )
-                continue
-
-            section_hits = chapter_section_hits.get(chapter, {})
-            if not section_hits:
-                continue
-            scored: List[tuple[float, str]] = []
-            for item in chapter_like_nodes:
-                toc_id = str(item.get("id") or "").strip()
-                if not toc_id:
-                    continue
-                descendant_items = cached_descendants_of(toc_id)
-                best = 0.0
-                for query, count in section_hits.items():
-                    query_weight = min(max(count, 1), 4) / 4
-                    for candidate in descendant_items:
-                        score = token_title_score(query, candidate) * query_weight
-                        if score > best:
-                            best = score
-                if best >= 0.72:
-                    scored.append((best, toc_id))
-            scored.sort(reverse=True)
-            if scored and (
-                len(scored) == 1
-                or scored[0][0] >= 0.99
-                or (len(scored) > 1 and scored[0][0] >= scored[1][0] + 0.15)
-            ):
-                _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER[chapter.lower()] = _toc_node_id(scored[0][1])
-
-    apply_explicit_toc_mapping()
-
-    for chapter, paths in sorted(paths_by_chapter.items(), key=lambda item: _structured_chapter_sort_key(item[0])):
-        paths.sort(key=lambda item: item.name.lower())
-        canonical_chapter_id = _chapter_node_id(chapter)
-        chapter_toc_node_id = _structured_chapter_to_toc_node_id(chapter)
-        chapter_toc_id = _toc_raw_id(chapter_toc_node_id)
-        descendant_items = (
-            [
-                item
-                for item in descendants_of(chapter_toc_id)
-                if str(item.get("entry_type") or "").strip().lower() not in {"index", "literature_cited"}
-            ]
-            if chapter_toc_id
-            else []
-        )
-
-        for source_path in paths:
-            unit_id = unit_id_by_path.get(source_path) or str(source_path.stem).strip().lower()
-            queries = unit_queries_by_path.get(source_path, [])
-            queries = [item for item in queries if not _is_intro_heading(item)]
-            if source_path.stem.endswith("_001"):
-                _TOC_NODE_BY_STRUCTURED_UNIT[unit_id] = canonical_chapter_id
-                continue
-            if not queries:
-                _TOC_NODE_BY_STRUCTURED_UNIT[unit_id] = canonical_chapter_id
-                continue
-            best_score, best_node = best_match(queries, descendant_items)
-            toc_id = str((best_node or {}).get("id") or "").strip()
-            nearest_container_id = nearest_chapter_or_appendix(toc_id) if toc_id else None
-            if toc_id and best_score >= 0.9 and (not chapter_toc_id or nearest_container_id == chapter_toc_id):
-                _TOC_NODE_BY_STRUCTURED_UNIT[unit_id] = _toc_node_id(toc_id)
-            else:
-                _TOC_NODE_BY_STRUCTURED_UNIT[unit_id] = canonical_chapter_id
+    for chapter, toc_id in fusion.chapter_to_toc_id.items():
+        if toc_id:
+            _TOC_CHAPTER_NODE_BY_STRUCTURED_CHAPTER[chapter.lower()] = _toc_node_id(toc_id)
+    for unit_id, toc_id in fusion.unit_to_toc_id.items():
+        if toc_id:
+            _TOC_NODE_BY_STRUCTURED_UNIT[unit_id.lower()] = _toc_node_id(toc_id)
+    for toc_id, metadata in fusion.metadata_by_toc_id.items():
+        _TOC_METADATA_BY_NODE_ID[_toc_node_id(toc_id)] = metadata
+    return
 
 
 def _toc_export_files() -> List[Path]:
@@ -1493,9 +1128,244 @@ def _toc_export_files() -> List[Path]:
     return sorted(resolved.values(), key=lambda item: str(item).lower())
 
 
+def _without_toc_export_outline_edges(spec: SourceSpec) -> SourceSpec:
+    """Keep detailed TOC entries, but let the canonical book outline own the tree root."""
+    if _has_toc_export_outline():
+        return spec
+    toc_part_node_ids = {
+        str(node.get("id") or "")
+        for node in spec.nodes
+        if str(node.get("id") or "").startswith("toc::")
+        and (
+            str(node.get("type") or "") == "part"
+            or str((node.get("metadata") or {}).get("toc_entry_type") or "").lower() == "part"
+        )
+    }
+    if not toc_part_node_ids:
+        return spec
+
+    relations = [
+        relation
+        for relation in spec.relations
+        if not (
+            str(relation.get("relation_type") or relation.get("type") or "") == "contains"
+            and str(relation.get("source_id") or relation.get("source") or "") in {TOC_ROOT_NODE_ID, *toc_part_node_ids}
+        )
+    ]
+    return SourceSpec(
+        source_key=spec.source_key,
+        file_hash=spec.file_hash,
+        nodes=spec.nodes,
+        relations=relations,
+        chapters=spec.chapters,
+    )
+
+
 def _build_chapter_specs(chapters: Dict[str, str]) -> List[SourceSpec]:
+    if not chapters:
+        return []
     specs: List[SourceSpec] = []
-    for chapter, title in sorted(chapters.items(), key=lambda item: _structured_chapter_sort_key(item[0])):
+    has_export_outline = _has_toc_export_outline()
+    outline_nodes: List[Dict[str, Any]] = [
+        _node_payload(
+            node_id=TOC_ROOT_NODE_ID,
+            content=BOOK_TITLE,
+            node_type="part",
+            label=BOOK_TITLE,
+            chapter="toc",
+            source_file="structured_sync",
+            extra_metadata={
+                "role": "book_root",
+                "source_title": BOOK_TITLE,
+                "outline_source": "canonical",
+                "toc_path": [],
+            },
+        )
+    ]
+    outline_relations: List[Dict[str, Any]] = []
+
+    chapters_by_part: Dict[str, list[str]] = {part.id: [] for part in BOOK_PARTS}
+    appendices: list[str] = []
+    extra_chapters: list[str] = []
+    for chapter in sorted(chapters, key=_structured_chapter_sort_key):
+        appendix_index = appendix_number(chapter)
+        if appendix_index is not None:
+            appendices.append(chapter)
+            continue
+        part = part_for_chapter(chapter)
+        if part is None:
+            extra_chapters.append(chapter)
+            continue
+        chapters_by_part.setdefault(part.id, []).append(chapter)
+
+    previous_part_id: Optional[str] = None
+    unmapped_chapters = {
+        chapter for chapter in chapters
+        if not _structured_chapter_to_toc_node_id(chapter)
+    }
+    for part in BOOK_PARTS:
+        if not chapters_by_part.get(part.id):
+            continue
+        emit_canonical_part = (not has_export_outline) or _toc_raw_id(
+            _export_toc_part_node_id_for_chapter(chapters_by_part[part.id][0])
+        ) == ""
+        if emit_canonical_part:
+            outline_nodes.append(
+                _node_payload(
+                    node_id=part.id,
+                    content=part.label,
+                    node_type="part",
+                    label=part.label,
+                    chapter="toc",
+                    source_file="structured_sync",
+                    extra_metadata={
+                        "role": "book_part",
+                        "outline_source": "canonical",
+                        "part_number": part.id.removeprefix("part::"),
+                        "chapter_start": part.chapter_start,
+                        "chapter_end": part.chapter_end,
+                        "toc_path": [part.label],
+                    },
+                )
+            )
+            outline_relations.append(
+                _relation_payload(
+                    f"rel::{TOC_ROOT_NODE_ID}::contains::{part.id}",
+                    TOC_ROOT_NODE_ID,
+                    part.id,
+                    "contains",
+                    description="book root contains canonical part",
+                    chapter="toc",
+                    source_file="structured_sync",
+                )
+            )
+        if previous_part_id and emit_canonical_part and not has_export_outline:
+            outline_relations.append(
+                _relation_payload(
+                    f"rel::{previous_part_id}::precedes::{part.id}",
+                    previous_part_id,
+                    part.id,
+                    "precedes",
+                    description="canonical part order",
+                    chapter="toc",
+                    source_file="structured_sync",
+                )
+            )
+        if emit_canonical_part:
+            previous_part_id = part.id
+
+    emit_appendices_part = bool(appendices) and not has_export_outline
+    if emit_appendices_part:
+        outline_nodes.append(
+            _node_payload(
+                node_id=APPENDICES_PART_ID,
+                content=APPENDICES_PART_LABEL,
+                node_type="part",
+                label=APPENDICES_PART_LABEL,
+                chapter="toc",
+                source_file="structured_sync",
+                extra_metadata={
+                    "role": "book_part",
+                    "outline_source": "canonical",
+                    "part_number": "appendices",
+                    "toc_path": [APPENDICES_PART_LABEL],
+                },
+            )
+        )
+        outline_relations.append(
+            _relation_payload(
+                f"rel::{TOC_ROOT_NODE_ID}::contains::{APPENDICES_PART_ID}",
+                TOC_ROOT_NODE_ID,
+                APPENDICES_PART_ID,
+                "contains",
+                description="book root contains appendices",
+                chapter="toc",
+                source_file="structured_sync",
+            )
+        )
+        if previous_part_id:
+            outline_relations.append(
+                _relation_payload(
+                    f"rel::{previous_part_id}::precedes::{APPENDICES_PART_ID}",
+                    previous_part_id,
+                    APPENDICES_PART_ID,
+                    "precedes",
+                    description="canonical part order",
+                    chapter="toc",
+                    source_file="structured_sync",
+                )
+            )
+        previous_part_id = APPENDICES_PART_ID
+
+    if extra_chapters:
+        extra_part_id = "part::other"
+        outline_nodes.append(
+            _node_payload(
+                node_id=extra_part_id,
+                content="Other Structured Units",
+                node_type="part",
+                label="Other Structured Units",
+                chapter="toc",
+                source_file="structured_sync",
+                extra_metadata={
+                    "role": "book_part",
+                    "outline_source": "canonical",
+                    "part_number": "other",
+                    "toc_path": ["Other Structured Units"],
+                },
+            )
+        )
+        outline_relations.append(
+            _relation_payload(
+                f"rel::{TOC_ROOT_NODE_ID}::contains::{extra_part_id}",
+                TOC_ROOT_NODE_ID,
+                extra_part_id,
+                "contains",
+                description="book root contains uncategorized structured units",
+                chapter="toc",
+                source_file="structured_sync",
+            )
+        )
+        if previous_part_id:
+            outline_relations.append(
+                _relation_payload(
+                    f"rel::{previous_part_id}::precedes::{extra_part_id}",
+                    previous_part_id,
+                    extra_part_id,
+                    "precedes",
+                    description="canonical part order",
+                    chapter="toc",
+                    source_file="structured_sync",
+                )
+            )
+        chapters_by_part[extra_part_id] = extra_chapters
+
+    file_hash = hashlib.sha256(
+        json.dumps(
+            {
+                "book_title": BOOK_TITLE,
+                "parts": [(part.id, part.label, part.chapter_start, part.chapter_end) for part in BOOK_PARTS],
+                "present_parts": [part_id for part_id, values in sorted(chapters_by_part.items()) if values],
+                "appendices": appendices,
+                "extra_chapters": extra_chapters,
+            },
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    specs.append(
+        SourceSpec(
+            source_key="book::outline",
+            file_hash=file_hash,
+            nodes=outline_nodes,
+            relations=outline_relations,
+            chapters={},
+        )
+    )
+
+    previous_by_part: Dict[str, Optional[str]] = {}
+    previous_by_toc_parent: Dict[str, Optional[str]] = {}
+    for chapter, raw_title in sorted(chapters.items(), key=lambda item: _structured_chapter_sort_key(item[0])):
+        title = _canonical_chapter_title(chapter, raw_title)
         node_id = _chapter_node_id(chapter)
         node_type = "appendix" if _structured_appendix_number(chapter) is not None else "chapter"
         payload = {
@@ -1508,7 +1378,60 @@ def _build_chapter_specs(chapters: Dict[str, str]) -> List[SourceSpec]:
         metadata = {
             "role": "chapter_root",
             "title": title,
+            "outline_source": "canonical",
         }
+        parent_part_id: Optional[str]
+        export_part_node_id = _export_toc_part_node_id_for_chapter(chapter) if has_export_outline else None
+        if has_export_outline and toc_node_id:
+            parent_part_id = toc_node_id
+            metadata.update(
+                {
+                    "book_part_id": toc_metadata.get("toc_root_part_id"),
+                    "book_part_label": toc_metadata.get("toc_root_part_title"),
+                    "toc_path": [*(toc_metadata.get("toc_path") or []), _chapter_label(chapter, title)],
+                }
+            )
+        elif has_export_outline and export_part_node_id:
+            parent_part_id = export_part_node_id
+            parent_metadata = _toc_metadata_for_node_id(export_part_node_id)
+            metadata.update(
+                {
+                    "book_part_id": parent_metadata.get("toc_node_id"),
+                    "book_part_label": parent_metadata.get("toc_title"),
+                    "toc_path": [*(parent_metadata.get("toc_path") or []), _chapter_label(chapter, title)],
+                    "toc_match_role": "chapter_missing_from_export",
+                    "toc_fusion_source": "structured_toc_fusion",
+                }
+            )
+        else:
+            part = part_for_chapter(chapter)
+            if part is not None:
+                parent_part_id = part.id
+                metadata.update(
+                    {
+                        "book_part_id": part.id,
+                        "book_part_label": part.label,
+                        "toc_path": [part.label, _chapter_label(chapter, title)],
+                    }
+                )
+            elif _structured_appendix_number(chapter) is not None:
+                parent_part_id = APPENDICES_PART_ID
+                metadata.update(
+                    {
+                        "book_part_id": APPENDICES_PART_ID,
+                        "book_part_label": APPENDICES_PART_LABEL,
+                        "toc_path": [APPENDICES_PART_LABEL, _chapter_label(chapter, title)],
+                    }
+                )
+            else:
+                parent_part_id = "part::other" if extra_chapters else TOC_ROOT_NODE_ID
+                metadata.update(
+                    {
+                        "book_part_id": parent_part_id,
+                        "book_part_label": "Other Structured Units",
+                        "toc_path": ["Other Structured Units", _chapter_label(chapter, title)],
+                }
+            )
         if toc_node_id:
             metadata.update(
                 {
@@ -1518,19 +1441,37 @@ def _build_chapter_specs(chapters: Dict[str, str]) -> List[SourceSpec]:
                 }
             )
         relations: List[Dict[str, Any]] = []
-        if _TOC_HAS_INDEXED_SOURCE:
+        relations.append(
+            _relation_payload(
+                f"rel::{parent_part_id}::contains::{node_id}",
+                parent_part_id,
+                node_id,
+                "contains",
+                description=(
+                    "exported TOC chapter contains structured chapter"
+                    if has_export_outline and parent_part_id == toc_node_id
+                    else "canonical part contains structured chapter"
+                ),
+                chapter=chapter,
+                source_file="structured_sync",
+            )
+        )
+        previous_map = previous_by_toc_parent if has_export_outline else previous_by_part
+        previous_sibling_id = previous_map.get(parent_part_id)
+        if previous_sibling_id:
             relations.append(
                 _relation_payload(
-                    f"rel::{TOC_ROOT_NODE_ID}::contains::{node_id}",
-                    TOC_ROOT_NODE_ID,
+                    f"rel::{previous_sibling_id}::precedes::{node_id}",
+                    previous_sibling_id,
                     node_id,
-                    "contains",
-                    description="TOC root contains canonical structured chapter",
+                    "precedes",
+                    description="canonical chapter order",
                     chapter=chapter,
                     source_file="structured_sync",
                 )
             )
-        if toc_node_id:
+        previous_map[parent_part_id] = node_id
+        if toc_node_id and toc_node_id != node_id and not has_export_outline:
             relations.append(
                 _relation_payload(
                     f"rel::{node_id}::contains::{toc_node_id}",
@@ -1619,6 +1560,7 @@ def _collect_specs(*, skip_semantic: bool = False) -> tuple[List[SourceSpec], Di
     toc_specs: List[SourceSpec] = []
     for path in toc_paths:
         spec = _build_toc_source(path)
+        spec = _without_toc_export_outline_edges(spec)
         toc_specs.append(spec)
         for chapter, title in spec.chapters.items():
             chapters.setdefault(chapter, title)

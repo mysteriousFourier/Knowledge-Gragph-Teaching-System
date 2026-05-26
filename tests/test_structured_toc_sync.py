@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from KGTS.maintenance import sync_builders
 from KGTS.maintenance import sync_core
+from KGTS.maintenance.book_outline import APPENDICES_PART_ID
+from KGTS.maintenance.toc_fusion import build_structured_units, fuse_toc_with_structured_units
 from KGTS.maintenance.sync_utils import SourceSpec, _slug_heading
 
 
@@ -168,8 +170,9 @@ class StructuredTocSyncTest(unittest.TestCase):
 
         self.assertIn("chapter::chapter1", node_ids)
         self.assertIn("section::chapter1::changes_in_quantitative_traits_over_time", node_ids)
-        self.assertIn(("toc::root", "contains", "chapter::chapter1"), relation_keys)
-        self.assertIn(("chapter::chapter1", "contains", "toc::toc_l1_0002"), relation_keys)
+        self.assertIn(("toc::root", "contains", "toc::toc_l0_0001"), relation_keys)
+        self.assertIn(("toc::toc_l0_0001", "contains", "toc::toc_l1_0002"), relation_keys)
+        self.assertIn(("toc::toc_l1_0002", "contains", "chapter::chapter1"), relation_keys)
         self.assertIn(
             ("chapter::chapter1", "contains", "section::chapter1::changes_in_quantitative_traits_over_time"),
             relation_keys,
@@ -250,9 +253,10 @@ class StructuredTocSyncTest(unittest.TestCase):
         }
         node_ids = {node["id"] for spec in specs for node in spec.nodes}
         self.assertIn("chapter::chapter1", node_ids)
-        self.assertIn(("toc::root", "contains", "chapter::chapter1"), relation_keys)
-        self.assertIn(("chapter::chapter1", "contains", "toc::toc_l1_0002"), relation_keys)
-        self.assertIn(("toc::toc_l2_0003", "contains", "block::chapter1_002::1"), relation_keys)
+        self.assertIn(("toc::root", "contains", "toc::toc_l0_0001"), relation_keys)
+        self.assertIn(("toc::toc_l0_0001", "contains", "toc::toc_l1_0002"), relation_keys)
+        self.assertIn(("toc::toc_l0_0001", "contains", "chapter::chapter1"), relation_keys)
+        self.assertIn(("section::chapter1::a_brief_history", "contains", "block::chapter1_002::1"), relation_keys)
 
     def test_toc_mapped_chapter26_falls_back_to_canonical_chapter_for_weak_match(self):
         toc_payload = {
@@ -315,6 +319,99 @@ class StructuredTocSyncTest(unittest.TestCase):
             relation_keys,
         )
         self.assertNotIn(("toc::toc_l1_0648", "contains", "block::chapter26_001::1"), relation_keys)
+
+    def test_canonical_outline_normalizes_part_tree_when_toc_uses_local_chapter_numbers(self):
+        toc_payload = {
+            "metadata": {"source_title": "Test Book"},
+            "root_nodes": ["toc_l0_0320"],
+            "nodes": {
+                "toc_l0_0320": {
+                    "id": "toc_l0_0320",
+                    "title": "IV. SHORT-TERM RESPONSE ON A SINGLE CHARACTER",
+                    "level": 0,
+                    "entry_type": "part",
+                    "page": 479,
+                    "parent_id": None,
+                    "children": ["toc_l1_0321", "toc_l1_0345", "toc_l1_0355"],
+                },
+                "toc_l1_0321": {
+                    "id": "toc_l1_0321",
+                    "title": "1. THE BREEDER'S EQUATION",
+                    "level": 1,
+                    "entry_type": "chapter",
+                    "page": 481,
+                    "parent_id": "toc_l0_0320",
+                    "children": [],
+                },
+                "toc_l1_0345": {
+                    "id": "toc_l1_0345",
+                    "title": "2. TRUNCATION AND THRESHOLD SELECTION",
+                    "level": 1,
+                    "entry_type": "chapter",
+                    "page": 507,
+                    "parent_id": "toc_l0_0320",
+                    "children": [],
+                },
+                "toc_l1_0355": {
+                    "id": "toc_l1_0355",
+                    "title": "3. PERMANENT VERSUS TRANSIENT RESPONSE",
+                    "level": 1,
+                    "entry_type": "chapter",
+                    "page": 525,
+                    "parent_id": "toc_l0_0320",
+                    "children": [],
+                },
+            },
+        }
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            structured_dir = root / "structured"
+            export_dir = root / "目录树导出"
+            structured_dir.mkdir()
+            export_dir.mkdir()
+            (export_dir / "1目录_toc_tree.json").write_text(json.dumps(toc_payload, ensure_ascii=False), encoding="utf-8")
+            for index in (13, 14, 15):
+                chunk_payload = {
+                    "id": f"chapter{index}_001",
+                    "metadata": {
+                        "chapter": f"chapter{index}",
+                        "section": f"Chapter {index}",
+                        "heading_path": [f"Chapter {index}"],
+                    },
+                    "blocks": [{"type": "discussion", "content": f"Structured chapter {index} content."}],
+                }
+                (structured_dir / f"chapter{index}_001.json").write_text(
+                    json.dumps(chunk_payload, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+
+            with (
+                patch.object(sync_builders, "STRUCTURED_DIR", structured_dir),
+                patch.object(sync_builders, "TOC_EXPORT_DIR", export_dir),
+            ):
+                specs, _ = sync_builders._collect_specs(skip_semantic=True)
+
+        node_by_id = {node["id"]: node for spec in specs for node in spec.nodes}
+        relation_keys = {
+            (relation["source_id"], relation["relation_type"], relation["target_id"])
+            for spec in specs
+            for relation in spec.relations
+        }
+
+        self.assertEqual("part", node_by_id["toc::toc_l0_0320"]["type"])
+        self.assertEqual(
+            "Chapter 13: Short-term Changes in the Mean: 1. The Breeder's Equation",
+            node_by_id["chapter::chapter13"]["metadata"]["label"],
+        )
+        self.assertIn(("toc::root", "contains", "toc::toc_l0_0320"), relation_keys)
+        self.assertIn(("toc::toc_l0_0320", "contains", "toc::toc_l1_0321"), relation_keys)
+        self.assertIn(("toc::toc_l0_0320", "contains", "toc::toc_l1_0345"), relation_keys)
+        self.assertIn(("toc::toc_l0_0320", "contains", "toc::toc_l1_0355"), relation_keys)
+        self.assertIn(("toc::toc_l0_0320", "contains", "chapter::chapter13"), relation_keys)
+        self.assertIn(("toc::toc_l0_0320", "contains", "chapter::chapter14"), relation_keys)
+        self.assertIn(("toc::toc_l0_0320", "contains", "chapter::chapter15"), relation_keys)
+        self.assertNotIn(("toc::root", "contains", "chapter::chapter13"), relation_keys)
 
     def test_structured_chapters_create_thirty_canonical_chapter_nodes_when_toc_has_twenty_five_chapters(self):
         toc_nodes = {
@@ -390,6 +487,14 @@ class StructuredTocSyncTest(unittest.TestCase):
             self.assertIn(f"chapter::chapter{index}", node_by_id)
         self.assertEqual(25, len(toc_chapter_entries))
         self.assertTrue(all(node["type"] == "section" for node in toc_chapter_entries))
+        relation_keys = {
+            (relation["source_id"], relation["relation_type"], relation["target_id"])
+            for spec in specs
+            for relation in spec.relations
+        }
+        self.assertIn(("toc::root", "contains", "part::4"), relation_keys)
+        self.assertIn(("part::4", "contains", "chapter::chapter13"), relation_keys)
+        self.assertIn(("toc::toc_l1_0019", "contains", "chapter::chapter30"), relation_keys)
 
     def test_appendix_does_not_count_as_chapter_node(self):
         chunk_payload = {
@@ -414,6 +519,13 @@ class StructuredTocSyncTest(unittest.TestCase):
 
         node_by_id = {node["id"]: node for spec in specs for node in spec.nodes}
         self.assertEqual("appendix", node_by_id["chapter::appendix1"]["type"])
+        relation_keys = {
+            (relation["source_id"], relation["relation_type"], relation["target_id"])
+            for spec in specs
+            for relation in spec.relations
+        }
+        self.assertIn(("toc::root", "contains", APPENDICES_PART_ID), relation_keys)
+        self.assertIn((APPENDICES_PART_ID, "contains", "chapter::appendix1"), relation_keys)
         self.assertEqual(
             [],
             [
@@ -509,8 +621,94 @@ class StructuredTocSyncTest(unittest.TestCase):
         for index, title in titles.items():
             self.assertEqual("chapter", node_by_id[f"chapter::chapter{index}"]["type"])
             section_id = f"section::chapter{index}::{_slug_heading(title)}"
+            expected_parent = {
+                13: "toc::toc_l1_0321",
+                14: "toc::toc_l1_0345",
+                15: "toc::toc_l1_0355",
+            }[index]
+            self.assertIn((expected_parent, "contains", f"chapter::chapter{index}"), relation_keys)
             self.assertIn((f"chapter::chapter{index}", "contains", section_id), relation_keys)
             self.assertIn((section_id, "contains", f"block::chapter{index}_001::1"), relation_keys)
+
+    def test_toc_fusion_uses_structured_chapter_ids_for_local_part_numbering(self):
+        toc_payload = {
+            "metadata": {"source_title": "Test Book"},
+            "root_nodes": ["toc_l0_0320"],
+            "nodes": {
+                "toc_l0_0320": {
+                    "id": "toc_l0_0320",
+                    "title": "IV. SHORT-TERM RESPONSE ON A SINGLE CHARACTER",
+                    "level": 0,
+                    "entry_type": "part",
+                    "page": 479,
+                    "parent_id": None,
+                    "children": ["toc_l1_0321", "toc_l1_0345", "toc_l1_0355"],
+                },
+                "toc_l1_0321": {
+                    "id": "toc_l1_0321",
+                    "title": "1. THE BREEDER'S EQUATION",
+                    "level": 1,
+                    "entry_type": "chapter",
+                    "page": 481,
+                    "parent_id": "toc_l0_0320",
+                    "children": [],
+                },
+                "toc_l1_0345": {
+                    "id": "toc_l1_0345",
+                    "title": "2. TRUNCATION AND THRESHOLD SELECTION",
+                    "level": 1,
+                    "entry_type": "chapter",
+                    "page": 507,
+                    "parent_id": "toc_l0_0320",
+                    "children": [],
+                },
+                "toc_l1_0355": {
+                    "id": "toc_l1_0355",
+                    "title": "3. PERMANENT VERSUS TRANSIENT RESPONSE",
+                    "level": 1,
+                    "entry_type": "chapter",
+                    "page": 525,
+                    "parent_id": "toc_l0_0320",
+                    "children": [],
+                },
+            },
+        }
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            root = Path(tmp)
+            structured_dir = root / "structured"
+            structured_dir.mkdir()
+            toc_path = root / "1目录_toc_tree.json"
+            toc_path.write_text(json.dumps(toc_payload, ensure_ascii=False), encoding="utf-8")
+            titles = {
+                13: "Short-term Changes in the Mean: 1. The Breeder's Equation: Introduction",
+                14: "Short-term Changes in the Mean: 2. Truncation and Threshold Selection",
+                15: "Short-term Changes in the Mean: 3. Permanent Versus Transient Response",
+            }
+            for index, title in titles.items():
+                (structured_dir / f"chapter{index}_001.json").write_text(
+                    json.dumps(
+                        {
+                            "id": f"chapter{index}_001",
+                            "metadata": {
+                                "chapter": f"chapter{index}",
+                                "section": title,
+                                "heading_path": [title],
+                            },
+                            "blocks": [{"type": "discussion", "content": "content"}],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+            units = build_structured_units(sorted(structured_dir.glob("*.json")))
+            fusion = fuse_toc_with_structured_units(toc_path, units)
+
+        self.assertEqual("toc_l1_0321", fusion.chapter_to_toc_id["chapter13"])
+        self.assertEqual("toc_l1_0345", fusion.chapter_to_toc_id["chapter14"])
+        self.assertEqual("toc_l1_0355", fusion.chapter_to_toc_id["chapter15"])
+        self.assertNotIn("chapter1", fusion.chapter_to_toc_id)
 
     def test_scan_imports_built_package_into_graph(self):
         spec = SourceSpec(

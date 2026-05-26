@@ -26,6 +26,7 @@ GRAPH_ADMIN_HTML = VECTOR_DIR / "knowledge_graph" / "backend_admin.html"
 SEED_DIR = ROOT_DIR / "data" / "seed"
 SEED_CHAPTERS_FILE = SEED_DIR / "chapters.json"
 SEED_GRAPH_DB_FILE = SEED_DIR / "knowledge_graph.db"
+SEED_VECTOR_INDEX_DIR = SEED_DIR / "vector_index"
 
 
 # Bootstrap: register KGTS as a namespace package so that
@@ -276,9 +277,35 @@ def _ensure_seed_graph() -> None:
     )
 
 
+def _vector_index_dir() -> Path:
+    configured = os.getenv("KGTS_VECTOR_INDEX_DIR")
+    if configured:
+        return Path(configured)
+    return Path(os.getenv("APP_RUNTIME_DIR", str(ROOT_DIR / ".runtime"))) / "vector_index"
+
+
+def _ensure_seed_vector_index() -> None:
+    if not _env_flag("APP_BOOTSTRAP_SEED_DATA", True):
+        return
+    if not (SEED_VECTOR_INDEX_DIR / "metadata.json").exists():
+        return
+
+    target_dir = _vector_index_dir()
+    target_metadata = target_dir / "metadata.json"
+    if target_metadata.exists():
+        return
+
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    shutil.copytree(SEED_VECTOR_INDEX_DIR, target_dir)
+    print(f"[render] seed vector index installed: {target_dir}")
+
+
 def _ensure_seed_runtime() -> None:
     _ensure_seed_chapters()
     _ensure_seed_graph()
+    _ensure_seed_vector_index()
     if not _run_startup_maintenance():
         print("[render] startup maintenance skipped")
         return

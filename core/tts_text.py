@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
@@ -9,7 +11,8 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-FORMULA_POLICY_VERSION = "kgts-formula-speech-v2"
+FORMULA_POLICY_VERSION = "kgts-formula-speech-v3-sre"
+SRE_LATEX_SPEECH_CLI = ROOT_DIR / "scripts" / "latex_speech_cli.cjs"
 
 
 @dataclass(frozen=True)
@@ -137,6 +140,79 @@ _SYMBOL_SPEECH_REPLACEMENTS = {
     "％": "百分之",
     "%": "百分之",
     "℃": "摄氏度",
+}
+
+_SRE_COMPLEX_LATEX_RE = re.compile(
+    r"\\(?:frac|dfrac|tfrac|sqrt|sum|prod|int|oint|iint|iiint|partial|lim|begin|matrix|cases|binom|left|right|overline|underline|vec|hat|bar|tilde)\b|"
+    r"\\\\|&|\\over\b"
+)
+
+_SRE_PHRASE_REPLACEMENTS = (
+    ("partial differential", "偏导"),
+    ("sigma summation", "求和"),
+    ("integral", "积分"),
+    ("normal infinity", "无穷大"),
+    ("infinity", "无穷大"),
+    ("greater than or equal to", "大于等于"),
+    ("less than or equal to", "小于等于"),
+    ("greater than", "大于"),
+    ("less than", "小于"),
+    ("not equals", "不等于"),
+    ("not equal to", "不等于"),
+    ("equals", "等于"),
+    ("minus", "减"),
+    ("plus", "加"),
+    ("times", "乘以"),
+    ("divided by", "除以"),
+    ("over", "除以"),
+    ("left parenthesis", "左括号"),
+    ("right parenthesis", "右括号"),
+    ("left bracket", "左中括号"),
+    ("right bracket", "右中括号"),
+    ("left brace", "左大括号"),
+    ("right brace", "右大括号"),
+    ("negative", "负"),
+    ("upper", "大写"),
+    ("lower", "小写"),
+)
+
+_SRE_TOKEN_REPLACEMENTS = {
+    "StartFraction": "",
+    "EndFraction": "",
+    "Over": "除以",
+    "StartRoot": "根号",
+    "EndRoot": "根号结束",
+    "Subscript": "下标",
+    "Superscript": "上标",
+    "Underscript": "下限",
+    "Overscript": "上限",
+    "Endscripts": "",
+    "Baseline": "",
+    "StartLayout": "布局开始",
+    "EndLayout": "布局结束",
+    "StartMatrix": "矩阵开始",
+    "EndMatrix": "矩阵结束",
+    "Matrix": "矩阵",
+    "Row": "行",
+    "Column": "列",
+    "By": "乘",
+    "Start": "开始",
+    "End": "结束",
+}
+
+_SRE_GREEK_REPLACEMENTS = {
+    "alpha": "阿尔法",
+    "beta": "贝塔",
+    "gamma": "伽马",
+    "delta": "德尔塔",
+    "epsilon": "艾普西龙",
+    "lambda": "兰姆达",
+    "mu": "缪",
+    "pi": "派",
+    "sigma": "西格玛",
+    "theta": "西塔",
+    "phi": "斐",
+    "omega": "欧米伽",
 }
 
 _CJK_PAUSE_SENTINELS = {
@@ -304,7 +380,142 @@ def _replace_single_argument_command(expr: str, command: str, replacement: str =
     return expr
 
 
-def latex_to_speech(expr: str) -> str:
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _formula_engine() -> str:
+    return os.getenv("KGTS_TTS_FORMULA_ENGINE", "sre").strip().lower() or "sre"
+
+
+def _sre_engine_options() -> tuple[str, str]:
+    domain = os.getenv("KGTS_TTS_FORMULA_SRE_DOMAIN", "mathspeak").strip() or "mathspeak"
+    style = os.getenv("KGTS_TTS_FORMULA_SRE_STYLE", "default").strip() or "default"
+    return domain, style
+
+
+def _should_use_sre_formula_engine(expr: str) -> bool:
+    engine = _formula_engine()
+    if engine in {"off", "disabled", "python", "regex", "legacy"}:
+        return False
+    if engine in {"sre", "mathjax", "mathjax-sre"}:
+        return True
+    if engine == "auto":
+        return bool(_SRE_COMPLEX_LATEX_RE.search(expr))
+    return True
+
+
+def _node_executable() -> str:
+    return os.getenv("KGTS_TTS_FORMULA_NODE", "node").strip() or "node"
+
+
+def _normalize_sre_speech(speech: str) -> str:
+    text = speech.strip()
+    if not text:
+        return text
+    text = re.sub(r"\b(\d+)(?:st|nd|rd|th)\b", r"\1", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bsquared\b", "的 2 次方", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bcubed\b", "的 3 次方", text, flags=re.IGNORECASE)
+    for phrase, replacement in _SRE_PHRASE_REPLACEMENTS:
+        text = re.sub(rf"\b{re.escape(phrase)}\b", replacement, text, flags=re.IGNORECASE)
+    for token, replacement in _SRE_TOKEN_REPLACEMENTS.items():
+        text = re.sub(rf"\b{re.escape(token)}\b", replacement, text)
+    for token, replacement in _SRE_GREEK_REPLACEMENTS.items():
+        text = re.sub(rf"\b{re.escape(token)}\b", replacement, text, flags=re.IGNORECASE)
+    text = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", text)
+    text = re.sub(r"(?<=[A-Za-z])(?=\d)", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return ""
+    return _speech_with_pause(text)
+
+
+@lru_cache(maxsize=512)
+def _sre_latex_to_speech_cached(expr: str, domain: str, style: str) -> str | None:
+    return _run_sre_latex_speech_cli([(0, expr)], domain, style).get(0)
+
+
+def _run_sre_latex_speech_cli(formulas: list[tuple[int, str]], domain: str, style: str) -> dict[int, str]:
+    if not SRE_LATEX_SPEECH_CLI.is_file():
+        return {}
+    payload = {
+        "domain": domain,
+        "style": style,
+        "formulas": [{"id": formula_id, "latex": expr} for formula_id, expr in formulas],
+    }
+    try:
+        completed = subprocess.run(
+            [_node_executable(), str(SRE_LATEX_SPEECH_CLI)],
+            cwd=str(ROOT_DIR),
+            input=json.dumps(payload, ensure_ascii=False),
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=max(_env_float("KGTS_TTS_FORMULA_TIMEOUT_SECONDS", 3.0), 0.2),
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if completed.returncode != 0 and not completed.stdout.strip():
+        return {}
+    try:
+        data = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict) or not data.get("ok"):
+        return {}
+    results = data.get("results")
+    if not isinstance(results, list):
+        return {}
+    converted: dict[int, str] = {}
+    for result in results:
+        if not isinstance(result, dict) or not result.get("ok"):
+            continue
+        formula_id = result.get("id")
+        speech = result.get("speech")
+        if not isinstance(formula_id, int) or not isinstance(speech, str):
+            continue
+        normalized = _normalize_sre_speech(speech)
+        if normalized:
+            converted[formula_id] = normalized
+    return converted
+
+
+def _sre_latex_to_speech(expr: str) -> str | None:
+    if not _should_use_sre_formula_engine(expr):
+        return None
+    domain, style = _sre_engine_options()
+    return _sre_latex_to_speech_cached(expr.strip(), domain, style)
+
+
+def _sre_latex_batch_to_speech(expressions: list[str]) -> dict[int, str]:
+    if not _env_flag("KGTS_TTS_FORMULA_SRE_ENABLED", True):
+        return {}
+    formulas = [
+        (index, expr.strip())
+        for index, expr in enumerate(expressions)
+        if expr.strip() and _should_use_sre_formula_engine(expr)
+    ]
+    if not formulas:
+        return {}
+    domain, style = _sre_engine_options()
+    return _run_sre_latex_speech_cli(formulas, domain, style)
+
+
+def _legacy_latex_to_speech(expr: str) -> str:
     raw_expr = expr.strip()
     expr = _strip_latex_wrappers(raw_expr)
     complex_expr = bool(re.search(r"\\(sum|prod|int|begin|matrix|cases)|\\\\|&", raw_expr))
@@ -364,6 +575,42 @@ def latex_to_speech(expr: str) -> str:
     return _speech_with_pause(expr)
 
 
+def latex_to_speech(expr: str, *, prefer_sre: bool = True) -> str:
+    raw_expr = expr.strip()
+    if prefer_sre and _env_flag("KGTS_TTS_FORMULA_SRE_ENABLED", True):
+        sre_speech = _sre_latex_to_speech(raw_expr)
+        if sre_speech:
+            return sre_speech
+    return _legacy_latex_to_speech(raw_expr)
+
+
+def _replace_latex_matches_for_speech(
+    text: str,
+    pattern: str,
+    *,
+    expr_group: int | None = 1,
+    flags: int = 0,
+    prefer_sre: bool = True,
+) -> str:
+    matches = list(re.finditer(pattern, text, flags))
+    if not matches:
+        return text
+    expressions = [match.group(expr_group) if expr_group is not None else match.group(0) for match in matches]
+    sre_speeches = _sre_latex_batch_to_speech(expressions) if prefer_sre else {}
+
+    parts: list[str] = []
+    cursor = 0
+    for index, match in enumerate(matches):
+        parts.append(text[cursor : match.start()])
+        replacement = sre_speeches.get(index)
+        if replacement is None:
+            replacement = _legacy_latex_to_speech(expressions[index])
+        parts.append(replacement)
+        cursor = match.end()
+    parts.append(text[cursor:])
+    return "".join(parts)
+
+
 def _formula_id_to_speech(formula_id: str) -> str:
     item = _formula_library_by_id().get(formula_id)
     if not item:
@@ -381,13 +628,13 @@ def _formula_id_to_speech(formula_id: str) -> str:
 def replace_formulas_for_speech(text: str) -> str:
     text = _replace_prose_dashes(text)
     text = re.sub(r"\[\[FORMULA:([^\]]+)\]\]", lambda match: _formula_id_to_speech(match.group(1).strip()), text)
-    text = re.sub(r"\$\$(.+?)\$\$", lambda match: latex_to_speech(match.group(1)), text, flags=re.DOTALL)
-    text = re.sub(r"\\\[(.+?)\\\]", lambda match: latex_to_speech(match.group(1)), text, flags=re.DOTALL)
-    text = re.sub(r"\\\((.+?)\\\)", lambda match: latex_to_speech(match.group(1)), text, flags=re.DOTALL)
-    text = re.sub(r"(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)", lambda match: latex_to_speech(match.group(1)), text)
-    text = re.sub(r"\\frac\s*\{[^{}]+\}\s*\{[^{}]+\}", lambda match: latex_to_speech(match.group(0)), text)
-    text = _BARE_MATH_EXPR_RE.sub(lambda match: latex_to_speech(match.group(1)), text)
-    text = _LATEX_SUBSUP_TOKEN_RE.sub(lambda match: latex_to_speech(match.group(1)), text)
+    text = _replace_latex_matches_for_speech(text, r"\$\$(.+?)\$\$", flags=re.DOTALL)
+    text = _replace_latex_matches_for_speech(text, r"\\\[(.+?)\\\]", flags=re.DOTALL)
+    text = _replace_latex_matches_for_speech(text, r"\\\((.+?)\\\)", flags=re.DOTALL)
+    text = _replace_latex_matches_for_speech(text, r"(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)")
+    text = _replace_latex_matches_for_speech(text, r"\\frac\s*\{[^{}]+\}\s*\{[^{}]+\}", expr_group=None)
+    text = _BARE_MATH_EXPR_RE.sub(lambda match: latex_to_speech(match.group(1), prefer_sre=False), text)
+    text = _LATEX_SUBSUP_TOKEN_RE.sub(lambda match: latex_to_speech(match.group(1), prefer_sre=False), text)
     return text
 
 

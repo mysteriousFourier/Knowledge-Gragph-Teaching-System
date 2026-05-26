@@ -57,10 +57,14 @@ python backend/education/api_server.py
 线上低资源部署还建议设置：
 
 - `DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS=0`
-- `KGTS_RETRIEVAL_MODE=sparse_hybrid`
-- `KGTS_TTS_ENABLED=0`
+- `KGTS_RETRIEVAL_MODE=hybrid`
+- `KGTS_VECTOR_STARTUP_ENSURE=0`
+- `KGTS_VECTOR_UNLOAD_AFTER_QUERY=1`
+- `KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1`
+- `KGTS_TTS_ENABLED=1`
+- `KGTS_TTS_PROVIDER=genie_server`
 
-这些配置能减少 Azure F1 或 1 GB 免费 VM 的启动压力，同时保留讲稿、问答和练习生成的主要链路。
+这些配置能减少 Azure F1 或 1 GB 免费 VM 的启动压力，同时保留讲稿、问答、练习生成、向量检索和 TTS 入口。
 
 ## 维护约定
 

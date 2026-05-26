@@ -34,12 +34,41 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install -r requirements/vector-cpu.txt
 
       - name: Build React frontend
         run: |
           cd frontend
           npm ci
           npm run build
+
+      - name: Smoke test Azure production app import
+        env:
+          KGTS_RETRIEVAL_MODE: hybrid
+          KGTS_VECTOR_STARTUP_ENSURE: "0"
+          KGTS_VECTOR_UNLOAD_AFTER_QUERY: "1"
+          KGTS_VECTOR_UNLOAD_AFTER_REBUILD: "1"
+          KGTS_TTS_ENABLED: "1"
+          KGTS_TTS_PROVIDER: genie_server
+          KGTS_TTS_SERVER_URL: http://127.0.0.1:9880
+          APP_RUN_STARTUP_MAINTENANCE: "0"
+          RENDER_AUTO_SYNC_STRUCTURED: "0"
+        run: |
+          python - <<'PY'
+          import os
+          import render_app
+          from KGTS.core.tts_service import get_tts_status
+          from KGTS.core.graph_service import GraphService
+
+          assert render_app.app is not None
+          tts = get_tts_status()
+          assert tts["enabled"] is True
+          assert tts["provider"] == "genie_server"
+          stats = GraphService().read_graph().get("vector_stats", {})
+          assert stats.get("mode") == "hybrid"
+          assert stats.get("unload_after_query") is True
+          print("azure smoke ok", {"tts": tts["provider"], "retrieval": stats.get("mode")})
+          PY
 
       - name: Prepare deployment package
         run: |
@@ -57,8 +86,6 @@ jobs:
             --exclude 'backend/vector_index_system/memory_systems' \
             --exclude 'backend/vector_index_system/models' \
             --exclude 'backend/vector_index_system/vector_index' \
-            --exclude 'requirements-tts.txt' \
-            --exclude 'requirements-gpt-sovits-tts.txt' \
             --exclude 'third_party/Genie-TTS' \
             --exclude 'third_party/genie-tts' \
             --exclude 'Genie-TTS' \

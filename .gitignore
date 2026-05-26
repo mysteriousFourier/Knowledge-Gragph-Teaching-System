@@ -130,9 +130,12 @@ backend/models/genie-tts/
 *.db
 !data/seed/
 !data/seed/knowledge_graph.db
+!data/seed/vector_index/
+!data/seed/vector_index/**
 *.db-shm
 *.db-wal
 *.faiss
+!data/seed/vector_index/*.faiss
 *.index
 *.pkl
 *.pickle

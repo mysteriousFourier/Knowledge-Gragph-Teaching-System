@@ -53,7 +53,9 @@ interface RelationBuckets {
 }
 
 const nodeColors: Record<string, string> = {
+  part: "#0f766e",
   chapter: "#2563eb",
+  appendix: "#4f46e5",
   concept: "#16a34a",
   formula: "#9333ea",
   theorem: "#dc2626",
@@ -2690,7 +2692,7 @@ function getNodeIdPriority(nodeId: string, selectedNodeId: string | null, select
 }
 
 function isStructuralHubNode(node: GraphNode | undefined) {
-  return (node?.type || "") === "chapter"
+  return (node?.type || "") === "chapter" || (node?.type || "") === "appendix"
 }
 
 function isContentStartNode(node: GraphNode) {

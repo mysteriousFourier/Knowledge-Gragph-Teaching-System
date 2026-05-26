@@ -1,4 +1,4 @@
-# 检索模式说明
+﻿# 检索模式说明
 
 KGTS 当前支持三种图谱检索模式。
 
@@ -9,13 +9,13 @@ KGTS 当前支持三种图谱检索模式。
 先安装可选依赖：
 
 ```bash
-python -m pip install -r requirements-vector.txt
+python -m pip install -r requirements/vector.txt
 ```
 
 低内存 Linux VM 使用 CPU-only 依赖文件，避免 PyPI 自动拉取 CUDA 版 torch：
 
 ```bash
-python -m pip install -r requirements-vector-cpu.txt
+python -m pip install -r requirements/vector-cpu.txt
 ```
 
 本地默认配置：
@@ -36,14 +36,7 @@ KGTS_PROJECT_LOCAL_ONLY=1
 
 ## `graph_db`
 
-轻量兼容模式。它使用 SQLite 知识图谱和文本打分，不依赖向量模型。
-
-适用场景：
-
-- 部署到 Azure App Service F1 免费实例
-- 没有 embedding 模型
-- 没有 FAISS 索引
-- 最关注冷启动速度和部署包大小
+轻量兼容模式。它使用 SQLite 知识图谱和文本打分，不依赖向量模型。保留给本地排障和兼容场景；当前 Azure 默认不使用它。
 
 ## `sparse_hybrid`
 
@@ -64,26 +57,18 @@ KGTS_PROJECT_LOCAL_ONLY=1
 - 本地模型文件
 - 外部 embedding API
 
-Azure F1 推荐配置：
-
-```text
-KGTS_RETRIEVAL_MODE=sparse_hybrid
-```
-
-`sparse_hybrid` 不是神经网络 embedding 检索，但可以在不增加 Azure F1 部署体积的情况下提供实用的“图谱 + 向量式”混合检索。
+`sparse_hybrid` 不是神经网络 embedding 检索，但可以在不增加部署体积的情况下提供实用的“图谱 + 向量式”混合检索。当前 Azure 默认仍保持 `hybrid`，不会主动切到该模式。
 
 ## 低资源 Azure 部署说明
 
-Azure App Service F1 不适合安装神经 embedding 大模型。线上推荐：
+Azure App Service F1 不适合让神经 embedding 大模型常驻主进程。线上保持 `hybrid`，但用 CPU-only 依赖、启动不预热、查询/重建后释放模型引用：
 
 ```text
-KGTS_RETRIEVAL_MODE=sparse_hybrid
-```
-
-如果最关注冷启动和内存占用，可以退回：
-
-```text
-KGTS_RETRIEVAL_MODE=graph_db
+KGTS_RETRIEVAL_MODE=hybrid
+KGTS_VECTOR_STARTUP_ENSURE=0
+KGTS_VECTOR_UNLOAD_AFTER_QUERY=1
+KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
+KGTS_VECTOR_HASH_FALLBACK=1
 ```
 
 GitHub Actions 的 Azure App Service 部署包会排除这些大型本地资产：
@@ -92,9 +77,9 @@ GitHub Actions 的 Azure App Service 部署包会排除这些大型本地资产�
 - `backend/vector_index_system/vector_index/`
 - `backend/vector_index_system/memory_systems/`
 
-重型向量依赖不要放在 `requirements.txt` 中。它们已拆到 `requirements-vector.txt` / `requirements-vector-cpu.txt`，因此 Azure F1 部署时不会安装 torch、sentence-transformers 或 faiss。
+重型向量依赖不要放在 `requirements.txt` 中。它们已拆到 `requirements/vector.txt` / `requirements/vector-cpu.txt`；Azure workflow 安装 `requirements/vector-cpu.txt`，避免拉取 CUDA 版 torch。
 
-Azure for Students 1 GB VM 可以实验 `hybrid`，但应按错峰运行处理：TTS 朗读课件时停掉或空闲向量检索，备课/问答需要向量检索时停掉 TTS 代理。推荐配置：
+Azure for Students 1 GB VM 保持 `hybrid`，但应按错峰运行处理：TTS 朗读课件时不要触发向量重建，备课/问答需要向量检索时让 TTS 代理空闲。推荐配置：
 
 ```text
 KGTS_RETRIEVAL_MODE=hybrid

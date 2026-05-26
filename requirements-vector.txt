@@ -1,9 +1,0 @@
-# Optional local neural vector retrieval dependencies.
-#
-# On low-memory Linux VMs, install CPU-only torch first to avoid pulling CUDA
-# wheels from PyPI:
-#   python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
-#   python -m pip install -r requirements-vector.txt
-numpy>=1.24,<3.0
-sentence-transformers>=2.2,<4.0
-faiss-cpu>=1.7,<2.0

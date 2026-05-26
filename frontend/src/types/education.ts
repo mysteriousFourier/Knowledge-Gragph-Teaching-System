@@ -422,6 +422,52 @@ export interface PptSlideLecture {
   consistency_report?: ConsistencyReport
 }
 
+export interface CoursewareStyleColor {
+  name?: string
+  model?: string
+  value?: string
+}
+
+export interface CoursewareStyleProfile {
+  document_class?: string
+  document_options?: string[]
+  themes?: string[]
+  packages?: string[]
+  colors?: CoursewareStyleColor[]
+  newcommands?: string[]
+  beamertemplates?: string[]
+  layout_summary?: {
+    frame_count?: number
+    columns_frame_count?: number
+    image_frame_count?: number
+    formula_frame_count?: number
+    tikz_frame_count?: number
+    itemize_frame_count?: number
+    [key: string]: unknown
+  }
+  style_signals?: string[]
+  sample_frame_titles?: string[]
+  source_file?: string
+  archive_file_count?: number
+  archive_image_count?: number
+  archive_image_paths?: string[]
+  truncated?: boolean
+  [key: string]: unknown
+}
+
+export interface CoursewareStyleReference {
+  source_filename?: string
+  profile?: CoursewareStyleProfile
+  guidance?: string
+  warning?: string
+  [key: string]: unknown
+}
+
+export interface CoursewareStyleReferenceResponse extends CoursewareStyleReference {
+  success: boolean
+  error?: string
+}
+
 export interface PptTexGenerateRequest {
   chapter_title?: string
   style?: string
@@ -429,6 +475,7 @@ export interface PptTexGenerateRequest {
   source_node_ids?: string[]
   graph_scope?: "subtree" | string
   teacher_guidance?: string
+  style_reference?: CoursewareStyleReference | null
   max_slides?: number
 }
 
@@ -472,6 +519,9 @@ export interface GenerateSlideLecturesRequest {
   source_node_ids?: string[]
   graph_scope?: "subtree" | string
   teacher_guidance?: string
+  style_reference?: CoursewareStyleReference | null
+  target_slide_indices?: number[]
+  existing_slide_lectures?: PptSlideLecture[]
   ppt_source_node_ids?: string[]
   ppt_source_scope?: GraphSourceScope | null
 }

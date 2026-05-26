@@ -1,3 +1,4 @@
+from KGTS.core import tts_text
 from KGTS.core.tts_text import normalize_tts_text
 
 
@@ -54,3 +55,49 @@ def test_normalize_tts_text_speaks_unwrapped_formulas() -> None:
     assert "批 下标 0 大于 1 除以 左括号 2 恩艾斯 右括号" in normalized
     assert "批 下标 艾弗艾艾克斯" in normalized
     assert r"\text" not in normalized
+
+
+def test_normalize_tts_text_uses_sre_for_structural_latex() -> None:
+    normalized = normalize_tts_text(
+        r"二次公式是 $\frac{-b+\sqrt{b^2-4ac}}{2a}$。",
+        "zh",
+    ).normalized_text
+
+    assert "根号" in normalized
+    assert "除以" in normalized
+    assert r"\frac" not in normalized
+    assert r"\sqrt" not in normalized
+
+
+def test_normalize_tts_text_speaks_sum_and_integral() -> None:
+    normalized = normalize_tts_text(
+        r"看 $$\sum_{i=1}^{n} x_i$$ 和 $\int_0^\infty e^{-x} dx$。",
+        "zh",
+    ).normalized_text
+
+    assert "求和" in normalized
+    assert "下限" in normalized
+    assert "上限" in normalized
+    assert "积分" in normalized
+    assert "无穷大" in normalized
+
+
+def test_normalize_tts_text_speaks_matrix() -> None:
+    normalized = normalize_tts_text(
+        r"矩阵为 \[\begin{pmatrix}a&b\\c&d\end{pmatrix}\]。",
+        "zh",
+    ).normalized_text
+
+    assert "矩阵" in normalized
+    assert r"\begin" not in normalized
+    assert "&" not in normalized
+
+
+def test_normalize_tts_text_falls_back_when_sre_unavailable(monkeypatch) -> None:
+    monkeypatch.setattr(tts_text, "_sre_latex_to_speech", lambda expr: None)
+    monkeypatch.setattr(tts_text, "_sre_latex_batch_to_speech", lambda expressions: {})
+
+    normalized = normalize_tts_text(r"比例为 $\frac{a}{b}$。", "all_zh").normalized_text
+
+    assert "诶 除以 比" in normalized
+    assert r"\frac" not in normalized

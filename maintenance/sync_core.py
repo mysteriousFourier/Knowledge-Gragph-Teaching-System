@@ -150,7 +150,14 @@ def rebuild_staging_graph(
 
     from KGTS.maintenance import sync_builders
 
-    effective_toc_dir = Path(toc_export_dir) if toc_export_dir is not None else Path(os.getenv("KGTS_TOC_EXPORT_DIR", ""))
+    if toc_export_dir is not None:
+        effective_toc_dir = Path(toc_export_dir)
+    else:
+        configured_toc_dir = os.getenv("KGTS_TOC_EXPORT_DIR", "").strip()
+        default_toc_dir = PROJECT_ROOT / "目录树导出"
+        effective_toc_dir = Path(configured_toc_dir) if configured_toc_dir else (
+            default_toc_dir if default_toc_dir.exists() else Path("")
+        )
     source_patches = [
         patch.object(sync_builders, "TOC_EXPORT_DIR", effective_toc_dir),
         patch("KGTS.maintenance.sync_core.MANIFEST_PATH", manifest_path),

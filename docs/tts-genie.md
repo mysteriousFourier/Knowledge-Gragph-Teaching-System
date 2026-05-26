@@ -2,7 +2,7 @@
 
 KGTS 默认使用项目内的 `Genie-TTS` 推理特化运行本地 TTS。
 
-这个能力面向本地或高资源 VM。Azure App Service F1 和 Azure for Students 1 GB 免费 VM 默认都应禁用 TTS，避免模型体积、内存和冷启动时间拖垮主站。
+这个能力面向本地或高资源 VM。Azure App Service F1 和 Azure for Students 1 GB 免费 VM 的主站不应直接加载本地 TTS 权重；线上默认保持 TTS 接口启用，并通过 `genie_server` 代理调用独立推理服务，避免模型体积、内存和冷启动时间拖垮主站。
 
 - 推理代码：`third_party/Genie-TTS`
 - 公共资源：`models/tts/GenieData`
@@ -61,16 +61,30 @@ curl http://127.0.0.1:8000/api/tts/status
 
 这不是字节级真流式；Genie-TTS 仍要先生成 wav 文件，再由浏览器播放。当前实现已经把“播放当前段”和“预取后续段”并行起来。
 
+## 公式朗读
+
+TTS 合成前会先在后端把 LaTeX 公式转换成可朗读文本。默认配置为：
+
+```text
+KGTS_TTS_FORMULA_ENGINE=sre
+KGTS_TTS_FORMULA_TIMEOUT_SECONDS=3
+```
+
+`sre` 模式通过 `scripts/latex_speech_cli.cjs` 调用前端依赖里的 MathJax 和 Speech Rule Engine，把 `$...$`、`$$...$$`、`\(...\)`、`\[...]` 以及裸 `\frac{...}{...}` 转换成公式朗读文本。分式、根号、求和、积分、矩阵等结构化 LaTeX 会优先走这条链路；简单裸表达式仍保留 Python 内置规则，避免把 `p_0 > 1/(2Ns)` 这类短式子读得更差。
+
+如果 VM 或本地环境没有安装 Node 依赖，或者公式转换超时/失败，系统会自动回退到 Python 内置转换，不会让 `/api/tts/synthesize` 因公式朗读引擎缺失而整体失败。更新部署时执行 `cd frontend && npm ci` 即可安装所需 Node 包。
+
 ## 线上部署建议
 
 轻量线上部署建议使用：
 
 ```text
-KGTS_TTS_ENABLED=0
-KGTS_TTS_PROVIDER=disabled
+KGTS_TTS_ENABLED=1
+KGTS_TTS_PROVIDER=genie_server
+KGTS_TTS_SERVER_URL=http://127.0.0.1:9880
 ```
 
-如果需要线上语音，优先把 TTS 独立部署到更高内存 VM 或专门推理服务，再让主站通过 server provider 调用，不要把 GenieData、ONNX 模型、缓存音频和主 Web 进程放在同一个 1 GB 免费 VM 里。1 GB 免费 VM 上如需同时保留本地图结构向量检索能力，按错峰任务处理：TTS 只用于朗读课件，向量检索只用于备课/问答。
+把 TTS 独立部署到更高内存 VM、专门推理服务，或单独的本机代理进程，再让主站通过 server provider 调用；不要把 GenieData、ONNX 模型、缓存音频和主 Web 进程放在同一个 1 GB 免费 VM 进程里。1 GB 免费 VM 上如需同时保留本地图结构向量检索能力，按错峰任务处理：TTS 只用于朗读课件，向量检索只用于备课/问答。
 
 ## 受限 VM 实验：独立 Genie 代理
 
