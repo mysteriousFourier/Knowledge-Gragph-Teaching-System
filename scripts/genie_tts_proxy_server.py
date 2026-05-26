@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import gc
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +94,14 @@ def _release_genie_models(character_name: str | None) -> None:
     _malloc_trim()
 
 
+def _schedule_process_exit() -> None:
+    def exit_later() -> None:
+        time.sleep(0.5)
+        os._exit(0)
+
+    threading.Thread(target=exit_later, daemon=True).start()
+
+
 class LoadCharacterRequest(BaseModel):
     character_name: str | None = None
     predefined_character: str | None = None
@@ -125,6 +134,7 @@ def health() -> dict[str, Any]:
         "service": "kgts-genie-tts-proxy",
         "low_memory_patch": LOW_MEMORY_PATCHED,
         "unload_after_synthesis": _env_flag("KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH", False),
+        "exit_after_synthesis": _env_flag("KGTS_TTS_PROXY_EXIT_AFTER_SYNTH", False),
     }
 
 
@@ -134,6 +144,7 @@ def status() -> dict[str, Any]:
     payload["service"] = "kgts-genie-tts-proxy"
     payload["low_memory_patch"] = LOW_MEMORY_PATCHED
     payload["unload_after_synthesis"] = _env_flag("KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH", False)
+    payload["exit_after_synthesis"] = _env_flag("KGTS_TTS_PROXY_EXIT_AFTER_SYNTH", False)
     return payload
 
 
@@ -191,6 +202,8 @@ def synthesize(payload: TtsRequest) -> FileResponse:
     finally:
         if _env_flag("KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH", False):
             _release_genie_models(payload.character_name or settings.character_name or settings.predefined_character)
+        if _env_flag("KGTS_TTS_PROXY_EXIT_AFTER_SYNTH", False):
+            _schedule_process_exit()
     elapsed = time.perf_counter() - started_at
     print(
         f"[genie-proxy] synthesize done chars={len(normalized.normalized_text)} "

@@ -88,6 +88,7 @@ KGTS_TTS_SERVER_URL=http://127.0.0.1:9880
 KGTS_TTS_GENIE_LOW_MEMORY=1 \
 KGTS_TTS_ONNX_CACHE_DIR=.runtime/tts/onnx-fp32-cache \
 KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH=1 \
+KGTS_TTS_PROXY_EXIT_AFTER_SYNTH=1 \
 python scripts/genie_tts_proxy_server.py
 ```
 
@@ -95,4 +96,4 @@ python scripts/genie_tts_proxy_server.py
 
 实际 1 GB VM 上仍要把它视为实验配置：`shu` 模型的 T2S 两个 decoder 各引用约 293 MB FP32 权重，VITS 约 154 MB，CN-HuBERT 约 360 MB；即使磁盘模型只有约 581 MB，ONNX Runtime 加载后也可能超过免费 VM 可用内存。代理进程的价值是保护主站，TTS OOM 时只重启代理，不拖垮页面和其它 API。
 
-在 1 GB VM 上建议开启 `KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH=1`。它会在每次合成后释放 Genie 角色模型、HuBERT 和引用音频缓存，牺牲下一次冷启动时间来换取主站长期空闲内存。
+在 1 GB VM 上建议开启 `KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH=1` 和 `KGTS_TTS_PROXY_EXIT_AFTER_SYNTH=1`。前者会在每次合成后释放 Genie 角色模型、HuBERT 和引用音频缓存；后者会让代理在响应发出后退出并由 systemd 重启，以绕过 ONNX Runtime 内存不完全归还的问题。
