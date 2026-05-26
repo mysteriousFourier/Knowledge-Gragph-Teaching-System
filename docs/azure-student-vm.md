@@ -282,7 +282,7 @@ Environment=KGTS_TTS_ONNX_CACHE_DIR=/home/azureuser/kgts/.runtime/tts/onnx-fp32-
 Environment=KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH=1
 Environment=KGTS_TTS_PROXY_EXIT_AFTER_SYNTH=1
 ExecStart=/home/azureuser/kgts/.venv/bin/python scripts/genie_tts_proxy_server.py
-Restart=on-failure
+Restart=always
 RestartSec=10
 OOMPolicy=stop
 
@@ -304,7 +304,7 @@ free -h
 journalctl -u kgts-tts -n 100 --no-pager
 ```
 
-`KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH=1` 会在每次合成后卸载 Genie 角色模型、HuBERT 和引用音频缓存。ONNX Runtime 在 1 GB VM 上不一定把全部内存还给系统，因此更稳的配置是同时开启 `KGTS_TTS_PROXY_EXIT_AFTER_SYNTH=1`，让代理在响应发出后退出并由 systemd 拉起一个空闲新进程。代价是每次合成都接近冷启动。
+`KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH=1` 会在每次合成后卸载 Genie 角色模型、HuBERT 和引用音频缓存。ONNX Runtime 在 1 GB VM 上不一定把全部内存还给系统，因此更稳的配置是同时开启 `KGTS_TTS_PROXY_EXIT_AFTER_SYNTH=1`，让代理在响应发出后退出并由 systemd 拉起一个空闲新进程。这个模式需要 `Restart=always`。代价是每次合成都接近冷启动。
 
 如果合成时出现 OOM，`kgts-tts.service` 会失败或重启，但 `kgts.service` 应继续可用。这说明当前免费 VM 不能稳定承载本地 TTS；可以保留 `genie_server` 配置指向更高内存 VM，或恢复 `KGTS_TTS_ENABLED=0`。
 

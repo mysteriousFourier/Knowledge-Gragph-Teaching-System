@@ -26,7 +26,7 @@ os.environ.setdefault("KGTS_TTS_GENIE_LOW_MEMORY", "1")
 os.environ.setdefault("KGTS_TTS_ONNX_INTRA_OP_THREADS", "1")
 os.environ.setdefault("KGTS_TTS_ONNX_INTER_OP_THREADS", "1")
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -177,7 +177,7 @@ def set_reference_audio(payload: ReferenceAudioRequest) -> dict[str, Any]:
 
 
 @app.post("/tts")
-def synthesize(payload: TtsRequest) -> FileResponse:
+def synthesize(payload: TtsRequest, background_tasks: BackgroundTasks) -> FileResponse:
     settings = get_tts_settings()
     normalized = normalize_tts_text(payload.text, settings.language, payload.language)
     if not normalized.normalized_text:
@@ -203,7 +203,7 @@ def synthesize(payload: TtsRequest) -> FileResponse:
         if _env_flag("KGTS_TTS_PROXY_UNLOAD_AFTER_SYNTH", False):
             _release_genie_models(payload.character_name or settings.character_name or settings.predefined_character)
         if _env_flag("KGTS_TTS_PROXY_EXIT_AFTER_SYNTH", False):
-            _schedule_process_exit()
+            background_tasks.add_task(_schedule_process_exit)
     elapsed = time.perf_counter() - started_at
     print(
         f"[genie-proxy] synthesize done chars={len(normalized.normalized_text)} "
