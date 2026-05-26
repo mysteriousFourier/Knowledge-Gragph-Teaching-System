@@ -1,8 +1,18 @@
 # Azure for Students VM 部署
 
-> 最后核对：2026-05-25。Azure 免费服务和地区 SKU 可用性会变，创建资源前以 Azure Portal 的 Free services、Cost Management 和 Pricing Calculator 为准。
+> 最后核对：2026-05-26。Azure 免费服务和地区 SKU 可用性会变，创建资源前以 Azure Portal 的 Free services、Cost Management 和 Pricing Calculator 为准。
 
 KGTS 已支持单端口部署：前端构建产物、教学 API、维护 API、图谱浏览页和后台页都由根目录 `render_app.py` 托管。VM 上只需要运行一个 Python Web 服务，再由防火墙或 Nginx 暴露到公网。
+
+当前实测部署：
+
+| 项目 | 值 |
+| --- | --- |
+| 资源组 | `kgts-student-sea-rg` |
+| VM | `kgts-free-vm` |
+| 区域 | `southeastasia` |
+| 规格 | `Standard_B2ats_v2` |
+| 公网访问 | `http://20.212.50.255/` |
 
 ## 免费规格选择
 
@@ -14,7 +24,7 @@ Azure for Students 当前包含 12 个月内的免费 VM 小规格和 100 美元
 | `Standard_B2pts_v2` | Arm64 | 2 vCPU / 1 GB RAM | 备选。部分 Python/Node 依赖在 Arm 上更容易遇到 wheel 或构建问题。 |
 | `Standard_B1s` | x86-64 | 1 vCPU / 1 GB RAM | 最稳妥兼容兜底，但构建和冷启动更慢。 |
 
-KGTS 的完整本地能力，包括神经向量检索和 Genie-TTS，不适合 1 GB 免费 VM。免费 VM 线上部署应使用轻量配置：
+KGTS 的完整本地能力，包括神经向量检索和 Genie-TTS，不适合在 1 GB 免费 VM 上同时常驻运行。免费 VM 线上部署应优先使用轻量配置：
 
 ```text
 KGTS_RETRIEVAL_MODE=sparse_hybrid
@@ -27,6 +37,8 @@ DEEPSEEK_GENERATION_READ_TIMEOUT_SECONDS=0
 ```
 
 如果要实验本地 TTS，必须把它作为独立服务运行，并让主站使用 `genie_server` 代理。不要在主 `kgts.service` 里直接使用 `KGTS_TTS_PROVIDER=genie`。
+
+如果同时要实验本地 TTS 和神经向量检索，把它们按错峰任务处理：TTS 只用于朗读课件，向量检索只用于备课/问答。不要在 TTS 合成时跑 embedding，也不要让 Web 启动时预热向量模型。
 
 ## 成本边界
 
@@ -121,6 +133,13 @@ cd ..
 
 前端生产构建默认不生成 sourcemap，以降低 1 GB 免费 VM 的构建内存和磁盘压力。如需调试线上 bundle，可临时执行 `VITE_BUILD_SOURCEMAP=1 npm run build`。
 
+如果要启用本地神经向量检索，使用 CPU-only 依赖文件，避免 PyPI 自动安装 CUDA 版 torch：
+
+```bash
+. .venv/bin/activate
+python -m pip install -r requirements-vector-cpu.txt
+```
+
 创建生产环境配置：
 
 ```bash
@@ -138,6 +157,19 @@ EOF
 ```
 
 把 `DEEPSEEK_API_KEY` 改成实际值；不要提交 `.env`。
+
+同一台 1 GB VM 需要同时保留 TTS 和神经向量检索能力时，可把检索配置改为低内存 hybrid：
+
+```text
+KGTS_RETRIEVAL_MODE=hybrid
+KGTS_VECTOR_STARTUP_ENSURE=0
+KGTS_VECTOR_UNLOAD_AFTER_QUERY=1
+KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
+KGTS_EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+KGTS_EMBEDDING_CACHE_DIR=.runtime/huggingface
+```
+
+第一次下载模型时临时设置 `KGTS_EMBEDDING_LOCAL_FILES_ONLY=0`；模型缓存完成后再改回 `1`，保证运行只读项目目录内缓存。
 
 ## systemd 服务
 
@@ -224,6 +256,7 @@ cd ~/kgts
 git pull --ff-only origin main
 . .venv/bin/activate
 python -m pip install -r requirements.txt
+python -m pip install -r requirements-vector-cpu.txt
 cd frontend
 npm ci
 NODE_OPTIONS=--max-old-space-size=1536 npm run build
@@ -234,6 +267,38 @@ sudo cp -a frontend/dist/. /var/www/kgts/
 sudo chown -R www-data:www-data /var/www/kgts
 sudo systemctl restart kgts
 sudo journalctl -u kgts -n 80 --no-pager
+```
+
+如果线上只使用 `sparse_hybrid` 或 `graph_db`，可以跳过 `requirements-vector-cpu.txt`。
+
+## 可选：本地图结构向量检索
+
+这不是推荐的常驻生产配置，只用于备课和问答。运行前建议先停 TTS 代理：
+
+```bash
+sudo systemctl stop kgts-tts
+```
+
+重建索引：
+
+```bash
+cd ~/kgts
+. .venv/bin/activate
+python -m KGTS.core.cli_dispatch rebuild_vector_index
+```
+
+也可以通过应用里的图谱/问答流程触发查询。低内存配置下每次查询会加载 embedding 模型，查询后释放模型引用；首次查询会比较慢。完成备课/问答后如需朗读课件，再启动 TTS：
+
+```bash
+sudo systemctl start kgts-tts
+```
+
+检查状态：
+
+```bash
+curl -s http://127.0.0.1/api/local-assets/status
+free -h
+du -sh .venv .runtime models third_party 2>/dev/null
 ```
 
 ## 可选：本机 Genie-TTS 代理实验

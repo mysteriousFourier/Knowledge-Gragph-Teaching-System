@@ -290,6 +290,8 @@ def _ensure_structured_graph() -> None:
 
 
 def _ensure_vector_index() -> None:
+    if not _env_flag("KGTS_VECTOR_STARTUP_ENSURE", False):
+        return
     graph = _graph()
     if graph.retrieval_mode != "hybrid":
         return

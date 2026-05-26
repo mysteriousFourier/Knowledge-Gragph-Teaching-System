@@ -12,6 +12,12 @@ KGTS 当前支持三种图谱检索模式。
 python -m pip install -r requirements-vector.txt
 ```
 
+低内存 Linux VM 使用 CPU-only 依赖文件，避免 PyPI 自动拉取 CUDA 版 torch：
+
+```bash
+python -m pip install -r requirements-vector-cpu.txt
+```
+
 本地默认配置：
 
 ```text
@@ -20,10 +26,13 @@ KGTS_VECTOR_INDEX_DIR=.runtime/vector_index
 KGTS_EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 KGTS_EMBEDDING_CACHE_DIR=.runtime/huggingface
 KGTS_EMBEDDING_LOCAL_FILES_ONLY=1
+KGTS_VECTOR_STARTUP_ENSURE=0
 KGTS_PROJECT_LOCAL_ONLY=1
 ```
 
 `KGTS_EMBEDDING_LOCAL_FILES_ONLY=1` 会要求模型已经在本机缓存或路径可用。`KGTS_PROJECT_LOCAL_ONLY=1` 会把索引和 HuggingFace/SentenceTransformer 缓存固定在项目目录内，推荐把模型预先放到 `.runtime/huggingface` 或把 `KGTS_EMBEDDING_MODEL` 指向 `models/embeddings/...`。缺失时接口会在 `vector_stats.last_error` / `retrieval_stats.last_error` 中返回明确错误，不会假装成功降级成 `graph_db`。
+
+默认 `KGTS_VECTOR_STARTUP_ENSURE=0`，Web 服务启动不会主动加载 embedding 模型；第一次混合检索或手动重建索引时才会加载。需要本地开发时预热索引，可以改成 `KGTS_VECTOR_STARTUP_ENSURE=1`。
 
 ## `graph_db`
 
@@ -65,7 +74,7 @@ KGTS_RETRIEVAL_MODE=sparse_hybrid
 
 ## 低资源 Azure 部署说明
 
-Azure App Service F1 和 Azure for Students 免费 VM 都不适合安装神经 embedding 大模型。线上推荐：
+Azure App Service F1 不适合安装神经 embedding 大模型。线上推荐：
 
 ```text
 KGTS_RETRIEVAL_MODE=sparse_hybrid
@@ -83,6 +92,15 @@ GitHub Actions 的 Azure App Service 部署包会排除这些大型本地资产�
 - `backend/vector_index_system/vector_index/`
 - `backend/vector_index_system/memory_systems/`
 
-重型向量依赖不要放在 `requirements.txt` 中。它们已拆到 `requirements-vector.txt`，因此 Azure F1 部署时不会安装 torch、sentence-transformers 或 faiss。
+重型向量依赖不要放在 `requirements.txt` 中。它们已拆到 `requirements-vector.txt` / `requirements-vector-cpu.txt`，因此 Azure F1 部署时不会安装 torch、sentence-transformers 或 faiss。
 
-Azure for Students VM 的具体部署配置见 [Azure for Students VM 部署](azure-student-vm.md)。1 GB RAM VM 上不要启用 `hybrid`，除非已经确认模型、FAISS、swap 和冷启动时间都可接受。
+Azure for Students 1 GB VM 可以实验 `hybrid`，但应按错峰运行处理：TTS 朗读课件时停掉或空闲向量检索，备课/问答需要向量检索时停掉 TTS 代理。推荐配置：
+
+```text
+KGTS_RETRIEVAL_MODE=hybrid
+KGTS_VECTOR_STARTUP_ENSURE=0
+KGTS_VECTOR_UNLOAD_AFTER_QUERY=1
+KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
+```
+
+这会避免 Web 服务启动预加载 embedding，并在每次查询/重建后释放 SentenceTransformer 模型引用。FAISS 索引仍可保留在内存中，成本远低于 torch 模型。Azure for Students VM 的具体部署配置见 [Azure for Students VM 部署](azure-student-vm.md)。

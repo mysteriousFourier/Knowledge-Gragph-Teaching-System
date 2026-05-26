@@ -70,7 +70,7 @@ KGTS_TTS_ENABLED=0
 KGTS_TTS_PROVIDER=disabled
 ```
 
-如果需要线上语音，优先把 TTS 独立部署到更高内存 VM 或专门推理服务，再让主站通过 server provider 调用，不要把 GenieData、ONNX 模型、缓存音频和主 Web 进程放在同一个 1 GB 免费 VM 里。
+如果需要线上语音，优先把 TTS 独立部署到更高内存 VM 或专门推理服务，再让主站通过 server provider 调用，不要把 GenieData、ONNX 模型、缓存音频和主 Web 进程放在同一个 1 GB 免费 VM 里。1 GB 免费 VM 上如需同时保留本地图结构向量检索能力，按错峰任务处理：TTS 只用于朗读课件，向量检索只用于备课/问答。
 
 ## 受限 VM 实验：独立 Genie 代理
 

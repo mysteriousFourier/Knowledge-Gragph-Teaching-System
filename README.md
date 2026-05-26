@@ -173,6 +173,12 @@ Azure 冷启动健康探测时间有限，默认会跳过结构化图谱重建�
 python -m pip install -r requirements-vector.txt
 ```
 
+在低内存 Linux VM 上不要直接让 PyPI 解析 torch，否则可能拉取 CUDA 版依赖。改用 CPU-only 文件：
+
+```bash
+python -m pip install -r requirements-vector-cpu.txt
+```
+
 默认环境变量：
 
 ```text
@@ -180,9 +186,10 @@ KGTS_RETRIEVAL_MODE=hybrid
 KGTS_VECTOR_INDEX_DIR=.runtime/vector_index
 KGTS_EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 KGTS_EMBEDDING_LOCAL_FILES_ONLY=1
+KGTS_VECTOR_STARTUP_ENSURE=0
 ```
 
-如果本机没有缓存该 embedding 模型，先下载/放置模型，或把 `KGTS_EMBEDDING_MODEL` 改为本地模型目录。缺失时接口会在 `vector_stats.last_error` 中给出明确错误，不会静默降级为 `graph_db`。
+如果本机没有缓存该 embedding 模型，先下载/放置模型，或把 `KGTS_EMBEDDING_MODEL` 改为本地模型目录。缺失时接口会在 `vector_stats.last_error` 中给出明确错误，不会静默降级为 `graph_db`。`KGTS_VECTOR_STARTUP_ENSURE=0` 会避免 Web 服务启动时预热 embedding；第一次混合检索或手动重建索引时再加载模型。
 
 ### Azure F1 检索配置
 
@@ -232,6 +239,15 @@ KGTS_TTS_PROVIDER=disabled
 APP_RUN_STARTUP_MAINTENANCE=0
 RENDER_AUTO_SYNC_STRUCTURED=0
 APP_BOOTSTRAP_SEED_DATA=1
+```
+
+如果需要在同一台 1 GB VM 上实验本地 Genie-TTS 和神经向量检索，按错峰运行处理：TTS 只用于朗读课件，向量检索只用于备课/问答；不要让两者同时常驻。向量依赖使用 `requirements-vector-cpu.txt`，并开启：
+
+```text
+KGTS_RETRIEVAL_MODE=hybrid
+KGTS_VECTOR_STARTUP_ENSURE=0
+KGTS_VECTOR_UNLOAD_AFTER_QUERY=1
+KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
 ```
 
 完整 VM 创建、systemd 和 Nginx 部署步骤见 [Azure for Students VM 部署](docs/azure-student-vm.md)。

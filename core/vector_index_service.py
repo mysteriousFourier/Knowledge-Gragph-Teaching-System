@@ -7,11 +7,13 @@ derived embeddings and metadata that can be rebuilt from the graph at any time.
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import os
 import re
 import shutil
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -149,6 +151,17 @@ def _load_faiss() -> Any:
     return faiss
 
 
+def _malloc_trim() -> None:
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
 class _HashingEmbeddingModel:
     def __init__(self, dimension: int = 384):
         self.dimension = dimension
@@ -201,6 +214,7 @@ class GraphVectorIndex:
         faiss, np, SentenceTransformer = _load_vector_dependencies()
         self._faiss = faiss
         self._np = np
+        self._provider = "sentence-transformers"
         model_error = _model_path_policy_error(self.model_name)
         if model_error:
             raise VectorIndexUnavailable(model_error)
@@ -221,6 +235,18 @@ class GraphVectorIndex:
                 self._use_hashing_fallback(exc)
         except Exception as exc:
             self._use_hashing_fallback(exc)
+
+    def release_model(self) -> None:
+        """Drop embedding model weights after low-memory one-shot operations."""
+        self._model = None
+        gc.collect()
+        _malloc_trim()
+
+    def _unload_after_query(self) -> bool:
+        return env_flag("KGTS_VECTOR_UNLOAD_AFTER_QUERY", env_flag("KGTS_VECTOR_UNLOAD_AFTER_OPERATION", False))
+
+    def _unload_after_rebuild(self) -> bool:
+        return env_flag("KGTS_VECTOR_UNLOAD_AFTER_REBUILD", env_flag("KGTS_VECTOR_UNLOAD_AFTER_OPERATION", False))
 
     def _use_hashing_fallback(self, exc: Exception) -> None:
         if not env_flag("KGTS_VECTOR_HASH_FALLBACK", True):
@@ -285,7 +311,8 @@ class GraphVectorIndex:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
 
     def _load_index(self) -> bool:
-        self._ensure_dependencies()
+        if self._faiss is None:
+            self._faiss = _load_faiss()
         if not self.index_file.exists() or not self.metadata_file.exists():
             return False
         self._entries = self._load_metadata()
@@ -348,42 +375,46 @@ class GraphVectorIndex:
         return False
 
     def rebuild(self, nodes: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
-        self._ensure_dependencies()
-        self.index_dir.mkdir(parents=True, exist_ok=True)
-        node_list = [node for node in nodes if str(node.get("id") or "")]
-        texts = [_node_text(node) for node in node_list]
-        embeddings = self._encode(texts)
-        self._dimension = int(embeddings.shape[1]) if len(texts) else 0
-        if self._dimension:
-            index = self._faiss.IndexFlatIP(self._dimension)
-            index.add(embeddings)
-            self._metric_type = int(getattr(index, "metric_type", 0) or 0)
-        else:
-            index = None
-            self._metric_type = None
+        try:
+            self._ensure_dependencies()
+            self.index_dir.mkdir(parents=True, exist_ok=True)
+            node_list = [node for node in nodes if str(node.get("id") or "")]
+            texts = [_node_text(node) for node in node_list]
+            embeddings = self._encode(texts)
+            self._dimension = int(embeddings.shape[1]) if len(texts) else 0
+            if self._dimension:
+                index = self._faiss.IndexFlatIP(self._dimension)
+                index.add(embeddings)
+                self._metric_type = int(getattr(index, "metric_type", 0) or 0)
+            else:
+                index = None
+                self._metric_type = None
 
-        self._entries = []
-        for node, text in zip(node_list, texts):
-            metadata = node.get("metadata") or {}
-            self._entries.append(
-                {
-                    "node_id": str(node.get("id") or ""),
-                    "label": node.get("label") or metadata.get("label"),
-                    "type": node.get("type") or metadata.get("type") or "concept",
-                    "content": node.get("content") or metadata.get("description") or "",
-                    "content_hash": _content_hash(text, node.get("updated_at")),
-                    "updated_at": node.get("updated_at"),
-                }
-            )
+            self._entries = []
+            for node, text in zip(node_list, texts):
+                metadata = node.get("metadata") or {}
+                self._entries.append(
+                    {
+                        "node_id": str(node.get("id") or ""),
+                        "label": node.get("label") or metadata.get("label"),
+                        "type": node.get("type") or metadata.get("type") or "concept",
+                        "content": node.get("content") or metadata.get("description") or "",
+                        "content_hash": _content_hash(text, node.get("updated_at")),
+                        "updated_at": node.get("updated_at"),
+                    }
+                )
 
-        if index is not None:
-            self._faiss.write_index(index, str(self.index_file))
-        elif self.index_file.exists():
-            self.index_file.unlink()
-        self._index = index
-        self._save_metadata()
-        self._force_rebuild = False
-        self.last_error = None
+            if index is not None:
+                self._faiss.write_index(index, str(self.index_file))
+            elif self.index_file.exists():
+                self.index_file.unlink()
+            self._index = index
+            self._save_metadata()
+            self._force_rebuild = False
+            self.last_error = None
+        finally:
+            if self._unload_after_rebuild():
+                self.release_model()
         return self.get_stats()
 
     def mark_stale(self) -> None:
@@ -397,6 +428,7 @@ class GraphVectorIndex:
         self._dimension = 0
         self._force_rebuild = False
         self.last_error = None
+        self.release_model()
         return self.get_stats()
 
     def search(
@@ -418,34 +450,38 @@ class GraphVectorIndex:
         allowed_ids.discard("")
         ntotal = int(getattr(self._index, "ntotal", 0) or 0)
         limit = ntotal if allowed_ids else min(max(top_k, 1), ntotal)
-        query_embedding = self._encode([query])
-        similarities, indices = self._index.search(query_embedding, limit)
-        results: List[Dict[str, Any]] = []
-        for raw_idx, raw_score in zip(indices[0], similarities[0]):
-            idx = int(raw_idx)
-            if idx < 0 or idx >= len(self._entries):
-                continue
-            entry = self._entries[idx]
-            if node_type and entry.get("type") != node_type:
-                continue
-            if allowed_ids and str(entry.get("node_id") or "") not in allowed_ids:
-                continue
-            score = self._score(raw_score)
-            results.append(
-                {
-                    "node_id": entry.get("node_id"),
-                    "vector_score": score,
-                    "similarity": score,
-                    "metadata": {
-                        "label": entry.get("label"),
-                        "type": entry.get("type"),
-                        "content": entry.get("content"),
-                    },
-                }
-            )
-            if len(results) >= top_k:
-                break
-        return results
+        try:
+            query_embedding = self._encode([query])
+            similarities, indices = self._index.search(query_embedding, limit)
+            results: List[Dict[str, Any]] = []
+            for raw_idx, raw_score in zip(indices[0], similarities[0]):
+                idx = int(raw_idx)
+                if idx < 0 or idx >= len(self._entries):
+                    continue
+                entry = self._entries[idx]
+                if node_type and entry.get("type") != node_type:
+                    continue
+                if allowed_ids and str(entry.get("node_id") or "") not in allowed_ids:
+                    continue
+                score = self._score(raw_score)
+                results.append(
+                    {
+                        "node_id": entry.get("node_id"),
+                        "vector_score": score,
+                        "similarity": score,
+                        "metadata": {
+                            "label": entry.get("label"),
+                            "type": entry.get("type"),
+                            "content": entry.get("content"),
+                        },
+                    }
+                )
+                if len(results) >= top_k:
+                    break
+            return results
+        finally:
+            if self._unload_after_query():
+                self.release_model()
 
     def _score(self, raw_score: Any) -> float:
         value = float(raw_score)
@@ -470,6 +506,9 @@ class GraphVectorIndex:
             "embedding_dimension": self._dimension,
             "model": self.model_name,
             "provider": self._provider,
+            "model_loaded": self._model is not None,
+            "unload_after_query": self._unload_after_query(),
+            "unload_after_rebuild": self._unload_after_rebuild(),
             "index_path": str(self.index_dir),
             "embedding_cache_path": str(self.cache_dir),
             "local_model_path": str(local_model_path) if local_model_path else None,

@@ -16,6 +16,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 
 
 def _service_graph(db_path: Optional[str] = None) -> GraphService:
+    from KGTS.config import load_root_env
+
+    load_root_env()
     return GraphService(db_path=db_path)
 
 
@@ -172,3 +175,24 @@ def _print_json(payload: Any) -> int:
     if isinstance(payload, dict):
         return 0 if payload.get("status") != "error" and not payload.get("error") else 1
     return 0
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args or args[0] in {"-h", "--help"}:
+        print("Usage: python -m KGTS.core.cli_dispatch <tool_name> [json_arguments]")
+        return 0 if args else 1
+
+    tool_name = args[0]
+    raw_arguments = args[1] if len(args) > 1 else "{}"
+    try:
+        parsed = json.loads(raw_arguments)
+    except json.JSONDecodeError as exc:
+        return _print_json({"status": "error", "error": f"Invalid JSON arguments: {exc}"})
+    if not isinstance(parsed, dict):
+        return _print_json({"status": "error", "error": "json_arguments must be an object"})
+    return _print_json(dispatch_tool(tool_name, parsed))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
