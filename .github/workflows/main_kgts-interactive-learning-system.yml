@@ -141,6 +141,14 @@ jobs:
         with:
           name: python-app
 
+      - name: Show deployment authentication route
+        run: |
+          if [ "${AZURE_WEBAPP_PUBLISH_PROFILE_SET}" = "true" ]; then
+            echo "Using AZURE_WEBAPP_PUBLISH_PROFILE for zip deployment."
+          else
+            echo "::notice::AZURE_WEBAPP_PUBLISH_PROFILE is not configured; falling back to Azure OIDC login. If azure/login reports 'No subscriptions found', grant the configured client id access to the App Service subscription/resource group or add the publish profile secret."
+          fi
+
       - name: Deploy to Azure Web App with publish profile
         if: env.AZURE_WEBAPP_PUBLISH_PROFILE_SET == 'true'
         uses: azure/webapps-deploy@v3
@@ -151,15 +159,23 @@ jobs:
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
 
       - name: Login to Azure
+        id: azure-login
         if: env.AZURE_WEBAPP_PUBLISH_PROFILE_SET != 'true'
+        continue-on-error: true
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_CDE106AA5390482CB8D021E302ABE476 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5381AC78696F4A1D8BDAC52DC299ECC8 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_8540526E18BF4BA88AB83FDEE7892B9E }}
 
+      - name: Explain Azure OIDC authentication failure
+        if: env.AZURE_WEBAPP_PUBLISH_PROFILE_SET != 'true' && steps.azure-login.outcome == 'failure'
+        run: |
+          echo "::error::Azure OIDC login failed before deployment. The build artifact is ready, but the configured Azure identity cannot see the target subscription. Fix one of these: add GitHub secret AZURE_WEBAPP_PUBLISH_PROFILE from the App Service publish profile, or grant the AZUREAPPSERVICE_CLIENTID identity access to the App Service subscription/resource group and confirm its federated credential matches repo:mysteriousFourier/Knowledge-Graph-Teaching-System:ref:refs/heads/main."
+          exit 1
+
       - name: Deploy to Azure Web App
-        if: env.AZURE_WEBAPP_PUBLISH_PROFILE_SET != 'true'
+        if: env.AZURE_WEBAPP_PUBLISH_PROFILE_SET != 'true' && steps.azure-login.outcome == 'success'
         uses: azure/webapps-deploy@v3
         with:
           app-name: kgts-Interactive-learning-system

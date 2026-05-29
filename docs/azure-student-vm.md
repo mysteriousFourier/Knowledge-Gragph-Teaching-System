@@ -156,6 +156,20 @@ ssh azureuser@<vm-ip> "sudo systemctl start kgts && sudo systemctl status kgts -
 
 Azure App Service 不使用这组 `scp` 命令。若 App Service 也需要这些大运行时文件，把 `APP_RUNTIME_DIR`、`GRAPH_DB_PATH` 和 `KGTS_VECTOR_INDEX_DIR` 指到 `/home/site/kgts-runtime`，再通过 Kudu/SSH/SCM 上传到该目录。不要把它们加入仓库，也不要放回 `data/seed/`。
 
+有 Azure Portal 下载的 App Service publish profile XML 时，可以从本机 PowerShell 上传到 Kudu/SCM，不依赖本地 Azure CLI：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\upload_app_service_runtime_data.ps1 -PublishProfilePath .tmp\kgts.PublishSettings
+```
+
+上传目标是 `/home/site/kgts-runtime`；App Settings 仍需指向：
+
+```text
+APP_RUNTIME_DIR=/home/site/kgts-runtime
+GRAPH_DB_PATH=/home/site/kgts-runtime/knowledge_graph.db
+KGTS_VECTOR_INDEX_DIR=/home/site/kgts-runtime/vector_index
+```
+
 启用本地神经向量检索时使用 CPU-only 依赖文件，避免 PyPI 自动安装 CUDA 版 torch：
 
 ```bash

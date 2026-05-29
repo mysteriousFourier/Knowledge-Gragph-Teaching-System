@@ -175,6 +175,14 @@ KGTS_VECTOR_INDEX_DIR=/home/site/kgts-runtime/vector_index
 
 然后通过 Kudu/SSH/SCM 把文件上传到 `/home/site/kgts-runtime/knowledge_graph.db` 和 `/home/site/kgts-runtime/vector_index/`。`/home` 是 App Service 的持久化存储；不要上传到部署 zip 解包目录里，否则下一次部署可能覆盖。Azure for Students VM 使用 `scp` 同步到 `~/kgts/.runtime/`，详见 VM 文档。
 
+如果手上有 Azure Portal 下载的 App Service publish profile XML，可以不安装 Azure CLI，直接用 Kudu/SCM 上传本地最新版运行时数据：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\upload_app_service_runtime_data.ps1 -PublishProfilePath .tmp\kgts.PublishSettings
+```
+
+该脚本只上传 `.runtime\knowledge_graph.db`、`.runtime\vector_index\metadata.json` 和 `.runtime\vector_index\vector_index.faiss` 到 `/home/site/kgts-runtime`，不会改 Git 历史，也不会把大文件放进 GitHub Actions 的部署包。
+
 Azure App Service 的 Startup Command 建议设置为：
 
 ```bash
