@@ -10,24 +10,30 @@ body {
                "PingFang SC", "Microsoft YaHei", sans-serif;
   background: #f0f2f5;
   color: #333;
+  width: 100vw;
   min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
 }
 
 /* ========== 双栏布局 ========== */
 .container {
   display: flex;
   gap: 0;
-  padding: 20px;
+  width: 100vw;
   height: 100vh;
-  max-width: 1600px;
-  margin: 0 auto;
+  height: 100dvh;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
 .panel {
   background: #fff;
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  border-radius: 0;
+  padding: 16px;
+  box-shadow: none;
   overflow-y: auto;
 }
 
@@ -41,7 +47,7 @@ body {
 
 .panel-output {
   flex: 1 1 auto;
-  min-width: 500px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -439,7 +445,7 @@ body.moving-saved-ppt-gallery * {
 
 .container.input-collapsed .panel-output {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 18px minmax(260px, 1fr);
+  grid-template-columns: minmax(320px, 0.9fr) 18px minmax(520px, 1.45fr);
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0;
 }
@@ -482,7 +488,7 @@ body.moving-saved-ppt-gallery * {
 }
 
 .container.input-collapsed .slide-list {
-  flex-basis: 128px;
+  flex-basis: clamp(104px, 9vw, 140px);
 }
 
 .container.input-collapsed .slide-toolbar {
@@ -1675,14 +1681,16 @@ body.modal-open {
   display: flex;
   flex-direction: row;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
   gap: 8px;
 }
 
 .slide-canvas {
   flex: 1;
+  min-width: 0;
   border: 1px solid #dce0e6;
-  border-radius: 8px;
+  border-radius: 0;
   overflow-y: auto;
   overflow-x: hidden;
   background: #fafbfc;
@@ -1700,6 +1708,7 @@ body.modal-open {
   gap: 10px;
   min-width: 0;
   min-height: 0;
+  align-items: center;
 }
 
 .slide-placeholder {
@@ -1714,11 +1723,11 @@ body.modal-open {
 /* ========== 幻灯片渲染样式 ========== */
 .slide-render {
   background: #fff;
-  border-radius: 8px;
+  border-radius: 0;
   box-shadow: 0 2px 12px rgba(0,0,0,0.06);
   padding: 0;
-  width: 100%;
-  max-width: min(1120px, 100%);
+  width: min(100%, calc((100dvh - 166px) * 16 / 9));
+  max-width: none;
   aspect-ratio: 16 / 9;
   min-height: 0;
   margin: 0 auto;
@@ -2301,7 +2310,7 @@ body.modal-open {
   display: block;
   min-height: 36px;
   pointer-events: auto;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .slide-image-placeholder {
@@ -2453,7 +2462,7 @@ body.modal-open {
   background: transparent;
   font-family: inherit;
   cursor: text;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .slide-textbox-remove {
@@ -2652,9 +2661,15 @@ body.modal-open {
 
 /* ========== 响应式 ========== */
 @media (max-width: 960px) {
+  body {
+    width: auto;
+    overflow: auto;
+  }
   .container {
     flex-direction: column;
     height: auto;
+    min-height: 100dvh;
+    width: 100%;
   }
   .panel-input { flex: none; }
   .panel-output { min-height: 600px; }

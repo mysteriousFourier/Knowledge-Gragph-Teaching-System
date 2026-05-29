@@ -232,13 +232,17 @@ def save_courseware_project(payload: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             previous = {}
     now = datetime.now().isoformat()
+    model = payload.get("editable_model") or {}
+    tex_content = payload.get("tex_content") or (model.get("source_tex") if isinstance(model, dict) else "") or ""
+    if isinstance(model, dict) and tex_content and not model.get("source_tex"):
+        model = {**model, "source_tex": tex_content}
     record = {
         "id": project_id,
-        "title": str(payload.get("title") or (payload.get("editable_model") or {}).get("title") or "未命名课件"),
-        "editable_model": payload.get("editable_model") or {},
-        "asset_map": payload.get("asset_map") or (payload.get("editable_model") or {}).get("assets") or {},
+        "title": str(payload.get("title") or model.get("title") or "未命名课件"),
+        "editable_model": model,
+        "asset_map": payload.get("asset_map") or model.get("assets") or {},
         "slides": payload.get("slides") or [],
-        "tex_content": payload.get("tex_content") or "",
+        "tex_content": tex_content,
         "ppt_artifact": payload.get("ppt_artifact"),
         "source_node_ids": payload.get("source_node_ids") or [],
         "created_at": previous.get("created_at") or now,
@@ -311,7 +315,10 @@ def _editable_slide_from_detail(slide: Dict[str, Any], asset_map: Dict[str, Dict
     if body_without_display_math:
         body_canvas_bbox = _bbox_from_canvas(canvas_items, "content", ordinal=content_canvas_ordinal)
         body_bbox = body_canvas_bbox or _default_bbox("richText", 0, slide)
-        body_bbox["y"] = body_bbox["y"] if body_canvas_bbox else cursor_y
+        if body_canvas_bbox:
+            body_bbox["y"] = body_bbox["y"]
+        elif not _layout_prefers_image_first(slide):
+            body_bbox["y"] = cursor_y
         estimated_height = _estimate_text_bbox_height(body_without_display_math, 18, body_bbox["width"])
         body_bbox["height"] = (
             max(body_bbox["height"], estimated_height)
@@ -408,12 +415,14 @@ def _editable_slide_from_detail(slide: Dict[str, Any], asset_map: Dict[str, Dict
         z += 1
 
     for ordinal, callout in enumerate(_extract_callouts(str(slide.get("source_tex") or slide.get("source_body_tex") or "")), start=1):
-        callout_bbox = _default_bbox("callout", ordinal - 1, slide)
-        callout_bbox["height"] = _fit_bbox_height(
-            callout_bbox["y"],
-            _estimate_text_bbox_height(callout.get("text") or "", 16, callout_bbox["width"], min_height=80) + 18,
-            min_height=80,
+        callout_bbox = callout.get("bbox") or _default_bbox("callout", ordinal - 1, slide)
+        estimated_callout_height = _estimate_text_bbox_height(callout.get("text") or "", 16, callout_bbox["width"], min_height=72) + 18
+        callout_bbox["height"] = (
+            max(callout_bbox["height"], min(estimated_callout_height, CANVAS_HEIGHT - callout_bbox["y"] - 24))
+            if callout.get("bbox")
+            else _fit_bbox_height(callout_bbox["y"], estimated_callout_height, min_height=80)
         )
+        callout_bbox = _avoid_bbox_overlap(callout_bbox, objects)
         objects.append(
             _object_payload(
                 slide_index=index,
@@ -428,9 +437,6 @@ def _editable_slide_from_detail(slide: Dict[str, Any], asset_map: Dict[str, Dict
             )
         )
         z += 1
-
-    if not any(canvas_items.values()):
-        objects = _pack_slide_objects(objects)
 
     if not objects:
         objects.append(
@@ -574,15 +580,30 @@ def _object_payload(slide_index: int, kind: str, ordinal: int, bbox: Dict[str, f
 def _default_bbox(kind: str, ordinal: int, slide: Dict[str, Any]) -> Dict[str, float]:
     image_count = len(_collect_slide_images(slide))
     has_body = bool(str(slide.get("content") or "").strip())
+    image_first = _layout_prefers_image_first(slide)
+    layout = slide.get("layout") if isinstance(slide.get("layout"), dict) else {}
+    is_title_layout = str(layout.get("mode") or "") == "title"
     if kind == "title":
+        if is_title_layout:
+            return {"x": 96, "y": 152, "width": 808, "height": 112}
         return {"x": 48, "y": 34, "width": 904, "height": 58}
     if kind == "richText":
+        if is_title_layout:
+            return {"x": 180, "y": 284, "width": 640, "height": 128}
+        if image_count and image_first:
+            y = _image_stack_bottom(slide) + 18
+            return {"x": 72, "y": y, "width": 856, "height": max(72, CANVAS_HEIGHT - y - 24)}
         return {"x": 64, "y": 116, "width": 500 if image_count else 872, "height": 96}
     if kind in {"image", "placeholder"}:
         width = 420 if image_count > 1 else 460
+        if image_count and image_first:
+            width = 700 if image_count <= 1 else 420
+            return {"x": (CANVAS_WIDTH - width) / 2, "y": 120 + ordinal * 132, "width": width, "height": 210 if image_count <= 1 else 118}
         x = 570 if has_body else (CANVAS_WIDTH - width) / 2
         return {"x": x, "y": 126 + ordinal * 128, "width": width, "height": 240 if image_count <= 1 else 118}
     if kind == "equation":
+        if image_count and image_first:
+            return {"x": 96, "y": 392 + ordinal * 70, "width": 808, "height": 60}
         return {"x": 72 if image_count else 96, "y": 212 + ordinal * 82, "width": 500 if image_count else 808, "height": 68}
     if kind == "table":
         return {"x": 72 if image_count else 84, "y": 250 + ordinal * 36, "width": 500 if image_count else 832, "height": 180}
@@ -595,9 +616,16 @@ def _default_image_bbox(slide: Dict[str, Any], ordinal: int, cursor_y: float) ->
     image_count = len(_collect_slide_images(slide))
     content = str(slide.get("content") or "").strip()
     has_body = bool(_remove_display_equations(content).strip())
+    layout = slide.get("layout") if isinstance(slide.get("layout"), dict) else {}
+    image_first = _layout_prefers_image_first(slide)
     width = 420 if image_count > 1 else 460
     height = 126 if image_count > 1 else 240
-    if has_body:
+    if image_count and image_first:
+        width = min(max(_finite_float((slide.get("layout") or {}).get("max_image_width"), 0.7), 0.2), 0.95) * CANVAS_WIDTH
+        height = 210 if image_count <= 1 else 118
+        x = (CANVAS_WIDTH - width) / 2
+        y = 120 + ordinal * 132
+    elif has_body:
         x = 570
         y = 126 + ordinal * 132
     else:
@@ -605,6 +633,71 @@ def _default_image_bbox(slide: Dict[str, Any], ordinal: int, cursor_y: float) ->
         y = max(126 + ordinal * 132, min(cursor_y, CANVAS_HEIGHT - height - 28))
     y = min(max(y, 86), CANVAS_HEIGHT - height - 24)
     return {"x": x, "y": y, "width": width, "height": height}
+
+
+def _layout_prefers_image_first(slide: Dict[str, Any]) -> bool:
+    layout = slide.get("layout") if isinstance(slide.get("layout"), dict) else {}
+    return bool(layout.get("image_first")) or str(layout.get("mode") or "") in {"image_text", "image_only", "title"}
+
+
+def _image_stack_bottom(slide: Dict[str, Any]) -> float:
+    image_count = len(_collect_slide_images(slide))
+    if image_count <= 0:
+        return 112.0
+    height = 210.0 if image_count <= 1 else 118.0
+    return 120.0 + (image_count - 1) * 132.0 + height
+
+
+def _avoid_bbox_overlap(bbox: Dict[str, float], objects: List[Dict[str, Any]]) -> Dict[str, float]:
+    next_bbox = dict(bbox)
+    if not _bbox_overlaps_objects(next_bbox, objects):
+        return next_bbox
+    original_x = next_bbox["x"]
+    original_y = next_bbox["y"]
+    bottom_margin = 12.0
+    candidates: List[Dict[str, float]] = []
+    object_bottoms = [
+        _finite_float((obj.get("bbox") or {}).get("y"), 0) + _finite_float((obj.get("bbox") or {}).get("height"), 0) + 18.0
+        for obj in objects
+        if obj.get("type") != "title" and isinstance(obj.get("bbox"), dict)
+    ]
+    y_values = [original_y, 86.0, 116.0, 150.0, 220.0, 300.0, 390.0, *object_bottoms]
+    x_values = [original_x, 24.0, 48.0, 620.0, CANVAS_WIDTH - next_bbox["width"] - 48.0]
+    for y in y_values:
+        for x in x_values:
+            candidates.append(
+                {
+                    **next_bbox,
+                    "x": min(max(x, 24.0), CANVAS_WIDTH - next_bbox["width"] - 24.0),
+                    "y": min(max(y, 86.0), CANVAS_HEIGHT - next_bbox["height"] - bottom_margin),
+                }
+            )
+    for candidate in sorted(candidates, key=lambda item: abs(item["x"] - original_x) + abs(item["y"] - original_y)):
+        if not _bbox_overlaps_objects(candidate, objects):
+            return candidate
+    return next_bbox
+
+
+def _bbox_overlaps_objects(bbox: Dict[str, float], objects: List[Dict[str, Any]]) -> bool:
+    for obj in objects:
+        if obj.get("type") == "title":
+            continue
+        other = obj.get("bbox") if isinstance(obj.get("bbox"), dict) else {}
+        if _bbox_overlap_area(bbox, other) > 800.0:
+            return True
+    return False
+
+
+def _bbox_overlap_area(a: Dict[str, Any], b: Dict[str, Any]) -> float:
+    ax1 = _finite_float(a.get("x"), 0)
+    ay1 = _finite_float(a.get("y"), 0)
+    ax2 = ax1 + _finite_float(a.get("width"), 0)
+    ay2 = ay1 + _finite_float(a.get("height"), 0)
+    bx1 = _finite_float(b.get("x"), 0)
+    by1 = _finite_float(b.get("y"), 0)
+    bx2 = bx1 + _finite_float(b.get("width"), 0)
+    by2 = by1 + _finite_float(b.get("height"), 0)
+    return max(0.0, min(ax2, bx2) - max(ax1, bx1)) * max(0.0, min(ay2, by2) - max(ay1, by1))
 
 
 def _estimate_text_bbox_height(
@@ -783,8 +876,8 @@ def _figure_ref_matches_asset(figure_ref: str, source_path: str) -> bool:
 
 def _extract_equations(content: str) -> List[str]:
     equations: List[str] = []
-    for match in re.finditer(r"\$\$\s*([\s\S]*?)\s*\$\$|(?<!\$)\$([^$\n]+)\$(?!\$)", content or ""):
-        value = (match.group(1) or match.group(2) or "").strip()
+    for match in re.finditer(r"\$\$\s*([\s\S]*?)\s*\$\$", content or ""):
+        value = match.group(1).strip()
         if value and value not in equations:
             equations.append(value)
     return equations
@@ -794,17 +887,50 @@ def _remove_display_equations(content: str) -> str:
     return re.sub(r"\n?\$\$\s*[\s\S]*?\s*\$\$\n?", "\n", content or "").strip()
 
 
-def _extract_callouts(source: str) -> List[Dict[str, str]]:
-    callouts: List[Dict[str, str]] = []
+def _extract_callouts(source: str) -> List[Dict[str, Any]]:
+    callouts: List[Dict[str, Any]] = []
     for match in re.finditer(r"\\begin\{(alertblock|exampleblock|block)\}\{([^}]*)\}([\s\S]*?)\\end\{\1\}", source or ""):
         text = _plain_latex_to_text(match.group(3))
         if text:
             callouts.append({"title": _plain_latex_to_text(match.group(2)) or "提示", "text": text})
-    for match in re.finditer(r"\\node\[[^\]]*callout[^\]]*\][^{]*\{([\s\S]*?)\}\s*;", source or "", flags=re.I):
-        text = _plain_latex_to_text(match.group(1))
+    for match in re.finditer(r"\\node\[([^\]]*callout[^\]]*)\]([^{]*)\{([\s\S]*?)\}\s*;", source or "", flags=re.I):
+        text = _plain_latex_to_text(match.group(3))
         if text:
-            callouts.append({"title": "标注", "text": text})
+            callout: Dict[str, Any] = {"title": "标注", "text": text}
+            bbox = _tikz_callout_bbox(match.group(1), match.group(2), text)
+            if bbox:
+                callout["bbox"] = bbox
+            callouts.append(callout)
     return callouts
+
+
+def _tikz_callout_bbox(options: str, placement: str, text: str) -> Optional[Dict[str, float]]:
+    placement_text = str(placement or "")
+    coord_match = re.search(
+        r"at\s*\(\s*\[\s*xshift\s*=\s*([-+]?\d+(?:\.\d+)?)cm\s*,\s*yshift\s*=\s*([-+]?\d+(?:\.\d+)?)cm\s*\]\s*current page\.north west\s*\)",
+        placement_text,
+        flags=re.I,
+    )
+    if not coord_match:
+        return None
+    x_cm = _finite_float(coord_match.group(1), 0)
+    y_cm = _finite_float(coord_match.group(2), 0)
+    width_cm = 3.2
+    width_match = re.search(r"text width\s*=\s*([-+]?\d+(?:\.\d+)?)cm", str(options or ""), flags=re.I)
+    if width_match:
+        width_cm = max(_finite_float(width_match.group(1), width_cm), 1.2)
+    px_per_cm_x = CANVAS_WIDTH / 16.0
+    px_per_cm_y = CANVAS_HEIGHT / 9.0
+    width = min(max(width_cm * px_per_cm_x, 120.0), 360.0)
+    height = _estimate_text_bbox_height(text, 16, width, min_height=72) + 16
+    x = x_cm * px_per_cm_x - width / 2
+    y = abs(y_cm) * px_per_cm_y - height / 2
+    return {
+        "x": min(max(x, 24.0), CANVAS_WIDTH - width - 24.0),
+        "y": min(max(y, 86.0), CANVAS_HEIGHT - height - 24.0),
+        "width": width,
+        "height": min(max(height, 72.0), CANVAS_HEIGHT - 110.0),
+    }
 
 
 def _rich_html_from_markdown(value: str) -> str:

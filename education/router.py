@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -37,7 +38,7 @@ from KGTS.core.bridge import (
     search_nodes as backend_search_nodes,
 )
 from KGTS.core.graph_context import build_graphrag_context, build_node_contexts
-from KGTS.education.claude_api import DeepSeekAPIClient, get_deepseek_model
+from KGTS.education.claude_api import DeepSeekAPIClient, get_deepseek_model, _strip_json_fence
 from KGTS.education.kg_constraints import (
     KG_CONSTRAINED_SYSTEM_PROMPT,
     build_lecture_gc_dpg_requirements,
@@ -84,6 +85,9 @@ load_root_env()
 
 router = APIRouter(prefix="/api", tags=["education"])
 
+DEFAULT_SLIDE_LECTURE_DURATION_MINUTES = 10.0
+DEFAULT_SLIDE_LECTURE_SPEECH_RATE_CPM = 250
+
 
 @router.get("/")
 async def root():
@@ -122,13 +126,24 @@ async def health_check():
 
 @router.get("/config-status")
 async def config_status():
+    load_root_env(override=True)
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
     return {
         "success": True,
-        "deepseek_api_key_configured": bool(os.getenv("DEEPSEEK_API_KEY")),
+        "deepseek_api_key_configured": bool(api_key),
+        "deepseek_api_key_fingerprint": _deepseek_key_fingerprint(api_key),
+        "deepseek_api_key_length": len(api_key.strip()),
         "flash_model": get_deepseek_model("flash"),
         "pro_model": get_deepseek_model("pro"),
         "deepseek_api_base": os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com"),
     }
+
+
+def _deepseek_key_fingerprint(api_key: str) -> str:
+    value = str(api_key or "").strip()
+    if not value:
+        return ""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
 
 
 @router.post("/save-config")
@@ -156,13 +171,67 @@ async def save_config(payload: dict[str, Any]):
             current[env_key] = value
             os.environ[env_key] = value
 
+    for env_key in editable_keys.values():
+        if current.get(env_key):
+            os.environ[env_key] = current[env_key]
+
     ordered_keys = sorted(current)
     env_path.write_text(
         "\n".join(f"{key}={current[key]}" for key in ordered_keys) + "\n",
         encoding="utf-8",
     )
-    load_root_env()
+    load_root_env(override=True)
     return await config_status()
+
+
+@router.post("/test-deepseek-config")
+async def test_deepseek_config():
+    load_root_env(override=True)
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    model = get_deepseek_model("flash")
+    base_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")
+    if not api_key:
+        return {
+            "success": False,
+            "error": "deepseek_api_key_missing",
+            "message": "未配置 DeepSeek API Key，请先在设置中保存 API Key。",
+            "deepseek_api_key_configured": False,
+            "deepseek_api_key_fingerprint": "",
+            "deepseek_api_key_length": 0,
+            "flash_model": model,
+            "deepseek_api_base": base_url,
+        }
+
+    client = DeepSeekAPIClient(model=model)
+    try:
+        response = await client._call_deepseek(
+            "请只回复 OK。",
+            max_tokens=8,
+            system_prompt="You are a connectivity test endpoint. Reply only OK.",
+            read_timeout_seconds=20.0,
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "error": "deepseek_config_test_failed",
+            "message": str(exc).strip() or exc.__class__.__name__,
+            "deepseek_api_key_configured": True,
+            "deepseek_api_key_fingerprint": _deepseek_key_fingerprint(api_key),
+            "deepseek_api_key_length": len(api_key.strip()),
+            "flash_model": model,
+            "deepseek_api_base": base_url,
+        }
+
+    return {
+        "success": True,
+        "message": "DeepSeek 连接测试通过。",
+        "response_preview": str(response or "").strip()[:40],
+        "deepseek_api_key_configured": True,
+        "deepseek_api_key_fingerprint": _deepseek_key_fingerprint(api_key),
+        "deepseek_api_key_length": len(api_key.strip()),
+        "flash_model": model,
+        "deepseek_api_base": base_url,
+    }
 
 
 @router.post("/education/generate-lecture")
@@ -499,20 +568,39 @@ async def generate_slide_lectures(request: GenerateSlideLecturesRequest):
             if not target_slide_indices or int(slide.get("index")) in set(target_slide_indices)
         ]
         base_query = "\n\n".join(str(slide.get("raw_text") or slide.get("content") or slide.get("title") or "") for slide in base_query_slides)[:1400]
-        graphrag_context = build_graphrag_context(
-            f"{chapter_title}\n{base_query}",
-            seed_node_ids=source_node_ids,
-            limit=10,
-        )
+        route_warnings: List[str] = []
+        try:
+            graphrag_context = build_graphrag_context(
+                f"{chapter_title}\n{base_query}",
+                seed_node_ids=source_node_ids,
+                limit=6,
+            )
+        except Exception as e:
+            graphrag_context = {"selected_context": selected_context, "graph_data": selected_context.get("graph_data")}
+            route_warnings.append(f"图谱检索上下文构建失败，已仅使用所选课程树和当前页内容生成：{e}")
         selected_context = graphrag_context.get("selected_context") or selected_context
         graph_data = graphrag_context.get("graph_data") or selected_context.get("graph_data")
         graph_context_content = _format_graphrag_generation_context(graphrag_context)
-        source_evidence = evidence_from_rag(graphrag_context.get("llm_context") or [], limit=10)
+        source_evidence = _compact_evidence_for_prompt(
+            evidence_from_rag(graphrag_context.get("llm_context") or [], limit=4),
+            limit=4,
+            content_chars=260,
+        )
         client = DeepSeekAPIClient(
             api_key=request.api_key,
             model=request.model or get_deepseek_model("pro"),
         )
         style_reference_guidance = build_style_reference_guidance(request.style_reference)
+        pacing = await _build_slide_lecture_pacing_with_model(
+            client,
+            request.slides,
+            chapter_title=chapter_title,
+            style=request.style,
+            target_duration_minutes=request.target_duration_minutes,
+            speech_rate_cpm=request.speech_rate_cpm,
+            teacher_guidance=str(request.teacher_guidance or "").strip(),
+            style_reference_guidance=style_reference_guidance,
+        )
         slide_lectures = await _generate_per_slide_lectures(
             client,
             request.slides,
@@ -525,7 +613,29 @@ async def generate_slide_lectures(request: GenerateSlideLecturesRequest):
             teacher_guidance=str(request.teacher_guidance or "").strip(),
             style_reference_guidance=style_reference_guidance,
             target_slide_indices=target_slide_indices,
+            pacing_by_index=pacing["slides"],
+            speech_rate_cpm=pacing["speech_rate_cpm"],
         )
+        if _nonempty_slide_lecture_count(slide_lectures) == 0 and any(_compact_slide_for_lecture(slide).strip() for slide in request.slides):
+            message = _slide_lecture_error_summary(slide_lectures) or "AI 未返回任何逐页讲解内容，请检查 DeepSeek 配置、模型返回或稍后重试。"
+            return {
+                "success": False,
+                "error": "slide_lecture_generation_empty",
+                "message": message,
+                "chapter_title": request.chapter_title or selected_context.get("chapter_title") or "图谱生成课件",
+                "slide_count": len(request.slides),
+                "slides": request.slides,
+                "full_text": "\n\n---\n\n".join(str(slide.get("raw_text") or "") for slide in request.slides),
+                "tex_content": request.tex_content,
+                "lecture_content": "",
+                "slide_lectures": slide_lectures,
+                "source_node_id": source_node_ids[0],
+                "source_node_ids": source_node_ids,
+                "source_scope": selected_context.get("scope"),
+                "ppt_source_node_ids": request.ppt_source_node_ids or [],
+                "lecture_source_node_ids": source_node_ids,
+                "drift_report": _build_source_drift_report(request.ppt_source_node_ids or [], source_node_ids),
+            }
         if target_slide_indices:
             slide_lectures = _merge_existing_slide_lectures(
                 request.existing_slide_lectures,
@@ -533,13 +643,25 @@ async def generate_slide_lectures(request: GenerateSlideLecturesRequest):
                 request.slides,
             )
         merged_lecture = _merge_slide_lectures(slide_lectures)
-        learning_plan = _build_ppt_learning_plan(
-            chapter_title=chapter_title,
-            chapter_content="\n\n".join(str(slide.get("raw_text") or slide.get("content") or "") for slide in request.slides),
-            graph_data=graph_data if isinstance(graph_data, dict) else None,
-            selected_evidence=source_evidence,
-        )
+        try:
+            learning_plan = _build_ppt_learning_plan(
+                chapter_title=chapter_title,
+                chapter_content=_truncate_for_prompt("\n\n".join(str(slide.get("raw_text") or slide.get("content") or "") for slide in request.slides), 1800),
+                graph_data=graph_data if isinstance(graph_data, dict) else None,
+                selected_evidence=source_evidence,
+            )
+        except Exception as e:
+            learning_plan = build_learning_plan(
+                query=chapter_title,
+                evidence=source_evidence,
+                learner_intent="explain",
+                learning_level="beginner",
+                task="lecture",
+                chapter_data={"title": chapter_title, "content": _truncate_for_prompt(merged_lecture, 1200)},
+            )
+            route_warnings.append(f"整体讲解计划构建失败，已使用逐页结果生成汇总：{e}")
         drift_report = _build_source_drift_report(request.ppt_source_node_ids or [], source_node_ids)
+        warning = drift_report.get("warning") or "；".join(route_warnings) or None
         return {
             "success": True,
             "chapter_title": request.chapter_title or selected_context.get("chapter_title") or "图谱生成课件",
@@ -549,6 +671,7 @@ async def generate_slide_lectures(request: GenerateSlideLecturesRequest):
             "tex_content": request.tex_content,
             "lecture_content": merged_lecture,
             "slide_lectures": slide_lectures,
+            "lecture_pacing": _summarize_slide_lecture_pacing(slide_lectures, pacing),
             "learning_plan": learning_plan,
             "consistency_report": _safe_consistency_report(merged_lecture, learning_plan, task="lecture"),
             "retrieval_mode": graphrag_context.get("retrieval_mode"),
@@ -563,7 +686,7 @@ async def generate_slide_lectures(request: GenerateSlideLecturesRequest):
             "ppt_source_node_ids": request.ppt_source_node_ids or [],
             "lecture_source_node_ids": source_node_ids,
             "drift_report": drift_report,
-            "warning": drift_report.get("warning") or None,
+            "warning": warning,
             "style": request.style,
             "style_reference": request.style_reference,
             "regenerated_slide_indices": target_slide_indices or [int(slide.get("index")) for slide in request.slides if isinstance(slide.get("index"), int)],
@@ -718,6 +841,421 @@ def _merge_slide_lectures(slide_lectures: List[Dict[str, Any]]) -> str:
         f"## 第 {item.get('index')} 页：{item.get('title') or ''}\n\n{str(item.get('lecture') or '').strip() or '_本页未生成文案_'}"
         for item in slide_lectures
     )
+
+
+def _nonempty_slide_lecture_count(slide_lectures: List[Dict[str, Any]]) -> int:
+    return sum(1 for item in slide_lectures if str((item or {}).get("lecture") or "").strip())
+
+
+def _slide_lecture_error_summary(slide_lectures: List[Dict[str, Any]]) -> str:
+    errors: List[str] = []
+    for item in slide_lectures:
+        if not isinstance(item, dict):
+            continue
+        error = str(item.get("error") or "").strip()
+        if not error:
+            continue
+        errors.append(f"第 {item.get('index', '?')} 页：{error}")
+        if len(errors) >= 3:
+            break
+    return "；".join(errors)
+
+
+def _truncate_for_prompt(value: Any, max_chars: int) -> str:
+    text = re.sub(r"\n{3,}", "\n\n", str(value or "").strip())
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[: max_chars - 12].rstrip() + "\n...[truncated]"
+
+
+def _compact_slide_for_lecture(slide: Dict[str, Any], max_chars: int = 1200) -> str:
+    parts: List[str] = []
+    title = str(slide.get("title") or "").strip()
+    if title:
+        parts.append(f"标题: {title}")
+    for key in ("content", "notes", "raw_text"):
+        value = str(slide.get(key) or "").strip()
+        if not value:
+            continue
+        prefix = "[备注] " if key == "notes" else ""
+        if value not in parts:
+            parts.append(prefix + value)
+    for table_data in (slide.get("tables") or [])[:2]:
+        if not isinstance(table_data, dict):
+            continue
+        rows = table_data.get("rows") or []
+        table_lines = [
+            " | ".join(str(cell) for cell in row)
+            for row in rows[:6]
+            if isinstance(row, list)
+        ]
+        if table_lines:
+            parts.append("[表格]\n" + "\n".join(table_lines))
+    return _truncate_for_prompt("\n".join(parts), max_chars)
+
+
+def _compact_evidence_for_prompt(evidence: Any, limit: int = 4, content_chars: int = 260) -> List[Dict[str, Any]]:
+    compacted: List[Dict[str, Any]] = []
+    for index, item in enumerate(evidence or [], start=1):
+        if not isinstance(item, dict):
+            continue
+        next_item = dict(item)
+        next_item["index"] = next_item.get("index") or index
+        if "content" in next_item:
+            next_item["content"] = _truncate_for_prompt(next_item.get("content"), content_chars)
+        compacted.append(next_item)
+        if len(compacted) >= limit:
+            break
+    return compacted
+
+
+def _fallback_slide_learning_plan(
+    *,
+    chapter_title: str,
+    slide: Dict[str, Any],
+    slide_text: str,
+    evidence: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    slide_index = slide.get("index", "?")
+    slide_evidence = {
+        "index": 1,
+        "id": f"ppt_slide::{hashlib.md5(f'{chapter_title}:{slide_index}:{slide_text}'.encode('utf-8')).hexdigest()[:10]}",
+        "label": str(slide.get("title") or f"第 {slide_index} 页"),
+        "type": "ppt_slide",
+        "content": _truncate_for_prompt(slide_text, 900),
+        "source": "ppt",
+    }
+    return build_learning_plan(
+        query=f"{chapter_title} 第 {slide.get('index')} 页",
+        evidence=_dedupe_evidence([*list(evidence or [])[:3], slide_evidence]),
+        learner_intent="explain",
+        learning_level="beginner",
+        task="lecture",
+        chapter_data={
+            "title": f"{chapter_title} - 第 {slide.get('index')} 页",
+            "content": _truncate_for_prompt(slide_text, 1000),
+        },
+    )
+
+
+def _fallback_slide_lecture_text(*, chapter_title: str, slide: Dict[str, Any], slide_text: str) -> str:
+    title = str(slide.get("title") or f"第 {slide.get('index', '?')} 页").strip()
+    clean_lines = [
+        line.strip(" -\t")
+        for line in re.split(r"[\n\r]+", str(slide_text or ""))
+        if line.strip(" -\t")
+    ]
+    body_lines = clean_lines[:6] or [title]
+    bullets = "\n".join(f"- {line}" for line in body_lines)
+    return (
+        f"这一页围绕 **{title}** 展开。课堂讲解时可以先把它放回《{chapter_title}》的整体脉络中，"
+        "说明本页要解决的问题，再逐条解释页面上的关键概念。\n\n"
+        f"{bullets}\n\n"
+        "讲授时建议最后用一句话收束：本页的核心作用是帮助学生把这些要点和前后页面的知识链条连接起来。"
+    )
+
+
+def _normalize_slide_lecture_duration_minutes(value: Optional[float]) -> float:
+    try:
+        duration = float(value if value is not None else DEFAULT_SLIDE_LECTURE_DURATION_MINUTES)
+    except (TypeError, ValueError):
+        duration = DEFAULT_SLIDE_LECTURE_DURATION_MINUTES
+    return max(0.1, min(duration, 180.0))
+
+
+def _normalize_slide_lecture_speech_rate_cpm(value: Optional[int]) -> int:
+    try:
+        rate = int(value if value is not None else DEFAULT_SLIDE_LECTURE_SPEECH_RATE_CPM)
+    except (TypeError, ValueError):
+        rate = DEFAULT_SLIDE_LECTURE_SPEECH_RATE_CPM
+    return max(80, min(rate, 800))
+
+
+def _count_speech_chars(text: str) -> int:
+    return len(re.findall(r"[\u4e00-\u9fff]|[A-Za-z0-9]+", str(text or "")))
+
+
+def _slide_budget_source_text(slide: Dict[str, Any]) -> str:
+    parts: List[str] = []
+    for key in ("title", "content", "notes", "raw_text"):
+        value = str(slide.get(key) or "").strip()
+        if value:
+            parts.append(value)
+    for table_data in slide.get("tables", []) or []:
+        if not isinstance(table_data, dict):
+            continue
+        for row in table_data.get("rows", []) or []:
+            if isinstance(row, list):
+                parts.append(" ".join(str(cell) for cell in row))
+    return "\n".join(parts)
+
+
+def _build_slide_lecture_pacing(
+    slides: List[Dict[str, Any]],
+    *,
+    target_duration_minutes: Optional[float] = None,
+    speech_rate_cpm: Optional[int] = None,
+) -> Dict[str, Any]:
+    duration = _normalize_slide_lecture_duration_minutes(target_duration_minutes)
+    rate = _normalize_slide_lecture_speech_rate_cpm(speech_rate_cpm)
+    total_budget = max(1, int(round(duration * rate)))
+    normalized_slides = [
+        slide
+        for slide in slides
+        if isinstance(slide, dict) and isinstance(slide.get("index"), int)
+    ]
+    if not normalized_slides:
+        return {
+            "target_duration_minutes": duration,
+            "speech_rate_cpm": rate,
+            "total_target_chars": total_budget,
+            "slides": {},
+        }
+
+    raw_counts = {
+        int(slide["index"]): _count_speech_chars(_slide_budget_source_text(slide))
+        for slide in normalized_slides
+    }
+    weights: Dict[int, float] = {}
+    for slide in normalized_slides:
+        index = int(slide["index"])
+        text_chars = raw_counts.get(index, 0)
+        title_only = bool(str(slide.get("title") or "").strip()) and text_chars <= _count_speech_chars(str(slide.get("title") or ""))
+        if text_chars <= 0:
+            weight = 0.35
+        elif title_only or text_chars <= 18:
+            weight = 0.65
+        else:
+            weight = max(float(text_chars), 28.0)
+        weights[index] = weight
+
+    total_weight = sum(weights.values()) or float(len(normalized_slides))
+    remaining = total_budget
+    allocations: Dict[int, int] = {}
+    remainders: List[tuple[float, int]] = []
+    minimum = 30 if total_budget >= len(normalized_slides) * 30 else 1
+    for slide in normalized_slides:
+        index = int(slide["index"])
+        exact = total_budget * weights[index] / total_weight
+        target = max(minimum, int(exact))
+        allocations[index] = target
+        remaining -= target
+        remainders.append((exact - int(exact), index))
+
+    if remaining > 0:
+        for _, index in sorted(remainders, reverse=True):
+            if remaining <= 0:
+                break
+            allocations[index] += 1
+            remaining -= 1
+    elif remaining < 0:
+        for _, index in sorted(remainders):
+            if remaining >= 0:
+                break
+            removable = min(allocations[index] - 1, -remaining)
+            if removable <= 0:
+                continue
+            allocations[index] -= removable
+            remaining += removable
+
+    by_index: Dict[int, Dict[str, Any]] = {}
+    for slide in normalized_slides:
+        index = int(slide["index"])
+        target_chars = max(1, allocations.get(index, 1))
+        by_index[index] = {
+            "target_chars": target_chars,
+            "source_chars": raw_counts.get(index, 0),
+            "target_duration_seconds": int(round(target_chars / rate * 60)),
+        }
+
+    return {
+        "target_duration_minutes": duration,
+        "speech_rate_cpm": rate,
+        "total_target_chars": sum(item["target_chars"] for item in by_index.values()),
+        "slides": by_index,
+    }
+
+
+def _apply_model_slide_lecture_allocations(
+    base_pacing: Dict[str, Any],
+    allocations: Any,
+) -> Dict[str, Any]:
+    """Apply model-planned slide character budgets while preserving a valid total."""
+    base_slides = base_pacing.get("slides") if isinstance(base_pacing.get("slides"), dict) else {}
+    if not base_slides:
+        return base_pacing
+
+    planned: Dict[int, int] = {}
+    if isinstance(allocations, dict):
+        allocations = allocations.get("slides") or allocations.get("allocations") or allocations.get("pages") or []
+    for item in allocations or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            index = int(item.get("index") or item.get("slide") or item.get("page"))
+            target_chars = int(round(float(item.get("target_chars") or item.get("chars") or item.get("words") or 0)))
+        except (TypeError, ValueError):
+            continue
+        if index not in base_slides or target_chars <= 0:
+            continue
+        planned[index] = target_chars
+    if not planned:
+        return base_pacing
+
+    total_target = int(base_pacing.get("total_target_chars") or sum(int(item.get("target_chars") or 0) for item in base_slides.values()))
+    minimum = 30 if total_target >= len(base_slides) * 30 else 1
+    allocations_by_index: Dict[int, int] = {
+        int(index): max(minimum, int(planned.get(int(index), item.get("target_chars") or minimum)))
+        for index, item in base_slides.items()
+    }
+
+    diff = total_target - sum(allocations_by_index.values())
+    if diff > 0:
+        ranked = sorted(allocations_by_index, key=lambda index: allocations_by_index[index], reverse=True)
+        cursor = 0
+        while diff > 0 and ranked:
+            allocations_by_index[ranked[cursor % len(ranked)]] += 1
+            diff -= 1
+            cursor += 1
+    elif diff < 0:
+        ranked = sorted(allocations_by_index, key=lambda index: allocations_by_index[index], reverse=True)
+        for index in ranked:
+            if diff >= 0:
+                break
+            removable = min(allocations_by_index[index] - minimum, -diff)
+            if removable <= 0:
+                continue
+            allocations_by_index[index] -= removable
+            diff += removable
+
+    rate = _normalize_slide_lecture_speech_rate_cpm(base_pacing.get("speech_rate_cpm"))
+    next_slides: Dict[int, Dict[str, Any]] = {}
+    for raw_index, item in base_slides.items():
+        index = int(raw_index)
+        target_chars = max(1, allocations_by_index.get(index, int(item.get("target_chars") or 1)))
+        next_slides[index] = {
+            **item,
+            "target_chars": target_chars,
+            "target_duration_seconds": int(round(target_chars / rate * 60)),
+            "budget_source": "deepseek-v4-pro",
+        }
+
+    return {
+        **base_pacing,
+        "total_target_chars": sum(item["target_chars"] for item in next_slides.values()),
+        "slides": next_slides,
+        "budget_source": "deepseek-v4-pro",
+    }
+
+
+async def _build_slide_lecture_pacing_with_model(
+    client: DeepSeekAPIClient,
+    slides: List[Dict[str, Any]],
+    *,
+    chapter_title: str,
+    style: str,
+    target_duration_minutes: Optional[float] = None,
+    speech_rate_cpm: Optional[int] = None,
+    teacher_guidance: str = "",
+    style_reference_guidance: str = "",
+) -> Dict[str, Any]:
+    base_pacing = _build_slide_lecture_pacing(
+        slides,
+        target_duration_minutes=target_duration_minutes,
+        speech_rate_cpm=speech_rate_cpm,
+    )
+    normalized_slides = [
+        slide
+        for slide in slides
+        if isinstance(slide, dict) and isinstance(slide.get("index"), int)
+    ]
+    if len(normalized_slides) <= 1:
+        return base_pacing
+
+    slide_summaries = []
+    for slide in normalized_slides:
+        index = int(slide["index"])
+        local = (base_pacing.get("slides") or {}).get(index) or {}
+        slide_summaries.append(
+            {
+                "index": index,
+                "title": str(slide.get("title") or "")[:80],
+                "source_chars": local.get("source_chars") or _count_speech_chars(_slide_budget_source_text(slide)),
+                "local_target_chars": local.get("target_chars"),
+                "content": _compact_slide_for_lecture(slide, max_chars=420),
+            }
+        )
+
+    prompt = f"""请为一份 PPT 的逐页课堂讲稿分配每页目标字数。
+
+课程标题：{chapter_title}
+讲课风格：{style}
+总时长：{base_pacing.get("target_duration_minutes")} 分钟
+语速估算：{base_pacing.get("speech_rate_cpm")} 中文字符/分钟
+总目标字数：{base_pacing.get("total_target_chars")}
+
+教师输入/偏好：
+{_truncate_for_prompt(teacher_guidance, 900) or "（无）"}
+
+参考课件风格提示：
+{_truncate_for_prompt(style_reference_guidance, 700) or "（无）"}
+
+页面摘要 JSON：
+{json.dumps(slide_summaries, ensure_ascii=False)}
+
+要求：
+1. 结合页面内容密度、标题页/过渡页、公式页、例题页和教师输入分配每页 target_chars。
+2. 所有 target_chars 之和必须等于总目标字数。
+3. 每页必须给正整数；内容少的页面可以少，但不要为非空页面分配 0。
+4. 只输出 JSON，不要解释，格式为：
+{{"slides":[{{"index":1,"target_chars":180,"reason":"标题页简短导入"}}]}}"""
+    try:
+        response = await client._call_deepseek(
+            prompt,
+            max_tokens=1600,
+            system_prompt="你是课程讲稿节奏规划器。只返回可解析 JSON。",
+            read_timeout_seconds=45.0,
+        )
+        payload = json.loads(_strip_json_fence(response))
+        planned = _apply_model_slide_lecture_allocations(base_pacing, payload)
+        planned["budget_model"] = client.model
+        return planned
+    except Exception as exc:
+        return {
+            **base_pacing,
+            "budget_source": "local_fallback",
+            "budget_model": client.model,
+            "budget_error": str(exc).strip() or exc.__class__.__name__,
+        }
+
+
+def _attach_slide_lecture_timing(
+    item: Dict[str, Any],
+    pacing: Optional[Dict[str, Any]],
+    speech_rate_cpm: int,
+) -> Dict[str, Any]:
+    lecture = str(item.get("lecture") or "")
+    estimated_chars = _count_speech_chars(lecture)
+    target_chars = int((pacing or {}).get("target_chars") or max(estimated_chars, 0))
+    item["target_chars"] = target_chars
+    if pacing:
+        item["target_duration_seconds"] = int((pacing or {}).get("target_duration_seconds") or 0)
+        item["budget_source"] = str((pacing or {}).get("budget_source") or "")
+    item["estimated_chars"] = estimated_chars
+    item["estimated_duration_seconds"] = int(round((estimated_chars / max(speech_rate_cpm, 1)) * 60))
+    return item
+
+
+def _summarize_slide_lecture_pacing(slide_lectures: List[Dict[str, Any]], pacing: Dict[str, Any]) -> Dict[str, Any]:
+    estimated_chars = sum(int(item.get("estimated_chars") or _count_speech_chars(str(item.get("lecture") or ""))) for item in slide_lectures)
+    rate = _normalize_slide_lecture_speech_rate_cpm(pacing.get("speech_rate_cpm"))
+    return {
+        "target_duration_minutes": pacing.get("target_duration_minutes", DEFAULT_SLIDE_LECTURE_DURATION_MINUTES),
+        "speech_rate_cpm": rate,
+        "total_target_chars": pacing.get("total_target_chars", 0),
+        "estimated_chars": estimated_chars,
+        "estimated_duration_seconds": int(round((estimated_chars / max(rate, 1)) * 60)),
+    }
 
 
 def _normalize_target_slide_indices(target_slide_indices: Optional[List[int]], slides: List[Dict[str, Any]]) -> Optional[List[int]]:
@@ -1246,6 +1784,8 @@ async def save_lecture(request: SaveLectureRequest):
 async def upload_ppt(
     file: UploadFile = File(...),
     style: str = Form("引导式教学"),
+    target_duration_minutes: Optional[float] = Form(None),
+    speech_rate_cpm: Optional[int] = Form(None),
     api_key: Optional[str] = Form(None),
     model: Optional[str] = Form(None),
     source_node_id: Optional[str] = Form(None),
@@ -1296,6 +1836,23 @@ async def upload_ppt(
             selected_evidence = selected_context.get("evidence") or []
 
         if not chapter_content.strip():
+            pacing = _build_slide_lecture_pacing(
+                slide_details,
+                target_duration_minutes=target_duration_minutes,
+                speech_rate_cpm=speech_rate_cpm,
+            )
+            slide_lectures = [
+                {
+                    "index": slide.get("index"),
+                    "title": slide.get("title", ""),
+                    "lecture": "",
+                    "skipped": True,
+                    **(pacing.get("slides", {}).get(slide.get("index")) or {}),
+                    "estimated_chars": 0,
+                    "estimated_duration_seconds": 0,
+                }
+                for slide in slide_details
+            ]
             payload = {
                 "success": True,
                 "chapter_title": chapter_title,
@@ -1309,15 +1866,8 @@ async def upload_ppt(
                 "layout": editable_model.get("layout") or {},
                 "source_tex": parse_result.get("tex_content") or "",
                 "lecture_content": "",
-                "slide_lectures": [
-                    {
-                        "index": slide.get("index"),
-                        "title": slide.get("title", ""),
-                        "lecture": "",
-                        "skipped": True,
-                    }
-                    for slide in slide_details
-                ],
+                "slide_lectures": slide_lectures,
+                "lecture_pacing": _summarize_slide_lecture_pacing(slide_lectures, pacing),
                 "warning": "课件中未提取到有效文本内容，可能是纯图片或扫描件",
             }
             if normalized_source_node_ids:
@@ -1341,45 +1891,19 @@ async def upload_ppt(
                 except Exception:
                     graph_data = None
 
-        chapter_data = {
-            "id": f"courseware_{hashlib.md5(file.filename.encode()).hexdigest()[:12]}",
-            "title": chapter_title,
-            "content": (
-                f"Selected graph subtree context:\n{graph_context_content}\n\nCourseware full text:\n{chapter_content}"
-                if graph_context_content
-                else chapter_content
-            ),
-            "teacher_guidance": str(teacher_guidance or "").strip(),
-        }
-        lecture_learning_plan = _build_ppt_learning_plan(
-            chapter_title=chapter_title,
-            chapter_content=chapter_content,
-            graph_data=graph_data if isinstance(graph_data, dict) else None,
-            selected_evidence=selected_evidence,
-        )
-        lecture_graph_paths = graph_paths_for_evidence(
-            graph_data if isinstance(graph_data, dict) else None,
-            lecture_learning_plan.get("evidence") or [],
-            limit=10,
-        )
-        lecture_formula_context = formula_context_for_text(chapter_content, limit=10)
-        chapter_data["graph_context"] = _format_ppt_generation_context(
-            learning_plan=lecture_learning_plan,
-            graph_paths=lecture_graph_paths,
-            formulas=lecture_formula_context,
-        )
-
         claude_client = DeepSeekAPIClient(
             api_key=api_key,
             model=model or get_deepseek_model("pro"),
         )
-
-        lecture_content = await claude_client.generate_lecture(
-            graph_data if isinstance(graph_data, dict) else {"nodes": [], "relations": []},
-            chapter_data,
-            style,
+        pacing = await _build_slide_lecture_pacing_with_model(
+            claude_client,
+            slide_details,
+            chapter_title=chapter_title,
+            style=style,
+            target_duration_minutes=target_duration_minutes,
+            speech_rate_cpm=speech_rate_cpm,
+            teacher_guidance=str(teacher_guidance or "").strip(),
         )
-        lecture_content = clean_generated_lecture_output(lecture_content)
 
         slide_lectures = await _generate_per_slide_lectures(
             claude_client,
@@ -1391,7 +1915,56 @@ async def upload_ppt(
             selected_graph_context=graph_context_content,
             source_node_ids=normalized_source_node_ids or None,
             teacher_guidance=str(teacher_guidance or "").strip(),
+            pacing_by_index=pacing["slides"],
+            speech_rate_cpm=pacing["speech_rate_cpm"],
         )
+        if _nonempty_slide_lecture_count(slide_lectures) == 0 and any(_compact_slide_for_lecture(slide).strip() for slide in slide_details):
+            message = _slide_lecture_error_summary(slide_lectures) or "AI 未返回任何逐页讲解内容，请检查 DeepSeek 配置、模型返回或稍后重试。"
+            return {
+                "success": False,
+                "error": "slide_lecture_generation_empty",
+                "message": message,
+                "chapter_title": chapter_title,
+                "slide_count": prompt_data["total_slides"],
+                "slides": slide_details,
+                "full_text": chapter_content,
+                "tex_content": parse_result.get("tex_content") or "",
+                "tex_source_file": parse_result.get("tex_source_file") or "",
+                "editable_model": editable_model,
+                "asset_map": editable_model.get("assets") or {},
+                "layout": editable_model.get("layout") or {},
+                "source_tex": parse_result.get("tex_content") or "",
+                "lecture_content": "",
+                "slide_lectures": slide_lectures,
+                "source_node_id": normalized_source_node_ids[0] if normalized_source_node_ids else None,
+                "source_node_ids": normalized_source_node_ids,
+                "source_scope": source_scope,
+                "model": claude_client.model,
+                "generated_at": datetime.now().isoformat(),
+            }
+        lecture_content = _merge_slide_lectures(slide_lectures)
+        try:
+            lecture_learning_plan = _build_ppt_learning_plan(
+                chapter_title=chapter_title,
+                chapter_content=_truncate_for_prompt(chapter_content, 1800),
+                graph_data=graph_data if isinstance(graph_data, dict) else None,
+                selected_evidence=_compact_evidence_for_prompt(selected_evidence, limit=4, content_chars=260),
+            )
+        except Exception:
+            lecture_learning_plan = build_learning_plan(
+                query=chapter_title,
+                evidence=_compact_evidence_for_prompt(selected_evidence, limit=4, content_chars=260),
+                learner_intent="explain",
+                learning_level="beginner",
+                task="lecture",
+                chapter_data={"title": chapter_title, "content": _truncate_for_prompt(lecture_content, 1200)},
+            )
+        lecture_graph_paths = graph_paths_for_evidence(
+            graph_data if isinstance(graph_data, dict) else None,
+            lecture_learning_plan.get("evidence") or [],
+            limit=4,
+        )
+        lecture_formula_context = formula_context_for_text(chapter_content[:1800], limit=4)
         lecture_consistency_report = _safe_consistency_report(lecture_content, lecture_learning_plan, task="lecture")
 
         return {
@@ -1408,6 +1981,7 @@ async def upload_ppt(
             "source_tex": parse_result.get("tex_content") or "",
             "lecture_content": lecture_content,
             "slide_lectures": slide_lectures,
+            "lecture_pacing": _summarize_slide_lecture_pacing(slide_lectures, pacing),
             "learning_plan": lecture_learning_plan,
             "graph_paths": lecture_graph_paths,
             "formula_context": lecture_formula_context,
@@ -1446,96 +2020,101 @@ async def _generate_per_slide_lectures(
     teacher_guidance: str = "",
     style_reference_guidance: str = "",
     target_slide_indices: Optional[List[int]] = None,
+    pacing_by_index: Optional[Dict[int, Dict[str, Any]]] = None,
+    speech_rate_cpm: int = DEFAULT_SLIDE_LECTURE_SPEECH_RATE_CPM,
 ) -> List[Dict]:
-    results = []
+    results_by_index: Dict[int, Dict[str, Any]] = {}
+    work_items: List[Dict[str, Any]] = []
     target_set = set(target_slide_indices or [])
+    speech_rate_cpm = _normalize_slide_lecture_speech_rate_cpm(speech_rate_cpm)
     for slide in slide_details:
         slide_index = slide.get("index")
         if target_set and slide_index not in target_set:
             continue
-        content_parts = []
-        if slide.get("title"):
-            content_parts.append(f"标题: {slide['title']}")
-        if slide.get("content"):
-            content_parts.append(slide["content"])
-        if slide.get("notes"):
-            content_parts.append(f"[备注] {slide['notes']}")
-        for table_data in slide.get("tables", []):
-            rows = table_data.get("rows", [])
-            if rows:
-                table_lines = []
-                for row in rows:
-                    table_lines.append(" | ".join(str(c) for c in row))
-                content_parts.append("\n".join(table_lines))
-
-        slide_text = "\n".join(content_parts)
+        pacing = (pacing_by_index or {}).get(int(slide_index)) if isinstance(slide_index, int) else None
+        slide_text = _compact_slide_for_lecture(slide, max_chars=1200)
         if not slide_text.strip():
-            learning_plan = build_learning_plan(
-                query=f"{chapter_title} 第 {slide.get('index')} 页",
-                evidence=[],
-                learner_intent="explain",
-                learning_level="beginner",
-                task="lecture",
-                chapter_data={"title": chapter_title, "content": ""},
+            learning_plan = _fallback_slide_learning_plan(
+                chapter_title=chapter_title,
+                slide=slide,
+                slide_text="",
             )
-            results.append({
-                "index": slide["index"],
-                "title": slide.get("title", ""),
-                "lecture": "",
-                "skipped": True,
-                "learning_plan": learning_plan,
-                "sources": [],
-                "graph_paths": [],
-                "formula_context": [],
-            })
+            if isinstance(slide_index, int):
+                results_by_index[slide_index] = _attach_slide_lecture_timing(
+                    {
+                        "index": slide["index"],
+                        "title": slide.get("title", ""),
+                        "lecture": "",
+                        "skipped": True,
+                        "learning_plan": learning_plan,
+                        "sources": [],
+                        "graph_paths": [],
+                        "formula_context": [],
+                        "generation_status": "skipped_empty_slide",
+                    },
+                    pacing,
+                    speech_rate_cpm,
+                )
             continue
 
         chapter_data = {
             "title": f"{chapter_title} - 第 {slide['index']} 页",
             "content": (
-                f"Selected graph subtree context:\n{selected_graph_context}\n\nPPT slide content:\n{slide_text}"
+                f"Selected graph subtree context:\n{_truncate_for_prompt(selected_graph_context, 900)}\n\nPPT slide content:\n{slide_text}"
                 if selected_graph_context
                 else slide_text
             ),
         }
         slide_graphrag_context = None
         slide_graph_data = graph_data
-        slide_selected_evidence = selected_evidence
+        slide_selected_evidence = _compact_evidence_for_prompt(selected_evidence, limit=4, content_chars=260)
         try:
             slide_graphrag_context = build_graphrag_context(
-                f"{chapter_title}\n{slide_text[:1000]}",
+                f"{chapter_title}\n{slide_text[:700]}",
                 seed_node_ids=source_node_ids,
-                limit=6,
+                limit=4,
             )
             slide_graph_data = slide_graphrag_context.get("graph_data") or graph_data
-            slide_selected_evidence = evidence_from_rag(slide_graphrag_context.get("llm_context") or [], limit=6)
+            slide_selected_evidence = _compact_evidence_for_prompt(
+                evidence_from_rag(slide_graphrag_context.get("llm_context") or [], limit=4),
+                limit=4,
+                content_chars=260,
+            )
             if slide_graphrag_context.get("context"):
                 chapter_data["content"] = (
-                    f"GraphRAG scoped context:\n{_format_graphrag_generation_context(slide_graphrag_context)}\n\n"
+                    f"GraphRAG scoped context:\n{_truncate_for_prompt(_format_graphrag_generation_context(slide_graphrag_context), 1000)}\n\n"
                     f"PPT slide content:\n{slide_text}"
                 )
         except Exception:
             slide_graphrag_context = None
-        learning_plan = _build_ppt_learning_plan(
-            chapter_title=chapter_title,
-            chapter_content=slide_text,
-            graph_data=slide_graph_data,
-            chapter_data=chapter_data,
-            query=f"{chapter_title}\n{slide_text[:800]}",
-            selected_evidence=slide_selected_evidence,
-        )
+        try:
+            learning_plan = _build_ppt_learning_plan(
+                chapter_title=chapter_title,
+                chapter_content=slide_text,
+                graph_data=slide_graph_data,
+                chapter_data=chapter_data,
+                query=f"{chapter_title}\n{slide_text[:650]}",
+                selected_evidence=slide_selected_evidence,
+            )
+        except Exception:
+            learning_plan = _fallback_slide_learning_plan(
+                chapter_title=chapter_title,
+                slide=slide,
+                slide_text=slide_text,
+                evidence=slide_selected_evidence,
+            )
         sources = learning_plan.get("evidence") or []
         if not sources:
             try:
                 rag = build_rag_context(
-                    f"{chapter_title}\n{slide_text[:800]}",
-                    limit=4,
+                    f"{chapter_title}\n{slide_text[:650]}",
+                    limit=3,
                     seed_node_ids=source_node_ids,
                 )
                 sources = rag.get("llm_context") or []
                 learning_plan = build_learning_plan(
-                    query=f"{chapter_title}\n{slide_text[:800]}",
-                    evidence=evidence_from_rag(sources, limit=4),
+                    query=f"{chapter_title}\n{slide_text[:650]}",
+                    evidence=_compact_evidence_for_prompt(evidence_from_rag(sources, limit=3), limit=3, content_chars=240),
                     learner_intent="explain",
                     learning_level="beginner",
                     task="lecture",
@@ -1543,8 +2122,9 @@ async def _generate_per_slide_lectures(
                 )
             except Exception:
                 sources = []
-        graph_paths = (slide_graphrag_context or {}).get("graph_paths") or graph_paths_for_evidence(slide_graph_data, learning_plan.get("evidence") or [], limit=8)
-        formula_context = (slide_graphrag_context or {}).get("formula_context") or formula_context_for_text(slide_text, limit=8)
+        prompt_evidence = _compact_evidence_for_prompt(learning_plan.get("evidence") or [], limit=4, content_chars=260)
+        graph_paths = ((slide_graphrag_context or {}).get("graph_paths") or graph_paths_for_evidence(slide_graph_data, prompt_evidence, limit=4))[:4]
+        formula_context = ((slide_graphrag_context or {}).get("formula_context") or formula_context_for_text(slide_text, limit=4))[:4]
 
         requirements = [
             *build_lecture_gc_dpg_requirements(style, slide_level=True),
@@ -1558,15 +2138,23 @@ async def _generate_per_slide_lectures(
             "Include 1-2 natural classroom questions when useful.",
             "Output directly usable Markdown prose for this slide.",
         ]
+        if pacing:
+            target_chars = int(pacing.get("target_chars") or 0)
+            target_seconds = int(pacing.get("target_duration_seconds") or 0)
+            if target_chars > 0:
+                requirements.append(
+                    f"Target pacing for this slide: about {target_chars} Chinese characters, approximately {max(1, round(target_seconds / 60, 1))} minutes at {speech_rate_cpm} characters per minute. "
+                    "Stay close to this budget with natural classroom prose; do not pad with empty transitions and do not remove required factual explanations just to hit the number exactly."
+                )
         if teacher_guidance:
             requirements.append(
                 "Teacher guidance for emphasis, selection, and pacing. Treat it as generation guidance only; it must not override source/graph facts:\n"
-                + teacher_guidance[:1600]
+                + _truncate_for_prompt(teacher_guidance, 700)
             )
         if style_reference_guidance:
             requirements.append(
                 "Reference courseware style guidance. Use it for pacing, visual-language-aware wording, and classroom tone only; do not copy reference facts, dates, authors, logos, or figures:\n"
-                + style_reference_guidance[:2000]
+                + _truncate_for_prompt(style_reference_guidance, 800)
             )
         requirement_text = "\n".join(
             f"{index}. {item}" for index, item in enumerate(requirements, start=1)
@@ -1575,7 +2163,7 @@ async def _generate_per_slide_lectures(
         if selected_graph_context.strip():
             selected_context_text = f"""
 Selected graph subtree context:
-{selected_graph_context[:3500]}
+{_truncate_for_prompt(selected_graph_context, 900)}
 """
         prompt = f"""You are a teacher. Generate the lecture script for one PPT slide.
 
@@ -1587,7 +2175,7 @@ Slide content:
 {slide_text}
 
 Available graph/RAG evidence for this slide:
-{format_evidence(learning_plan.get("evidence") or [])}
+{format_evidence(prompt_evidence)}
 
 Graph relation paths to use when teaching:
 {format_graph_paths(graph_paths)}
@@ -1600,25 +2188,11 @@ Requirements:
 
 Output only the final slide lecture script."""
 
-        try:
-            lecture = expand_formula_references(
-                await client._call_deepseek(
-                    prompt,
-                    max_tokens=2000,
-                    system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
-                    read_timeout_seconds=60.0,
-                ),
-                expand_labels=True,
-            )
-            lecture = clean_generated_lecture_output(lecture)
-        except Exception:
-            lecture = ""
-
-        results.append({
-            "index": slide["index"],
-            "title": slide.get("title", ""),
-            "lecture": lecture,
-            "skipped": not lecture.strip(),
+        work_items.append({
+            "slide": slide,
+            "slide_text": slide_text,
+            "prompt": prompt,
+            "pacing": pacing,
             "sources": sources,
             "retrieval_mode": (slide_graphrag_context or {}).get("retrieval_mode"),
             "retrieval_stats": (slide_graphrag_context or {}).get("retrieval_stats"),
@@ -1627,10 +2201,278 @@ Output only the final slide lecture script."""
             "graph_paths": graph_paths,
             "formula_context": formula_context,
             "learning_plan": learning_plan,
-            "consistency_report": _safe_consistency_report(lecture, learning_plan, task="lecture"),
         })
 
-    return results
+    failed_items: List[Dict[str, Any]] = []
+    for item in work_items:
+        result = await _try_generate_slide_lecture_item(
+            client,
+            item,
+            speech_rate_cpm=speech_rate_cpm,
+            phase="initial",
+            attempt=1,
+        )
+        if result.get("lecture"):
+            results_by_index[int(item["slide"]["index"])] = result
+        else:
+            item["last_error"] = result.get("error") or "AI 返回为空"
+            failed_items.append(item)
+
+    for attempt in range(1, 4):
+        if not failed_items:
+            break
+        retry_items = failed_items
+        failed_items = []
+        for item in retry_items:
+            result = await _try_generate_slide_lecture_item(
+                client,
+                item,
+                speech_rate_cpm=speech_rate_cpm,
+                phase="pro_retry",
+                attempt=attempt,
+            )
+            if result.get("lecture"):
+                results_by_index[int(item["slide"]["index"])] = result
+            else:
+                item["last_error"] = result.get("error") or item.get("last_error") or "AI 返回为空"
+                failed_items.append(item)
+
+    if failed_items:
+        flash_client = DeepSeekAPIClient(api_key=client.api_key, model=get_deepseek_model("flash"))
+        retry_items = failed_items
+        failed_items = []
+        for item in retry_items:
+            result = await _try_generate_slide_lecture_item(
+                flash_client,
+                item,
+                speech_rate_cpm=speech_rate_cpm,
+                phase="flash_fallback",
+                attempt=1,
+            )
+            if result.get("lecture"):
+                results_by_index[int(item["slide"]["index"])] = result
+            else:
+                item["last_error"] = result.get("error") or item.get("last_error") or "AI 返回为空"
+                failed_items.append(item)
+
+    if results_by_index:
+        flash_client = DeepSeekAPIClient(api_key=client.api_key, model=get_deepseek_model("flash"))
+        for item in work_items:
+            slide_index = int(item["slide"]["index"])
+            result = results_by_index.get(slide_index)
+            if not result or result.get("generation_status") == "fallback":
+                continue
+            if not _slide_lecture_needs_flash_completion(str(result.get("lecture") or ""), item.get("pacing")):
+                continue
+            completed = await _complete_short_slide_lecture_with_flash(
+                flash_client,
+                item,
+                result,
+                speech_rate_cpm=speech_rate_cpm,
+            )
+            results_by_index[slide_index] = completed
+
+    for item in failed_items:
+        slide = item["slide"]
+        slide_text = item["slide_text"]
+        lecture = _fallback_slide_lecture_text(
+            chapter_title=chapter_title,
+            slide=slide,
+            slide_text=slide_text,
+        )
+        error = str(item.get("last_error") or "AI 生成失败，已使用兜底讲解").strip()
+        results_by_index[int(slide["index"])] = _finalize_slide_lecture_result(
+            item,
+            lecture=lecture,
+            speech_rate_cpm=speech_rate_cpm,
+            error=error,
+            generation_model="fallback",
+            generation_status="fallback",
+            generation_attempts=5,
+        )
+
+    ordered: List[Dict[str, Any]] = []
+    for slide in slide_details:
+        slide_index = slide.get("index")
+        if target_set and slide_index not in target_set:
+            continue
+        if isinstance(slide_index, int) and slide_index in results_by_index:
+            ordered.append(results_by_index[slide_index])
+    return ordered
+
+
+async def _try_generate_slide_lecture_item(
+    client: DeepSeekAPIClient,
+    item: Dict[str, Any],
+    *,
+    speech_rate_cpm: int,
+    phase: str,
+    attempt: int,
+) -> Dict[str, Any]:
+    pacing = item.get("pacing") if isinstance(item.get("pacing"), dict) else {}
+    prompt = str(item.get("prompt") or "")
+    last_error = str(item.get("last_error") or "").strip()
+    retry_note = ""
+    if phase == "pro_retry":
+        retry_note = (
+            f"\n\n上一次第 {attempt} 轮重试前的失败信息：{_truncate_for_prompt(last_error, 260)}\n"
+            "请重新生成完整的本页讲课文案，只输出最终文案。"
+        )
+    elif phase == "flash_fallback":
+        retry_note = (
+            f"\n\n前序 deepseek-v4-pro 多轮生成失败：{_truncate_for_prompt(last_error, 260)}\n"
+            "请用更稳健的方式生成完整的本页讲课文案，只输出最终文案。"
+        )
+    try:
+        lecture = expand_formula_references(
+            await client._call_deepseek(
+                prompt + retry_note,
+                max_tokens=min(2600, max(800, int(pacing.get("target_chars") or 700) * 2)),
+                system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
+                read_timeout_seconds=45.0 if phase != "flash_fallback" else 35.0,
+            ),
+            expand_labels=True,
+        )
+        lecture = clean_generated_lecture_output(lecture)
+        if not lecture.strip():
+            raise ValueError("AI 返回为空")
+        return _finalize_slide_lecture_result(
+            item,
+            lecture=lecture,
+            speech_rate_cpm=speech_rate_cpm,
+            error="",
+            generation_model=client.model,
+            generation_status=phase,
+            generation_attempts=_generation_attempt_count(phase, attempt),
+        )
+    except Exception as exc:
+        return {
+            "index": item.get("slide", {}).get("index"),
+            "title": item.get("slide", {}).get("title", ""),
+            "lecture": "",
+            "skipped": True,
+            "error": str(exc).strip() or exc.__class__.__name__,
+            "generation_model": client.model,
+            "generation_status": f"{phase}_failed",
+            "generation_attempts": _generation_attempt_count(phase, attempt),
+        }
+
+
+def _generation_attempt_count(phase: str, attempt: int) -> int:
+    if phase == "initial":
+        return 1
+    if phase == "pro_retry":
+        return 1 + max(1, attempt)
+    if phase == "flash_fallback":
+        return 5
+    return max(1, attempt)
+
+
+def _finalize_slide_lecture_result(
+    item: Dict[str, Any],
+    *,
+    lecture: str,
+    speech_rate_cpm: int,
+    error: str,
+    generation_model: str,
+    generation_status: str,
+    generation_attempts: int,
+) -> Dict[str, Any]:
+    slide = item["slide"]
+    learning_plan = item.get("learning_plan") or {}
+    return _attach_slide_lecture_timing({
+        "index": slide["index"],
+        "title": slide.get("title", ""),
+        "lecture": lecture,
+        "skipped": not lecture.strip(),
+        "error": error,
+        "sources": item.get("sources") or [],
+        "retrieval_mode": item.get("retrieval_mode"),
+        "retrieval_stats": item.get("retrieval_stats"),
+        "graphrag_context": item.get("graphrag_context"),
+        "vector_hits": item.get("vector_hits"),
+        "graph_paths": item.get("graph_paths") or [],
+        "formula_context": item.get("formula_context") or [],
+        "learning_plan": learning_plan,
+        "consistency_report": _safe_consistency_report(lecture, learning_plan, task="lecture"),
+        "generation_model": generation_model,
+        "generation_status": generation_status,
+        "generation_attempts": generation_attempts,
+    }, item.get("pacing") if isinstance(item.get("pacing"), dict) else None, speech_rate_cpm)
+
+
+def _slide_lecture_needs_flash_completion(
+    lecture: str,
+    pacing: Optional[Dict[str, Any]],
+) -> bool:
+    if not pacing:
+        return False
+    target_chars = int(pacing.get("target_chars") or 0)
+    if target_chars <= 0:
+        return False
+    estimated_chars = _count_speech_chars(lecture)
+    if target_chars < 160:
+        return estimated_chars < max(45, int(target_chars * 0.55))
+    return estimated_chars < max(100, int(target_chars * 0.72))
+
+
+async def _complete_short_slide_lecture_with_flash(
+    flash_client: DeepSeekAPIClient,
+    item: Dict[str, Any],
+    result: Dict[str, Any],
+    *,
+    speech_rate_cpm: int,
+) -> Dict[str, Any]:
+    pacing = item.get("pacing") if isinstance(item.get("pacing"), dict) else {}
+    target_chars = int(pacing.get("target_chars") or 0)
+    current_chars = _count_speech_chars(str(result.get("lecture") or ""))
+    gap = max(80, target_chars - current_chars)
+    prompt = f"""请补全一页 PPT 的讲课文案，使其更接近目标字数。
+
+页面内容：
+{item.get("slide_text") or ""}
+
+当前讲稿：
+{result.get("lecture") or ""}
+
+目标：补充约 {gap} 个中文字符。补充内容必须自然衔接、可直接朗读，并围绕本页内容展开。
+限制：
+1. 不要重复当前讲稿已有句子。
+2. 不要引入没有依据的新事实。
+3. 只输出要追加的补全文案，不要输出标题、说明或 JSON。"""
+    try:
+        addition = expand_formula_references(
+            await flash_client._call_deepseek(
+                prompt,
+                max_tokens=min(1400, max(300, gap * 2)),
+                system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
+                read_timeout_seconds=30.0,
+            ),
+            expand_labels=True,
+        )
+        addition = clean_generated_lecture_output(addition)
+        if not addition.strip():
+            raise ValueError("flash 补全返回为空")
+        lecture = f"{str(result.get('lecture') or '').rstrip()}\n\n{addition.strip()}"
+        completed = _finalize_slide_lecture_result(
+            item,
+            lecture=lecture,
+            speech_rate_cpm=speech_rate_cpm,
+            error=str(result.get("error") or ""),
+            generation_model=str(result.get("generation_model") or ""),
+            generation_status=f"{result.get('generation_status') or 'generated'}+flash_completion",
+            generation_attempts=int(result.get("generation_attempts") or 1),
+        )
+        completed["completion_model"] = flash_client.model
+        completed["completion_added_chars"] = _count_speech_chars(addition)
+        return completed
+    except Exception as exc:
+        result = dict(result)
+        warning = str(exc).strip() or exc.__class__.__name__
+        result["completion_model"] = flash_client.model
+        result["completion_error"] = warning
+        result["warning"] = f"字数不足，flash 补全失败：{warning}"
+        return result
 
 
 def _build_ppt_learning_plan(
@@ -1829,9 +2671,11 @@ async def upload_courseware_assets(file: UploadFile = File(...)):
 async def save_courseware_project_route(request: CoursewareProjectSaveRequest):
     try:
         model = request.editable_model or {}
-        tex_content = request.tex_content
+        tex_content = request.tex_content or (model.get("source_tex") if isinstance(model, dict) else "")
         if not tex_content and model:
             tex_content = serialize_editable_model_to_tex(model, title=request.title)
+        if isinstance(model, dict) and tex_content and not model.get("source_tex"):
+            model = {**model, "source_tex": tex_content}
         record = save_courseware_project(
             {
                 "project_id": request.project_id,

@@ -1,8 +1,12 @@
+import "./lib/polyfills"
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { RouterProvider, createRouter } from "@tanstack/react-router"
 import { routeTree } from "./routeTree.gen"
+import { applyBrowserCompatibilityClasses } from "./lib/browserCompatibility"
 import "./index.css"
+
+applyBrowserCompatibilityClasses()
 
 async function loadRuntimeConfig() {
   if ((window as unknown as { __APP_CONFIG__?: unknown }).__APP_CONFIG__) return

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -21,6 +22,7 @@ from KGTS.education.kg_constraints import (
     relation_evidence_from_graph,
 )
 from KGTS.core.graph_context import build_graphrag_context
+from KGTS.config import load_root_env
 
 DEFAULT_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
 DEFAULT_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
@@ -68,6 +70,88 @@ def _exercise_generation_read_timeout() -> float | None:
     )
 
 
+def _redact_deepseek_error_text(text: str) -> str:
+    clean = str(text or "")
+    clean = re.sub(r"(?i)(api\s*key[:\s]+)([A-Za-z0-9_\-]{8,})", r"\1[redacted]", clean)
+    clean = re.sub(r"sk-[A-Za-z0-9_\-]{8,}", "sk-[redacted]", clean)
+    clean = re.sub(r"\*{2,}[A-Za-z0-9]{2,}", "[redacted]", clean)
+    return clean.strip()
+
+
+def _format_deepseek_http_error(response: httpx.Response) -> str:
+    if response.status_code in {401, 403}:
+        return (
+            "DeepSeek API 鉴权失败：当前 API Key 无效、已过期或无权限。"
+            "请在右上角齿轮设置中更新 DeepSeek API Key，或检查 .env 中的 DEEPSEEK_API_KEY 后重试。"
+        )
+
+    provider_message = ""
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            error_payload = payload.get("error")
+            if isinstance(error_payload, dict):
+                provider_message = str(error_payload.get("message") or error_payload.get("code") or "")
+            else:
+                provider_message = str(payload.get("message") or payload.get("error") or "")
+    except Exception:
+        provider_message = response.text
+
+    provider_message = _redact_deepseek_error_text(provider_message)
+    if response.status_code == 429:
+        return f"DeepSeek API 请求受限或额度不足（HTTP 429）：{provider_message or '请稍后重试或检查账户额度。'}"
+    if response.status_code >= 500:
+        return f"DeepSeek API 服务暂时不可用（HTTP {response.status_code}）：{provider_message or '请稍后重试。'}"
+    return f"DeepSeek API 调用失败（HTTP {response.status_code}）：{provider_message or '请检查 API Base、模型名和请求参数。'}"
+
+
+def _message_content_to_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts: List[str] = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content") or item.get("value")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(part for part in parts if part)
+    if isinstance(value, dict):
+        text = value.get("text") or value.get("content") or value.get("value")
+        return text if isinstance(text, str) else ""
+    return ""
+
+
+def _extract_deepseek_response_text(result: Dict[str, Any]) -> str:
+    choices = result.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise Exception("DeepSeek API 返回格式不正确：缺少 choices")
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        raise Exception("DeepSeek API 返回格式不正确：choices[0] 不是对象")
+
+    message = choice.get("message")
+    if isinstance(message, dict):
+        content = _message_content_to_text(message.get("content")).strip()
+        if content:
+            return content
+        for key in ("text", "output_text"):
+            content = _message_content_to_text(message.get(key)).strip()
+            if content:
+                return content
+
+    for key in ("text", "content", "output_text"):
+        content = _message_content_to_text(choice.get(key)).strip()
+        if content:
+            return content
+
+    finish_reason = str(choice.get("finish_reason") or "").strip() or "unknown"
+    message_keys = ",".join(sorted(message.keys())) if isinstance(message, dict) else "none"
+    raise Exception(f"DeepSeek API 返回正文为空：finish_reason={finish_reason}, message_keys={message_keys}")
+
+
 def _format_graphrag_context_for_prompt(graphrag_context: Dict[str, Any]) -> str:
     lines = []
     for item in graphrag_context.get("llm_context") or []:
@@ -89,7 +173,9 @@ class DeepSeekAPIClient:
     """DeepSeek chat-completions client for lecture, QA, and exercise generation."""
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
-        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
+        if not str(api_key or "").strip():
+            load_root_env(override=True)
+        self.api_key = (api_key or os.getenv("DEEPSEEK_API_KEY", "")).strip()
         self.base_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
         self.model = (model or get_deepseek_model("flash")).strip() or DEFAULT_DEEPSEEK_FLASH_MODEL
 
@@ -387,12 +473,9 @@ class DeepSeekAPIClient:
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
             if response.status_code != 200:
-                raise Exception(f"DeepSeek API 调用失败: {response.status_code} - {response.text}")
+                raise Exception(_format_deepseek_http_error(response))
             result = response.json()
-            try:
-                return result["choices"][0]["message"]["content"]
-            except (KeyError, IndexError, TypeError) as exc:
-                raise Exception(f"DeepSeek API 返回格式不正确: {exc}") from exc
+            return _extract_deepseek_response_text(result)
 
 
 ClaudeAPIClient = DeepSeekAPIClient

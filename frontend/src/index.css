@@ -168,8 +168,19 @@
     font-size: 1em;
   }
 
+  .kgts-slide-stage {
+    width: min(100%, calc((100vh - 250px) * 16 / 9));
+  }
+
+  @supports (height: 100dvh) {
+    .kgts-slide-stage {
+      width: min(100%, calc((100dvh - 250px) * 16 / 9));
+    }
+  }
+
   .studio-shell {
     display: grid;
+    height: 100vh;
     height: 100dvh;
     min-height: 640px;
     grid-template-columns: minmax(0, 1fr);
@@ -317,6 +328,11 @@
     min-width: 0;
     padding-bottom: 6px;
     overflow-wrap: anywhere;
+  }
+
+  .paper-workspace > .teacher-prepare-workbench {
+    width: 100%;
+    max-width: none;
   }
 
   .paper-workspace h1,
@@ -572,12 +588,14 @@
 
   .studio-shell {
     height: auto;
+    min-height: 100vh;
     min-height: 100dvh;
     grid-template-columns: 1fr;
     grid-template-rows: auto;
   }
 
   .paper-stack {
+    min-height: min(680px, 100vh);
     min-height: min(680px, 100dvh);
     overflow: visible;
   }
@@ -643,6 +661,7 @@
   }
 
   .studio-shell {
+    min-height: 100vh;
     min-height: 100dvh;
   }
 

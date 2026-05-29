@@ -59,10 +59,15 @@ _FORMULA_INDEX: Optional[Dict[str, Dict[str, Any]]] = None
 
 def _structured_dir() -> Path:
     for parent in Path(__file__).resolve().parents:
+        nested_candidate = parent / "structured" / "structured" / "formula_library.json"
+        if nested_candidate.exists():
+            return nested_candidate.parent
         candidate = parent / "structured" / "formula_library.json"
         if candidate.exists():
             return parent / "structured"
-    return Path(__file__).resolve().parents[1] / "structured"
+    fallback = Path(__file__).resolve().parents[1] / "structured"
+    nested = fallback / "structured"
+    return nested if (nested / "formula_library.json").exists() else fallback
 
 
 def _load_formula_index() -> Dict[str, Dict[str, Any]]:
@@ -755,7 +760,8 @@ def clean_generated_lecture_output(text: str) -> str:
         cleaned,
     )
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    return cleaned.strip()
+    cleaned = cleaned.strip()
+    return cleaned if cleaned else str(text or "").strip()
 
 
 def check_generation_consistency(

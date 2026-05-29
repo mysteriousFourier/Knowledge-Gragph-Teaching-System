@@ -2,6 +2,8 @@ import { defineConfig, loadEnv } from "vite"
 import react from "@vitejs/plugin-react"
 import { TanStackRouterVite } from "@tanstack/router-plugin/vite"
 
+const qaxBrowserTarget = "chrome102"
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "")
   const backendTarget = env.VITE_DEV_API_TARGET || env.EDUCATION_API_BASE_URL || "http://127.0.0.1:8000"
@@ -30,7 +32,8 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: "dist",
       sourcemap: enableSourceMap,
-      target: "es2020",
+      target: qaxBrowserTarget,
+      cssTarget: qaxBrowserTarget,
       reportCompressedSize: false,
       rollupOptions: {
         output: {

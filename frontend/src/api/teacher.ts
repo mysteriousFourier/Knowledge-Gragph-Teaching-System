@@ -51,6 +51,17 @@ export const useTeacherChapters = () => {
   })
 }
 
+export const useTeacherChapter = (chapterId: string) => {
+  return useQuery({
+    queryKey: ["teacher-chapter", chapterId],
+    queryFn: () =>
+      educationClient
+        .get<{ success: boolean; chapter?: Chapter; error?: string }>(`/api/education/get-chapter?chapter_id=${encodeURIComponent(chapterId)}`)
+        .then((r) => r.data),
+    enabled: Boolean(chapterId),
+  })
+}
+
 export const useSaveChapter = () => {
   return useMutation({
     mutationFn: (data: SaveChapterRequest) =>

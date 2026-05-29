@@ -10,6 +10,7 @@ import posixpath
 import re
 import zipfile
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any, Dict, List
 from xml.etree import ElementTree
 
@@ -20,6 +21,9 @@ from pptx.util import Pt
 
 MAX_INLINE_IMAGE_BYTES = 800 * 1024
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".svg"}
+LATEX_IMAGE_COMMAND_DEFAULT_OPTIONS = {
+    "safecontentimage": r"width=0.7\textwidth",
+}
 TEXT_COURSEWARE_EXTENSIONS = {".tex", ".md", ".markdown", ".txt", ".rst", ".csv", ".json", ".html", ".htm", ".rtf"}
 PPT_COURSEWARE_EXTENSIONS = {".pptx", ".ppt"}
 DOCX_COURSEWARE_EXTENSIONS = {".docx"}
@@ -33,6 +37,8 @@ SUPPORTED_COURSEWARE_EXTENSIONS = (
     .union(ZIP_COURSEWARE_EXTENSIONS)
 )
 SUPPORTED_COURSEWARE_FORMATS_TEXT = ", ".join(sorted(SUPPORTED_COURSEWARE_EXTENSIONS))
+_STRUCTURED_FIGURE_INDEX: Dict[str, Dict[str, Any]] | None = None
+_STRUCTURED_FIGURE_ASSET_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def parse_ppt(file_bytes: bytes) -> Dict[str, Any]:
@@ -393,7 +399,7 @@ def _slides_from_latex(
         if is_titlepage:
             title = title or metadata.get("title") or f"第 {index} 页"
             body = _latex_titlepage_body(metadata)
-            image_chunk = f"{raw_body}\n{template_text}"
+            image_chunk = raw_body
         else:
             inline_title, raw_body = _extract_frametitle(raw_body)
             title = title or inline_title or f"第 {index} 页"
@@ -450,19 +456,21 @@ def _extract_kgts_canvas_layout(source: str) -> Dict[str, Any]:
 def _images_from_text_chunk(chunk: str, image_assets: Dict[str, Dict[str, Any]], tex_base_dir: str) -> List[Dict[str, Any]]:
     images: List[Dict[str, Any]] = []
     seen: set[str] = set()
-    refs = re.findall(r"\\includegraphics(?:\[([^\]]*)\])?\{([^}]+)\}", chunk)
+    refs = _latex_image_refs(chunk)
     for options, ref in refs:
-        asset = _resolve_image_asset(image_assets, ref, tex_base_dir)
-        source_path = str((asset or {}).get("name") or ref)
+        asset = _resolve_image_asset(image_assets, ref, tex_base_dir) or _resolve_structured_figure_asset(ref)
+        if not asset:
+            continue
+        source_path = str(asset.get("name") or ref)
         if source_path in seen:
             continue
         seen.add(source_path)
-        image_bytes = (asset or {}).get("bytes") or b""
+        image_bytes = asset.get("bytes") or b""
         oversized = len(image_bytes) > MAX_INLINE_IMAGE_BYTES
         data_uri = None
         if image_bytes and not oversized:
             encoded = base64.b64encode(image_bytes).decode("utf-8")
-            data_uri = f"data:{(asset or {}).get('mime_type') or 'application/octet-stream'};base64,{encoded}"
+            data_uri = f"data:{asset.get('mime_type') or 'application/octet-stream'};base64,{encoded}"
         image_info = {
             "data_uri": data_uri,
             "width_emu": 0,
@@ -471,7 +479,7 @@ def _images_from_text_chunk(chunk: str, image_assets: Dict[str, Dict[str, Any]],
             "top_emu": 0,
             "source_path": source_path,
             "tex_options": options,
-            "tex_ref": ref,
+            "tex_ref": asset.get("tex_ref") or ref,
         }
         width_match = re.search(r"width\s*=\s*([0-9.]+)\\textwidth", options or "")
         if width_match:
@@ -483,6 +491,15 @@ def _images_from_text_chunk(chunk: str, image_assets: Dict[str, Dict[str, Any]],
             image_info["oversized"] = True
         images.append(image_info)
     return images
+
+
+def _latex_image_refs(chunk: str) -> List[tuple[str, str]]:
+    refs = re.findall(r"\\includegraphics(?:\[([^\]]*)\])?\{([^}]+)\}", chunk or "")
+    for command, default_options in LATEX_IMAGE_COMMAND_DEFAULT_OPTIONS.items():
+        pattern = re.compile(rf"\\{re.escape(command)}(?![A-Za-z@])(?:\[[^\]]*\])?\{{([^{{}}]+)\}}")
+        for match in pattern.finditer(chunk or ""):
+            refs.append((default_options, match.group(1)))
+    return refs
 
 
 def _resolve_image_asset(image_assets: Dict[str, Dict[str, Any]], ref: str, tex_base_dir: str) -> Dict[str, Any] | None:
@@ -507,9 +524,90 @@ def _resolve_image_asset(image_assets: Dict[str, Dict[str, Any]], ref: str, tex_
     return None
 
 
+def _resolve_structured_figure_asset(ref: str) -> Dict[str, Any] | None:
+    index = _load_structured_figure_index()
+    if not index:
+        return None
+    for figure_id in _structured_figure_id_candidates(ref):
+        entry = index.get(figure_id)
+        if not entry:
+            continue
+        if figure_id in _STRUCTURED_FIGURE_ASSET_CACHE:
+            return _STRUCTURED_FIGURE_ASSET_CACHE[figure_id]
+        asset_path = str(entry.get("asset_path") or "").replace("\\", "/").lstrip("/")
+        if not asset_path:
+            continue
+        absolute_path = _structured_root_dir() / asset_path
+        try:
+            image_bytes = absolute_path.read_bytes()
+        except OSError:
+            continue
+        asset = {
+            "name": asset_path,
+            "bytes": image_bytes,
+            "mime_type": mimetypes.guess_type(asset_path)[0] or "application/octet-stream",
+            "tex_ref": asset_path,
+            "figure_id": figure_id,
+        }
+        _STRUCTURED_FIGURE_ASSET_CACHE[figure_id] = asset
+        return asset
+    return None
+
+
+def _load_structured_figure_index() -> Dict[str, Dict[str, Any]]:
+    global _STRUCTURED_FIGURE_INDEX
+    if _STRUCTURED_FIGURE_INDEX is not None:
+        return _STRUCTURED_FIGURE_INDEX
+    library_path = _structured_root_dir() / "figure_library.json"
+    try:
+        payload = json.loads(library_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        _STRUCTURED_FIGURE_INDEX = {}
+        return _STRUCTURED_FIGURE_INDEX
+    figures = payload.get("figures") if isinstance(payload, dict) else None
+    _STRUCTURED_FIGURE_INDEX = figures if isinstance(figures, dict) else {}
+    return _STRUCTURED_FIGURE_INDEX
+
+
+def _structured_root_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "structured"
+
+
+def _structured_figure_id_candidates(ref: str) -> List[str]:
+    clean = str(ref or "").strip().strip("\"'").replace("\\", "/")
+    basename = posixpath.basename(clean)
+    root, _extension = posixpath.splitext(basename)
+    values = [clean, basename, root]
+    candidates: List[str] = []
+
+    def add(value: str) -> None:
+        normalized = value.strip()
+        if not normalized:
+            return
+        normalized = re.sub(r"^(?:figure|fig|图)\s*[-_ ]*", "", normalized, flags=re.I)
+        normalized = re.sub(r"^figure\s*", "", normalized, flags=re.I)
+        if normalized.startswith("a") and re.match(r"a\d+\.", normalized, flags=re.I):
+            normalized = "A" + normalized[1:]
+        if normalized not in candidates:
+            candidates.append(normalized)
+        if re.match(r"^(?:A\d+|\d+)\.\d+[a-z]$", normalized):
+            parent = normalized[:-1]
+            if parent not in candidates:
+                candidates.append(parent)
+
+    for value in values:
+        add(value)
+        for match in re.finditer(r"\b(A\d+|\d+)\.\d+[a-z]?\b", value, flags=re.I):
+            add(match.group(0))
+    return candidates
+
+
 def _image_appears_before_text(body: str) -> bool:
     text = _strip_latex_comments(body)
-    first_image = text.find("\\includegraphics")
+    image_positions = [match.start() for match in re.finditer(r"\\includegraphics(?![A-Za-z@])", text)]
+    for command in LATEX_IMAGE_COMMAND_DEFAULT_OPTIONS:
+        image_positions.extend(match.start() for match in re.finditer(rf"\\{re.escape(command)}(?![A-Za-z@])", text))
+    first_image = min(image_positions) if image_positions else -1
     if first_image < 0:
         return False
     first_item = text.find("\\item")
@@ -957,6 +1055,12 @@ def _replace_tikz_nodes_with_content(text: str) -> str:
     return "".join(result)
 
 
+def _remove_custom_latex_image_commands(text: str) -> str:
+    for command in LATEX_IMAGE_COMMAND_DEFAULT_OPTIONS:
+        text = re.sub(rf"\\{re.escape(command)}(?![A-Za-z@])(?:\[[^\]]*\])?\{{[^{{}}]+\}}", "", text)
+    return text
+
+
 def _clean_latex_math(formula: str) -> str:
     cleaned = _strip_latex_comments(formula)
     cleaned = _replace_latex_commands_by_arg(cleaned, {"textcolor", "color"}, 2, 1)
@@ -1024,6 +1128,7 @@ def _remove_latex_layout_commands(text: str) -> str:
         -1,
     )
     text = re.sub(r"\\includegraphics(?:\[[^\]]*\])?\{[^}]+\}", "", text)
+    text = _remove_custom_latex_image_commands(text)
     text = re.sub(r"\\(?:draw|path|coordinate|filldraw|fill)\b[\s\S]*?;", "\n", text)
     text = re.sub(
         r"\\begin\{(?:itemize|enumerate|center|columns|column|minipage|tikzpicture|block|alertblock)\}"

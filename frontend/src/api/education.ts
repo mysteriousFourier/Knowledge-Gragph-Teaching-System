@@ -27,7 +27,7 @@ import type {
   TtsSynthesizeResponse,
   UploadGraphResponse,
 } from "@/types/education"
-import type { ApiResponse, HealthCheckResponse, ConfigStatusResponse, SaveConfigResponse } from "@/types/api"
+import type { ApiResponse, DeepSeekConfigTestResponse, HealthCheckResponse, ConfigStatusResponse, SaveConfigResponse } from "@/types/api"
 
 export const useHealthCheck = () => {
   return useQuery({
@@ -52,6 +52,15 @@ export const useSaveConfig = () => {
       deepseek_flash_model?: string
       deepseek_pro_model?: string
     }) => educationClient.post<SaveConfigResponse>("/api/save-config", data).then((r) => r.data),
+  })
+}
+
+export const useTestDeepSeekConfig = () => {
+  return useMutation({
+    mutationFn: () =>
+      educationClient
+        .post<DeepSeekConfigTestResponse>("/api/test-deepseek-config", {}, { timeout: 30000 })
+        .then((r) => r.data),
   })
 }
 
@@ -295,17 +304,23 @@ export const useGeneratePptLectures = () => {
     mutationFn: ({
       file,
       style,
+      targetDurationMinutes,
+      speechRateCpm,
       sourceNodeIds,
       teacherGuidance,
     }: {
       file: File
       style: string
+      targetDurationMinutes?: number
+      speechRateCpm?: number
       sourceNodeIds?: string[]
       teacherGuidance?: string
     }) => {
       const formData = new FormData()
       formData.append("file", file)
       formData.append("style", style)
+      if (typeof targetDurationMinutes === "number") formData.append("target_duration_minutes", String(targetDurationMinutes))
+      if (typeof speechRateCpm === "number") formData.append("speech_rate_cpm", String(speechRateCpm))
       if (sourceNodeIds?.length) {
         if (sourceNodeIds.length === 1) formData.append("source_node_id", sourceNodeIds[0])
         sourceNodeIds.forEach((nodeId) => formData.append("source_node_ids", nodeId))

@@ -75,7 +75,7 @@ class CoursewareParserTest(unittest.TestCase):
         self.assertEqual(parsed["tex_source_file"], "main.tex")
         self.assertEqual(prompt_data["chapter_title"], "Evolutionary Theory on Polygenic Trait")
         self.assertEqual(len(slides), 3)
-        self.assertEqual(slides[0]["image_count"], 1)
+        self.assertEqual(slides[0]["image_count"], 0)
         self.assertEqual(slides[0]["layout"]["mode"], "title")
         self.assertIn("XI - Long-term Response", slides[0]["content"])
 
@@ -119,11 +119,11 @@ class CoursewareParserTest(unittest.TestCase):
 
         self.assertEqual(slide["layout"]["mode"], "columns")
         self.assertTrue(slide["layout"]["has_columns"])
-        self.assertEqual(slide["images"][0]["source_path"], "fig/chart")
-        self.assertEqual(slide["images"][0]["width_ratio"], 0.75)
+        self.assertEqual(slide["image_count"], 0)
+        self.assertEqual(slide["layout"]["columns"][1]["image_count"], 0)
         self.assertIn("Left text", slide["content"])
 
-    def test_tex_single_column_with_caption_stays_vertical(self):
+    def test_tex_unmatched_image_reference_is_not_displayed(self):
         tex = r"""
 \documentclass{beamer}
 \begin{document}
@@ -145,12 +145,42 @@ class CoursewareParserTest(unittest.TestCase):
         parsed = parse_courseware(tex.encode("utf-8"), "edited.tex")
         slide = build_ppt_lecture_prompt_data(parsed)["slide_details"][0]
 
-        self.assertEqual(slide["layout"]["mode"], "image_text")
+        self.assertEqual(slide["layout"]["mode"], "text")
+        self.assertEqual(slide["image_count"], 0)
         self.assertTrue(slide["layout"]["has_columns"])
         self.assertEqual(slide["layout"]["column_count"], 1)
         self.assertEqual(slide["layout"]["columns"][0]["width_ratio"], 0.85)
-        self.assertEqual(slide["layout"]["columns"][0]["images"][0]["width_ratio"], 0.65)
+        self.assertEqual(slide["layout"]["columns"][0]["image_count"], 0)
         self.assertIn("Caption below the image", slide["layout"]["outside_content"])
+
+    def test_tex_custom_safecontentimage_is_treated_as_image(self):
+        tex = r"""
+\documentclass{beamer}
+\newcommand{\safecontentimage}[1]{\IfFileExists{#1}{\includegraphics[width=0.7\textwidth]{#1}}{\fbox{\parbox[c][0.34\textheight][c]{0.7\textwidth}{Missing image\\\texttt{\detokenize{#1}}}}}}
+\begin{document}
+\begin{frame}{Figure 27.1}
+  \centering
+  \safecontentimage{fig/27.1.png}
+  \vspace{0.3cm}
+  \begin{center}
+    \parbox{0.95\textwidth}{\scriptsize Caption with inline math $r$ and $x$.}
+  \end{center}
+\end{frame}
+\end{document}
+"""
+        parsed = parse_courseware(tex.encode("utf-8"), "edited.tex")
+        slide = build_ppt_lecture_prompt_data(parsed)["slide_details"][0]
+
+        self.assertEqual(slide["image_count"], 1)
+        self.assertEqual(slide["images"][0]["source_path"], "figures/fig_0132.png")
+        self.assertEqual(slide["images"][0]["tex_ref"], "figures/fig_0132.png")
+        self.assertTrue(str(slide["images"][0]["data_uri"]).startswith("data:image/png;base64,"))
+        self.assertEqual(slide["images"][0]["width_ratio"], 0.7)
+        self.assertEqual(slide["layout"]["mode"], "image_text")
+        self.assertTrue(slide["layout"]["image_first"])
+        self.assertIn("Caption with inline math $r$ and $x$", slide["content"])
+        self.assertNotIn("fig/27.1.png", slide["content"])
+        self.assertNotIn("Missing image", slide["content"])
 
     def test_tex_zip_image_paths_match_common_root_without_extension(self):
         tex = r"""

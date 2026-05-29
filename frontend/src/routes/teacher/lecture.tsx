@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
-import { BookOpen, ChevronLeft, ChevronRight, Edit3, Eye, Pause, Play, Save, Trash2, X } from "lucide-react"
+import { BookOpen, ChevronLeft, ChevronRight, Edit3, Eye, Pause, Play, RotateCcw, Save, Trash2, X } from "lucide-react"
 import { useDeleteChapter, useSaveLecture, useTeacherChapters } from "@/api/teacher"
 import { EvidenceSummary } from "@/components/common/EvidenceSummary"
 import { LectureReviewPanel } from "@/components/common/LectureReviewPanel"
@@ -34,6 +34,7 @@ function LecturePage() {
   const deleteChapter = useDeleteChapter()
   const chapters = chaptersData?.chapters || []
   const selectedChapter = chapters.find((chapter) => chapter.id === selectedChapterId)
+  const slideLectures = selectedChapter?.slide_lectures || []
   const lectureContent = isEditing ? draftContent : selectedChapter?.lecture_content || ""
   const markdownSlides = lectureContent.trim() ? [lectureContent] : []
   const isCoursewareChapter = !isEditing && !!selectedChapter?.ppt_slides?.length
@@ -43,7 +44,7 @@ function LecturePage() {
     getSegmentText: (segment) => {
       if (isCoursewareChapter) {
         const slide = selectedChapter?.ppt_slides?.[segment]
-        const lecture = selectedChapter?.slide_lectures?.find((item) => item.index === slide?.index)
+        const lecture = slideLectures.find((item) => item.index === slide?.index && item.lecture?.trim())
         return lecture?.lecture || slide?.notes || slide?.content || slide?.raw_text || ""
       }
       return markdownSlides[segment] || ""
@@ -64,9 +65,9 @@ function LecturePage() {
 
   const currentCoursewareSlide = selectedChapter?.ppt_slides?.[currentSlide]
   const currentSlideLecture = useMemo(() => {
-    if (!selectedChapter?.slide_lectures?.length || !currentCoursewareSlide) return undefined
-    return selectedChapter.slide_lectures.find((item) => item.index === currentCoursewareSlide.index)
-  }, [currentCoursewareSlide, selectedChapter?.slide_lectures])
+    if (!slideLectures.length || !currentCoursewareSlide) return undefined
+    return slideLectures.find((item) => item.index === currentCoursewareSlide.index && item.lecture?.trim())
+  }, [currentCoursewareSlide, slideLectures])
 
   const handleStartEdit = () => {
     setDraftContent(selectedChapter?.lecture_content || "")
@@ -229,6 +230,15 @@ function LecturePage() {
                   >
                     {playback.isPlaying || playback.isLoadingAudio ? <Pause size={14} /> : <Play size={14} />}
                     {playback.isPlaying || playback.isLoadingAudio ? "暂停" : "播放"}
+                  </button>
+                  <button
+                    onClick={() => playback.replay(currentSlide)}
+                    disabled={!playback.hasSegments}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border hover:bg-accent disabled:opacity-50 transition-colors"
+                    title={playback.providerLabel}
+                  >
+                    <RotateCcw size={14} />
+                    重播当前页
                   </button>
                 </>
               )}

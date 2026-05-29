@@ -415,11 +415,32 @@ export interface PptSlideLecture {
   title?: string
   lecture: string
   skipped: boolean
+  target_chars?: number
+  target_duration_seconds?: number
+  budget_source?: string
+  estimated_chars?: number
+  estimated_duration_seconds?: number
   sources?: unknown[]
   graph_paths?: unknown[]
   formula_context?: unknown[]
   learning_plan?: unknown
   consistency_report?: ConsistencyReport
+  error?: string
+  warning?: string
+  generation_model?: string
+  generation_status?: string
+  generation_attempts?: number
+  completion_model?: string
+  completion_added_chars?: number
+  completion_error?: string
+}
+
+export interface SlideLecturePacingSummary {
+  target_duration_minutes?: number
+  speech_rate_cpm?: number
+  total_target_chars?: number
+  estimated_chars?: number
+  estimated_duration_seconds?: number
 }
 
 export interface CoursewareStyleColor {
@@ -515,6 +536,8 @@ export interface GenerateSlideLecturesRequest {
   slides: PptSlideDetail[]
   tex_content?: string
   style?: string
+  target_duration_minutes?: number
+  speech_rate_cpm?: number
   source_node_id?: string
   source_node_ids?: string[]
   graph_scope?: "subtree" | string
@@ -539,6 +562,7 @@ export interface SourceDriftReport {
 export interface PptUploadResponse extends PptTexGenerateResponse {
   lecture_content: string
   slide_lectures: PptSlideLecture[]
+  lecture_pacing?: SlideLecturePacingSummary
   consistency_report?: ConsistencyReport
   drift_report?: SourceDriftReport
   ppt_source_node_ids?: string[]

@@ -6,10 +6,22 @@ import unittest
 import zipfile
 from pathlib import Path
 
+import httpx
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from KGTS.education.claude_api import _extract_deepseek_response_text, _format_deepseek_http_error
 from KGTS.education.courseware_style import build_style_reference_guidance, build_style_reference_profile
-from KGTS.education.router import _merge_existing_slide_lectures, _normalize_target_slide_indices
+from KGTS.education.kg_constraints import clean_generated_lecture_output
+from KGTS.education.router import (
+    _apply_model_slide_lecture_allocations,
+    _build_slide_lecture_pacing,
+    _merge_existing_slide_lectures,
+    _nonempty_slide_lecture_count,
+    _normalize_target_slide_indices,
+    _slide_lecture_error_summary,
+)
+from KGTS.models.education import GenerateSlideLecturesRequest
 
 
 class CoursewareStyleTest(unittest.TestCase):
@@ -94,9 +106,126 @@ class CoursewareStyleTest(unittest.TestCase):
 
         self.assertEqual([item["lecture"] for item in merged], ["old one", "new two", "old three"])
 
+    def test_slide_lecture_request_accepts_duration_budget(self):
+        request = GenerateSlideLecturesRequest(
+            slides=[{"index": 1, "title": "One"}],
+            target_duration_minutes=15,
+            speech_rate_cpm=250,
+        )
+
+        self.assertEqual(request.target_duration_minutes, 15)
+        self.assertEqual(request.speech_rate_cpm, 250)
+
+    def test_slide_lecture_pacing_allocates_total_character_budget(self):
+        slides = [
+            {"index": 1, "title": "Title"},
+            {"index": 2, "title": "Dense", "content": "这是一个包含较多课堂内容的页面，用于验证权重分配。" * 8},
+            {"index": 3, "title": "Empty", "content": ""},
+        ]
+
+        pacing = _build_slide_lecture_pacing(
+            slides,
+            target_duration_minutes=10,
+            speech_rate_cpm=250,
+        )
+
+        self.assertEqual(pacing["total_target_chars"], 2500)
+        self.assertEqual(sum(item["target_chars"] for item in pacing["slides"].values()), 2500)
+        self.assertLess(pacing["slides"][3]["target_chars"], pacing["slides"][2]["target_chars"])
+        self.assertIn("target_duration_seconds", pacing["slides"][2])
+
+    def test_model_slide_lecture_allocations_keep_total_budget(self):
+        base = _build_slide_lecture_pacing(
+            [
+                {"index": 1, "title": "Intro", "content": "短页"},
+                {"index": 2, "title": "Dense", "content": "内容较多" * 80},
+            ],
+            target_duration_minutes=2,
+            speech_rate_cpm=250,
+        )
+
+        planned = _apply_model_slide_lecture_allocations(
+            base,
+            {"slides": [{"index": 1, "target_chars": 80}, {"index": 2, "target_chars": 800}]},
+        )
+
+        self.assertEqual(planned["total_target_chars"], base["total_target_chars"])
+        self.assertEqual(sum(item["target_chars"] for item in planned["slides"].values()), 500)
+        self.assertEqual(planned["slides"][1]["budget_source"], "deepseek-v4-pro")
+
+    def test_selected_slide_regeneration_preserves_other_metadata(self):
+        slides = [{"index": 1, "title": "One"}, {"index": 2, "title": "Two"}]
+        existing = [
+            {"index": 1, "title": "One", "lecture": "old one", "target_chars": 100, "estimated_chars": 80},
+            {"index": 2, "title": "Two", "lecture": "old two", "target_chars": 120, "estimated_chars": 90},
+        ]
+        generated = [
+            {"index": 2, "title": "Two", "lecture": "new two", "target_chars": 250, "estimated_chars": 230},
+        ]
+
+        merged = _merge_existing_slide_lectures(existing, generated, slides)
+
+        self.assertEqual(merged[0]["target_chars"], 100)
+        self.assertEqual(merged[1]["target_chars"], 250)
+
     def test_target_slide_indices_rejects_missing_slide(self):
         with self.assertRaises(Exception):
             _normalize_target_slide_indices([4], [{"index": 1}, {"index": 2}])
+
+    def test_empty_slide_lecture_helpers_surface_failures(self):
+        lectures = [
+            {"index": 1, "lecture": "", "error": "timeout"},
+            {"index": 2, "lecture": "有效讲稿", "error": ""},
+        ]
+
+        self.assertEqual(_nonempty_slide_lecture_count(lectures), 1)
+        self.assertIn("第 1 页：timeout", _slide_lecture_error_summary(lectures))
+
+    def test_deepseek_auth_error_is_actionable_and_redacted(self):
+        response = httpx.Response(
+            401,
+            json={
+                "error": {
+                    "message": "Authentication Fails, Your api key: ****d3ec is invalid",
+                    "code": "invalid_request_error",
+                }
+            },
+            request=httpx.Request("POST", "https://api.deepseek.com/chat/completions"),
+        )
+
+        message = _format_deepseek_http_error(response)
+
+        self.assertIn("DeepSeek API 鉴权失败", message)
+        self.assertIn("设置", message)
+        self.assertNotIn("d3ec", message)
+
+    def test_deepseek_non_auth_error_is_redacted(self):
+        response = httpx.Response(
+            400,
+            json={"error": {"message": "bad request with api key: sk-testsecret123456"}},
+            request=httpx.Request("POST", "https://api.deepseek.com/chat/completions"),
+        )
+
+        message = _format_deepseek_http_error(response)
+
+        self.assertIn("HTTP 400", message)
+        self.assertNotIn("sk-testsecret123456", message)
+
+    def test_deepseek_empty_content_reports_finish_reason(self):
+        with self.assertRaisesRegex(Exception, "finish_reason=stop"):
+            _extract_deepseek_response_text({"choices": [{"finish_reason": "stop", "message": {"content": ""}}]})
+
+    def test_deepseek_content_list_is_extracted(self):
+        text = _extract_deepseek_response_text(
+            {"choices": [{"message": {"content": [{"type": "text", "text": "有效讲稿"}]}}]}
+        )
+
+        self.assertEqual(text, "有效讲稿")
+
+    def test_clean_lecture_output_does_not_delete_everything(self):
+        raw = "AI补充\n这是一段有效讲解。"
+
+        self.assertEqual(clean_generated_lecture_output(raw), raw)
 
 
 if __name__ == "__main__":

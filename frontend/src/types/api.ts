@@ -36,6 +36,8 @@ export interface HealthCheckResponse {
 export interface ConfigStatusResponse {
   success: boolean
   deepseek_api_key_configured: boolean
+  deepseek_api_key_fingerprint?: string
+  deepseek_api_key_length?: number
   flash_model: string
   pro_model: string
   deepseek_api_base?: string
@@ -44,8 +46,15 @@ export interface ConfigStatusResponse {
 export interface SaveConfigResponse {
   success: boolean
   deepseek_api_key_configured: boolean
+  deepseek_api_key_fingerprint?: string
+  deepseek_api_key_length?: number
   flash_model: string
   pro_model: string
   deepseek_api_base?: string
   message?: string
+}
+
+export interface DeepSeekConfigTestResponse extends SaveConfigResponse {
+  response_preview?: string
+  error?: string
 }

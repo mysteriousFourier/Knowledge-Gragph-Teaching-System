@@ -105,6 +105,35 @@
     }
   }
 
+  function syncTextboxHeight($box) {
+    if (!$box || !$box.length) return;
+    var $content = $box.find(".slide-textbox-content").first();
+    if (!$content.length) return;
+    var textarea = $content[0];
+    var $preview = $box.find(".slide-rich-text-preview").first();
+    var currentHeight = cssPx($box, "height", $box.outerHeight() || 40);
+    var contentHeight = 0;
+    if (textarea) {
+      textarea.style.height = "auto";
+      contentHeight = Math.max(contentHeight, textarea.scrollHeight || 0);
+    }
+    if ($preview.length) {
+      contentHeight = Math.max(contentHeight, $preview[0].scrollHeight || $preview.outerHeight() || 0);
+    }
+    var nextHeight = Math.max(currentHeight, Math.ceil(contentHeight + 24));
+    var parentHeight = $box.parent().height() || SLIDE_DESIGN_HEIGHT;
+    var top = parseFloat($box.css("top")) || 0;
+    nextHeight = Math.min(nextHeight, Math.max(36, parentHeight - top));
+    $box.css("height", nextHeight + "px");
+    if (textarea) textarea.style.height = Math.max(30, nextHeight - 18) + "px";
+  }
+
+  function syncAllTextboxHeights($scope) {
+    ($scope || $("#slideCanvas")).find(".slide-textbox").each(function () {
+      syncTextboxHeight($(this));
+    });
+  }
+
   function hasMathSyntax(text) {
     return /\\\(|\\\[|\$\$|(^|[^\\])\$|\\begin\{|\\(?:frac|sqrt|sum|prod|int|beta|alpha|gamma|delta|theta|lambda|mu|sigma|phi|omega|bar|overline|hat|vec|tilde|partial|nabla|cdot|times|leq|geq|neq|approx|infty)\b|[_^]\s*\{?/.test(String(text || ""));
   }
@@ -1928,12 +1957,17 @@
       var panelWidth = $panel.width() || 0;
       var handleWidth = $handle.outerWidth() || 18;
       var usable = Math.max(0, panelWidth - handleWidth);
-      var minPane = 260;
-      var maxLeft = Math.max(minPane, usable - minPane);
-      var nextLeft = Math.round(Math.max(minPane, Math.min(maxLeft, usable * ratio)));
-      var nextRight = Math.max(minPane, usable - nextLeft);
+      var minLeftPane = 320;
+      var minRightPane = 520;
+      if (usable < minLeftPane + minRightPane) {
+        minLeftPane = Math.max(220, Math.floor(usable * 0.38));
+        minRightPane = Math.max(260, usable - minLeftPane);
+      }
+      var maxLeft = Math.max(minLeftPane, usable - minRightPane);
+      var nextLeft = Math.round(Math.max(minLeftPane, Math.min(maxLeft, usable * ratio)));
+      var nextRight = Math.max(minRightPane, usable - nextLeft);
       if (nextLeft + nextRight > usable) {
-        nextRight = Math.max(minPane, usable - nextLeft);
+        nextRight = Math.max(minRightPane, usable - nextLeft);
       }
       $panel.css("grid-template-columns", nextLeft + "px " + handleWidth + "px " + nextRight + "px");
       if (usable > 0) {
@@ -1952,8 +1986,13 @@
       var usable = Math.max(0, panelWidth - handleWidth);
       if (!usable) return;
       var left = pageX - rect.left - paddingLeft;
-      var minPane = 260;
-      left = Math.max(minPane, Math.min(usable - minPane, left));
+      var minLeftPane = 320;
+      var minRightPane = 520;
+      if (usable < minLeftPane + minRightPane) {
+        minLeftPane = Math.max(220, Math.floor(usable * 0.38));
+        minRightPane = Math.max(260, usable - minLeftPane);
+      }
+      left = Math.max(minLeftPane, Math.min(usable - minRightPane, left));
       applySplit(left / usable);
     }
 
@@ -4199,6 +4238,9 @@
     bindSlideEvents($canvas);
     updateHistoryButtons();
     updateScopedMathPreviews($canvas);
+    setTimeout(function () {
+      syncAllTextboxHeights($canvas);
+    }, 0);
   }
 
   function createItemRow(idx, text) {
@@ -4420,6 +4462,9 @@
       '</div>'
     );
     $box.find(".slide-textbox-content").css("height", Math.max(30, height - 18) + "px");
+    setTimeout(function () {
+      syncTextboxHeight($box);
+    }, 0);
 
     $box.find(".slide-textbox-drag").on("mousedown", function (e) {
       e.preventDefault();
@@ -4746,6 +4791,7 @@
         rememberRichTextSelection(this);
       }
       updateScopedMathPreviews(mathPreviewScope($(this)));
+      syncTextboxHeight($(this).closest(".slide-textbox"));
       saveCurrentSlide();
       scheduleLatexSync();
       scheduleHistoryCommit();
@@ -4757,6 +4803,7 @@
       syncSingleRichText($preview);
       setTimeout(function () {
         updateScopedMathPreviews($host);
+        syncTextboxHeight($preview.closest(".slide-textbox"));
       }, 0);
     });
 
@@ -5276,6 +5323,7 @@
     var tbs = [];
     $canvas.find(".slide-textbox").each(function () {
       var $tb = $(this);
+      syncTextboxHeight($tb);
       var $content = $tb.find(".slide-textbox-content");
       tbs.push({
         text: $content.val(),
@@ -5480,4 +5528,3 @@
   setGenerating(false);
   updateDownloadPptxButton();
 });
-

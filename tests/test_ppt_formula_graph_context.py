@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from KGTS.education.kg_constraints import (
+    _structured_dir,
     check_generation_consistency,
     formula_context_for_text,
     graph_paths_for_evidence,
@@ -186,6 +187,13 @@ class PptFormulaGraphContextTest(unittest.TestCase):
         p_symbol = next(symbol for symbol in formulas[0]["symbols"] if symbol["symbol"] == "p")
         self.assertEqual(p_symbol["unit_id"], "chapter6_block_063")
         self.assertIn("scope", p_symbol["meaning"])
+
+    def test_formula_context_uses_nested_structured_library(self):
+        structured_dir = _structured_dir()
+
+        self.assertEqual(structured_dir.name, "structured")
+        self.assertTrue((structured_dir / "formula_library.json").exists())
+        self.assertEqual(formula_context_for_text("Equation 6.18g", limit=1)[0]["id"], "6.18g")
 
     def test_lecture_consistency_ignores_plain_chinese_phrases_as_entities(self):
         plan = {

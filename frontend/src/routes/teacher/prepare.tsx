@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
@@ -13,7 +13,10 @@ import {
   ImagePlus,
   Minus,
   LayoutPanelTop,
+  Move,
   Network,
+  Pause,
+  Play,
   Plus,
   RotateCcw,
   RotateCw,
@@ -24,6 +27,8 @@ import {
 } from "lucide-react"
 import {
   useExportCoursewarePptx,
+  useCoursewareProject,
+  useCoursewareProjects,
   useGeneratePptLectures,
   useGeneratePptTex,
   useGenerateSlideLectures,
@@ -35,7 +40,7 @@ import {
   useUploadCoursewareStyleReference,
 } from "@/api/education"
 import { useGraphScopeTree } from "@/api/graph"
-import { useSaveChapter, useSaveLecture } from "@/api/teacher"
+import { useSaveChapter, useSaveLecture, useTeacherChapter } from "@/api/teacher"
 import {
   GraphContextPanel,
   GraphTreePanel,
@@ -45,7 +50,9 @@ import {
   sortGraphScopeNodeIds,
 } from "@/components/common/GraphScopeSelector"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
+import { PlaybackProgress } from "@/components/common/PlaybackProgress"
 import { RichTextContent } from "@/components/renderers/RichTextContent"
+import { useLecturePlayback } from "@/hooks/useLecturePlayback"
 import type {
   GraphSourceScope,
   CoursewareAsset,
@@ -57,7 +64,9 @@ import type {
   PptSlideDetail,
   PptSlideLecture,
   SourceDriftReport,
+  CoursewareProject,
 } from "@/types/education"
+import type { Chapter } from "@/types/chapter"
 import { getRuntimeConfig } from "@/lib/config"
 import { cn } from "@/lib/utils"
 
@@ -99,6 +108,8 @@ const COURSEWARE_ACCEPT = ".ppt,.pptx,.tex,.md,.markdown,.txt,.rst,.csv,.json,.h
 const COURSEWARE_FORMAT_LABEL = "PPT/PPTX、TeX、Markdown、TXT、RST、CSV、JSON、HTML、RTF、DOCX、PDF、ZIP"
 const CANVAS_WIDTH = 1000
 const CANVAS_HEIGHT = 562.5
+const DEFAULT_LECTURE_DURATION_MINUTES = 10
+const DEFAULT_SPEECH_RATE_CPM = 250
 
 function normalizeTexNewlines(value: string) {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
@@ -126,6 +137,117 @@ function imageSourcePathKeys(value?: string) {
     return [suffix, suffixWithoutExtension]
   })
   return Array.from(new Set([normalized, withoutExtension, basename, basenameWithoutExtension, ...suffixes].filter(Boolean)))
+}
+
+function clampLectureDurationMinutes(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_LECTURE_DURATION_MINUTES
+  return Math.min(180, Math.max(1, Math.round(value * 10) / 10))
+}
+
+function mergeSlideLectures(previous: PptSlideLecture[], incoming: PptSlideLecture[]) {
+  const byIndex = new Map(previous.map((lecture) => [lecture.index, lecture]))
+  incoming.forEach((lecture) => {
+    byIndex.set(lecture.index, lecture)
+  })
+  return Array.from(byIndex.values()).sort((a, b) => a.index - b.index)
+}
+
+function hasUsableSlideLecture(lecture?: PptSlideLecture): lecture is PptSlideLecture & { lecture: string } {
+  return Boolean(lecture?.lecture?.trim())
+}
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error) return error.message
+  if (typeof error === "object" && error && "message" in error) return String((error as { message?: unknown }).message || "")
+  return String(error || "未知错误")
+}
+
+function estimateSlideDurationMinutes(slide: PptSlideDetail, allSlides: PptSlideDetail[], targetDurationMinutes: number) {
+  const slideTextLength = Math.max(1, [slide.title, slide.content, slide.notes, slide.raw_text].join("").length)
+  const totalTextLength = Math.max(
+    slideTextLength,
+    allSlides.reduce((sum, item) => sum + Math.max(1, [item.title, item.content, item.notes, item.raw_text].join("").length), 0),
+  )
+  const estimated = (targetDurationMinutes * slideTextLength) / totalTextLength
+  return Math.min(180, Math.max(0.1, Math.round(estimated * 10) / 10))
+}
+
+function compactSlideForLectureRequest(slide: PptSlideDetail): PptSlideDetail {
+  return {
+    index: slide.index,
+    title: slide.title,
+    content: slide.content,
+    notes: slide.notes,
+    raw_text: slide.raw_text,
+    tables: slide.tables?.slice(0, 2).map((table) => ({ rows: table.rows.slice(0, 8) })),
+  }
+}
+
+function textFromSlides(slides: PptSlideDetail[]) {
+  return slides
+    .map((slide) => [slide.title, slide.content, slide.notes, slide.raw_text].map((part) => String(part || "").trim()).filter(Boolean).join("\n"))
+    .filter(Boolean)
+    .join("\n\n")
+}
+
+function coursewareProjectToPreview(project: CoursewareProject): PptPreviewResponse | null {
+  const slides = (project.slides || []) as PptSlideDetail[]
+  const editableModel = project.editable_model || null
+  const modelSlides = editableModel?.slides || []
+  if (!slides.length && !modelSlides.length) return null
+  const restoredSlides = slides.length
+    ? slides
+    : modelSlides.map((slide) => ({
+        index: slide.index,
+        title: slide.title || `第 ${slide.index} 页`,
+        content: (slide.objects || slide.items || []).map((object) => object.text || object.latex || "").filter(Boolean).join("\n"),
+        source_tex: slide.source_tex || "",
+        source_body_tex: slide.source_body_tex || "",
+        source_start: slide.source_start,
+        source_end: slide.source_end,
+        layout: slide.layout,
+        notes: slide.notes,
+      }))
+  const texContent = project.tex_content || editableModel?.source_tex || ""
+  return {
+    success: true,
+    chapter_title: project.title || editableModel?.title || "未命名课件",
+    slide_count: restoredSlides.length,
+    slides: restoredSlides,
+    full_text: textFromSlides(restoredSlides),
+    tex_content: texContent,
+    editable_model: editableModel || undefined,
+    asset_map: project.asset_map || editableModel?.assets || {},
+    layout: editableModel?.layout,
+    source_tex: texContent,
+  }
+}
+
+function chapterToCoursewareProject(chapter: Chapter): CoursewareProject | null {
+  const slides = chapter.ppt_slides || []
+  if (!slides.length && !chapter.editable_model && !chapter.tex_content) return null
+  return {
+    id: chapter.id,
+    title: chapter.title,
+    editable_model: chapter.editable_model,
+    asset_map: chapter.asset_map,
+    slides,
+    tex_content: chapter.tex_content,
+    ppt_artifact: chapter.ppt_artifact,
+    source_node_ids: chapter.source_node_ids,
+    created_at: typeof chapter.created_at === "number" ? String(chapter.created_at) : chapter.created_at,
+    updated_at: typeof chapter.updated_at === "number" ? String(chapter.updated_at) : chapter.updated_at,
+  }
+}
+
+function formatDuration(seconds?: number) {
+  const value = Math.max(0, Math.round(seconds || 0))
+  if (value <= 0) return "0 分钟"
+  const minutes = Math.floor(value / 60)
+  const rest = value % 60
+  if (minutes <= 0) return `${rest} 秒`
+  if (rest === 0) return `${minutes} 分钟`
+  return `${minutes} 分 ${rest} 秒`
 }
 
 function hydratePreviewImages(images: SlideImage[], imageBySourcePath: Map<string, SlideImage>) {
@@ -320,12 +442,14 @@ function canvasLayoutFromSlide(slide: PptSlideDetail): CanvasItem[] {
   const items: CanvasItem[] = []
   const hasImages = images.length > 0
   const content = String(slide.content || "").trim()
-  const titleHeight = slide.layout?.mode === "title" ? 72 : 54
+  const titleY = slide.layout?.mode === "title" ? 58 : 34
+  const titleHeight = estimateCanvasTextHeight(String(slide.title || ""), 904, 28, 1.12, 16, slide.layout?.mode === "title" ? 116 : 96)
+  const contentTop = Math.max(slide.layout?.mode === "title" ? 150 : 118, titleY + titleHeight + 20)
   items.push({
     id: "title",
     type: "title",
     x: 48,
-    y: slide.layout?.mode === "title" ? 58 : 34,
+    y: titleY,
     width: 904,
     height: titleHeight,
   })
@@ -335,9 +459,9 @@ function canvasLayoutFromSlide(slide: PptSlideDetail): CanvasItem[] {
       id: "content",
       type: "content",
       x: hasImages && slide.layout?.image_first ? 72 : 64,
-      y: hasImages && slide.layout?.image_first ? 348 : 118,
+      y: hasImages && slide.layout?.image_first ? 348 : contentTop,
       width: hasImages && !slide.layout?.image_first ? 480 : 872,
-      height: hasImages && slide.layout?.image_first ? 150 : 360,
+      height: hasImages && slide.layout?.image_first ? 150 : Math.max(120, CANVAS_HEIGHT - contentTop - 40),
     })
   }
 
@@ -460,7 +584,7 @@ function normalizeSlideObjectLayout(objects: EditableSlideObject[], options: Lay
         width: contentWidth,
         height: 96,
       })
-      const shouldRepair = options.force || shouldRepairObjectLayout(object, objects, hasImages, originalById.get(object.id))
+      const shouldRepair = Boolean(options.force && shouldRepairObjectLayout(object, objects, hasImages, originalById.get(object.id)))
       const nextX = shouldRepair ? contentX : Math.min(Math.max(bbox.x, 24), CANVAS_WIDTH - Math.max(bbox.width, 80))
       const nextWidth = shouldRepair ? contentWidth : Math.min(Math.max(bbox.width, 80), CANVAS_WIDTH - nextX)
       const yForFit = shouldRepair ? contentCursor : bbox.y
@@ -492,7 +616,7 @@ function normalizeSlideObjectLayout(objects: EditableSlideObject[], options: Lay
         width: hasImages && textObjects.length ? imageWidth : 460,
         height: images.length > 1 ? 118 : 240,
       })
-      const repair = options.force || shouldRepairObjectLayout(object, objects, hasImages, originalById.get(object.id))
+      const repair = Boolean(options.force && shouldRepairObjectLayout(object, objects, hasImages, originalById.get(object.id)))
       const nextWidth = repair ? (textObjects.length ? imageWidth : 460) : Math.min(Math.max(bbox.width, 120), CANVAS_WIDTH - bbox.x)
       const nextX = repair ? (textObjects.length ? imageX : (CANVAS_WIDTH - nextWidth) / 2) : bbox.x
       const nextY = repair ? 126 + index * (images.length > 1 ? 132 : 156) : bbox.y
@@ -691,6 +815,16 @@ function defaultFontSizeForObject(object: EditableSlideObject | undefined, itemT
   return 18
 }
 
+function estimateCanvasTextHeight(text: string, width: number, fontSize: number, lineHeight: number, padding = 20, maxHeight = CANVAS_HEIGHT) {
+  const safeWidth = Math.max(width - 10, 80)
+  const explicitLines = Math.max(String(text || "").split(/\n/).length, 1)
+  const wrappedLines = String(text || "")
+    .split(/\n/)
+    .reduce((total, line) => total + estimateWrappedLineCount(line, safeWidth, fontSize), 0)
+  const lines = Math.max(explicitLines, wrappedLines, 1)
+  return Math.min(Math.max(Math.ceil(lines * fontSize * lineHeight + padding), 42), maxHeight)
+}
+
 function objectLineHeight(object: EditableSlideObject | undefined) {
   const raw = object?.style?.lineHeight
   const numeric = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN
@@ -715,7 +849,7 @@ function canAutoFitObject(object: EditableSlideObject | undefined) {
 function estimateObjectHeight(object: EditableSlideObject, fontSize: number, lineHeight = objectLineHeight(object)) {
   const bbox = object.bbox || { width: 320, height: 80, x: 0, y: 0 }
   const width = Math.max(Number(bbox.width || 320) - 10, 80)
-  const text = String(object.text || object.latex || object.label || "")
+  const text = String(object.text || object.latex || object.label || textFromRichHtml(object.rich_html) || "")
   if (object.type === "equation") {
     const rows = Math.max(text.split(/\n/).length, 1)
     return Math.ceil(fontSize * lineHeight * rows + fontSize * 1.45)
@@ -731,6 +865,19 @@ function estimateObjectHeight(object: EditableSlideObject, fontSize: number, lin
   const lines = Math.max(explicitLines, wrappedLines, 1)
   const padding = object.type === "title" ? 12 : object.type === "callout" ? 34 : 20
   return Math.ceil(lines * fontSize * lineHeight + padding)
+}
+
+function textFromRichHtml(value?: string) {
+  return String(value || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .trim()
 }
 
 function estimateWrappedLineCount(line: string, width: number, fontSize: number) {
@@ -868,16 +1015,19 @@ function collectSlideImages(slide: PptSlideDetail) {
 }
 
 function TeacherPreparePage() {
-  const { nodeId } = Route.useSearch()
+  const { chapterId, nodeId } = Route.useSearch()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [mode, setMode] = useState<GenerationMode>("graph")
   const [file, setFile] = useState<File | null>(null)
   const [style, setStyle] = useState("引导式教学")
   const [chapterTitle, setChapterTitle] = useState("")
+  const [targetDurationMinutes, setTargetDurationMinutes] = useState(DEFAULT_LECTURE_DURATION_MINUTES)
   const [preview, setPreview] = useState<PptPreviewResponse | null>(null)
   const [editableModel, setEditableModel] = useState<EditableSlideModel | null>(null)
   const [assetMap, setAssetMap] = useState<Record<string, CoursewareAsset>>({})
   const [projectId, setProjectId] = useState("")
+  const [loadedRecordId, setLoadedRecordId] = useState("")
   const [texContent, setTexContent] = useState("")
   const [texDraft, setTexDraft] = useState("")
   const [frameDrafts, setFrameDrafts] = useState<Record<number, string>>({})
@@ -893,6 +1043,7 @@ function TeacherPreparePage() {
   const [pptSourceScope, setPptSourceScope] = useState<GraphSourceScope | null>(null)
   const [lectureSourceScope, setLectureSourceScope] = useState<GraphSourceScope | null>(null)
   const [driftReport, setDriftReport] = useState<SourceDriftReport | null>(null)
+  const [isGeneratingSlideLecturesBatch, setIsGeneratingSlideLecturesBatch] = useState(false)
   const [status, setStatus] = useState("")
 
   const previewPpt = usePreviewPpt()
@@ -906,6 +1057,10 @@ function TeacherPreparePage() {
   const generateSlideLectures = useGenerateSlideLectures()
   const saveChapter = useSaveChapter()
   const saveLecture = useSaveLecture()
+  const savedCoursewareProject = useCoursewareProject(chapterId.startsWith("cw_") ? chapterId : "")
+  const { data: coursewareProjectsData, isLoading: coursewareProjectsLoading } = useCoursewareProjects()
+  const savedTeacherChapter = useTeacherChapter(chapterId && !chapterId.startsWith("cw_") ? chapterId : "")
+  const coursewareProjects = coursewareProjectsData?.projects || []
   const { data: scopeTreeData, isLoading: scopeTreeLoading } = useGraphScopeTree()
   const { data: pptNodeContext, isLoading: pptContextLoading } = useGraphNodeContext(pptNodeIds)
   const { data: lectureNodeContext, isLoading: lectureContextLoading } = useGraphNodeContext(lectureNodeIds)
@@ -928,11 +1083,37 @@ function TeacherPreparePage() {
   }, [tree])
   const isGraphLoading = scopeTreeLoading
   const isGeneratingPpt = generatePptTex.isPending || previewPpt.isPending || previewTex.isPending
-  const isGeneratingLectures = generateSlideLectures.isPending || generateUploadedPptLectures.isPending
-  const lectureStatusText = isGeneratingLectures ? "正在生成" : selectedLecture?.lecture ? "已生成" : "未生成"
+  const isGeneratingLectures = isGeneratingSlideLecturesBatch || generateSlideLectures.isPending || generateUploadedPptLectures.isPending
+  const hasGeneratedSlideLectures = useMemo(() => slideLectures.some(hasUsableSlideLecture), [slideLectures])
+  const selectedLectureError = selectedLecture?.error?.trim() || ""
+  const lectureStatusText = hasUsableSlideLecture(selectedLecture)
+    ? "已生成"
+    : selectedLectureError
+      ? "生成失败"
+      : isGeneratingLectures
+        ? "正在生成"
+        : "未生成"
   const hasTexDraftChanges = Boolean(texContent) && texDraft !== texContent
   const selectedFrameDraft = selectedSlide ? frameDrafts[selectedSlide.index] ?? selectedSlide.source_tex ?? "" : ""
   const hasSelectedFrameChanges = Boolean(selectedSlide?.source_tex) && selectedFrameDraft !== (selectedSlide?.source_tex || "")
+  const totalTargetChars = Math.round(targetDurationMinutes * DEFAULT_SPEECH_RATE_CPM)
+  const generatedLectureChars = useMemo(
+    () => slideLectures.reduce((sum, lecture) => sum + (lecture.estimated_chars ?? lecture.lecture?.length ?? 0), 0),
+    [slideLectures],
+  )
+  const generatedLectureSeconds = Math.round((generatedLectureChars / DEFAULT_SPEECH_RATE_CPM) * 60)
+  const currentLectureSeconds =
+    selectedLecture?.estimated_duration_seconds ?? Math.round(((selectedLecture?.estimated_chars ?? selectedLecture?.lecture?.length ?? 0) / DEFAULT_SPEECH_RATE_CPM) * 60)
+  const lecturePlayback = useLecturePlayback({
+    segmentCount: preview?.slides.length || 0,
+    initialSegment: Math.max(selectedIndex - 1, 0),
+    getSegmentText: (segment) => {
+      const slide = preview?.slides[segment]
+      if (!slide) return ""
+      const lecture = slideLectures.find((item) => item.index === slide.index)
+      return lecture?.lecture || slide.notes || slide.content || slide.raw_text || ""
+    },
+  })
   const imageBySourcePath = useMemo(() => {
     const map = new Map<string, NonNullable<PptSlideDetail["images"]>[number]>()
     for (const slide of preview?.slides || []) {
@@ -998,7 +1179,34 @@ function TeacherPreparePage() {
     })
   }, [defaultExpandedNodeIds])
 
+  useEffect(() => {
+    const slidePosition = Math.max(
+      0,
+      (preview?.slides || []).findIndex((slide) => slide.index === selectedIndex),
+    )
+    lecturePlayback.reset(slidePosition)
+  }, [preview?.slides, selectedIndex])
+
+  useEffect(() => {
+    const project = savedCoursewareProject.data?.project
+    if (!chapterId || !chapterId.startsWith("cw_") || !project || loadedRecordId === project.id) return
+    restoreCoursewareProject(project, "project")
+  }, [chapterId, loadedRecordId, savedCoursewareProject.data?.project])
+
+  useEffect(() => {
+    const chapter = savedTeacherChapter.data?.chapter
+    if (!chapterId || chapterId.startsWith("cw_") || !chapter || loadedRecordId === chapter.id) return
+    const project = chapterToCoursewareProject(chapter)
+    if (project) {
+      restoreCoursewareProject(project, "chapter")
+      setSlideLectures(chapter.slide_lectures || [])
+      setLectureNodeIds(chapter.lecture_source_node_ids || chapter.source_node_ids || [])
+      setPptNodeIds(chapter.ppt_source_node_ids || chapter.source_node_ids || [])
+    }
+  }, [chapterId, loadedRecordId, savedTeacherChapter.data?.chapter])
+
   const resetGeneratedLectures = () => {
+    lecturePlayback.pause()
     setSlideLectures([])
     setLectureSourceScope(null)
     setDriftReport(null)
@@ -1011,6 +1219,16 @@ function TeacherPreparePage() {
     setFrameDrafts({})
   }
 
+  const currentEditableModelForSave = (title: string) =>
+    editableModel
+      ? {
+          ...editableModel,
+          title,
+          source_tex: texContent || editableModel.source_tex || "",
+          assets: mergedAssetMap,
+        }
+      : undefined
+
   const applyPreviewResult = (result: PptPreviewResponse, fallbackTitle?: string) => {
     const editable = normalizeEditableModelLayout(result.editable_model || null)
     setPreview(result)
@@ -1019,6 +1237,26 @@ function TeacherPreparePage() {
     resetTexState(result.tex_content || result.source_tex || "")
     setChapterTitle(result.chapter_title || fallbackTitle || chapterTitle)
     setSelectedIndex(result.slides[0]?.index || 1)
+  }
+
+  const restoreCoursewareProject = (project: CoursewareProject, source: "project" | "chapter") => {
+    const restored = coursewareProjectToPreview(project)
+    if (!restored) {
+      setStatus("已找到保存记录，但其中没有可恢复的课件页面或 TeX")
+      return
+    }
+    setMode("upload")
+    setFile(null)
+    setLoadedRecordId(project.id)
+    setProjectId(source === "project" ? project.id : "")
+    applyPreviewResult(restored, project.title)
+    setPptArtifact(project.ppt_artifact || null)
+    setPptNodeIds(project.source_node_ids || [])
+    setLectureNodeIds(project.source_node_ids || [])
+    setSlideLectures([])
+    setLectureSourceScope(null)
+    setDriftReport(null)
+    setStatus(`已恢复保存的课件：${project.title || project.id}`)
   }
 
   const handleGeneratePptTex = async () => {
@@ -1061,6 +1299,7 @@ function TeacherPreparePage() {
     setMode("upload")
     setFile(selectedFile)
     setProjectId("")
+    setLoadedRecordId("")
     resetTexState("")
     setEditableModel(null)
     setAssetMap({})
@@ -1076,12 +1315,18 @@ function TeacherPreparePage() {
     if (!preview?.slides.length) return
     setStatus("")
     if (mode === "upload" && file && !texContent) {
-  const result = await generateUploadedPptLectures.mutateAsync({
+      const result = await generateUploadedPptLectures.mutateAsync({
         file,
         style,
+        targetDurationMinutes,
+        speechRateCpm: DEFAULT_SPEECH_RATE_CPM,
         sourceNodeIds: lectureNodeIds.length ? lectureNodeIds : pptNodeIds,
         teacherGuidance,
       })
+      if (!result.success) {
+        setStatus(result.message || result.error || "上传课件逐页讲解生成失败")
+        return
+      }
       applyPreviewResult({
         success: result.success,
         chapter_title: result.chapter_title,
@@ -1103,46 +1348,74 @@ function TeacherPreparePage() {
     }
 
     const sourceNodeIds = lectureNodeIds.length ? lectureNodeIds : pptNodeIds
-    const result = await generateSlideLectures.mutateAsync({
-      chapter_title: preview.chapter_title || chapterTitle,
-      slides: preview.slides,
-      tex_content: texContent,
-      style,
-      source_node_ids: sourceNodeIds,
-      graph_scope: "subtree",
-      teacher_guidance: teacherGuidance,
-      style_reference: styleReference,
-      ppt_source_node_ids: pptNodeIds,
-      ppt_source_scope: pptSourceScope,
-    })
-    setSlideLectures(result.slide_lectures || [])
-    setLectureSourceScope(result.source_scope || null)
-    setDriftReport(result.drift_report || null)
-    setStatus(result.warning || "已根据页面内容和图谱范围生成逐页讲解")
+    setSlideLectures([])
+    setIsGeneratingSlideLecturesBatch(true)
+    try {
+      setStatus("正在分配每页字数并逐页生成讲解...")
+      const result = await generateSlideLectures.mutateAsync({
+        chapter_title: preview.chapter_title || chapterTitle,
+        slides: preview.slides.map(compactSlideForLectureRequest),
+        tex_content: texContent,
+        style,
+        target_duration_minutes: targetDurationMinutes,
+        speech_rate_cpm: DEFAULT_SPEECH_RATE_CPM,
+        source_node_ids: sourceNodeIds,
+        graph_scope: "subtree",
+        teacher_guidance: teacherGuidance,
+        style_reference: styleReference,
+        ppt_source_node_ids: pptNodeIds,
+        ppt_source_scope: pptSourceScope,
+      })
+      if (!result.success) {
+        if (result.slide_lectures?.length) {
+          setSlideLectures(result.slide_lectures)
+        }
+        setStatus(result.message || result.error || "逐页讲解生成失败")
+        return
+      }
+      setSlideLectures(result.slide_lectures || [])
+      setSelectedIndex(result.slide_lectures?.find((lecture) => lecture.lecture?.trim())?.index || preview.slides[0]?.index || 1)
+      setLectureSourceScope(result.source_scope || null)
+      setDriftReport(result.drift_report || null)
+      setStatus(result.warning || "已完成逐页讲解生成")
+    } catch (error) {
+      setStatus(`逐页讲解生成失败：${errorMessage(error)}`)
+    } finally {
+      setIsGeneratingSlideLecturesBatch(false)
+    }
   }
 
   const handleRegenerateCurrentLecture = async () => {
     if (!preview?.slides.length || !selectedSlide) return
     setStatus("")
     const sourceNodeIds = lectureNodeIds.length ? lectureNodeIds : pptNodeIds
-    const result = await generateSlideLectures.mutateAsync({
-      chapter_title: preview.chapter_title || chapterTitle,
-      slides: preview.slides,
-      tex_content: texContent,
-      style,
-      source_node_ids: sourceNodeIds,
-      graph_scope: "subtree",
-      teacher_guidance: teacherGuidance,
-      style_reference: styleReference,
-      target_slide_indices: [selectedSlide.index],
-      existing_slide_lectures: slideLectures,
-      ppt_source_node_ids: pptNodeIds,
-      ppt_source_scope: pptSourceScope,
-    })
-    setSlideLectures(result.slide_lectures || [])
-    setLectureSourceScope(result.source_scope || null)
-    setDriftReport(result.drift_report || null)
-    setStatus(result.warning || `已重生成第 ${selectedSlide.index} 页讲解`)
+    try {
+      const result = await generateSlideLectures.mutateAsync({
+        chapter_title: preview.chapter_title || chapterTitle,
+        slides: [compactSlideForLectureRequest(selectedSlide)],
+        tex_content: "",
+        style,
+        target_duration_minutes: estimateSlideDurationMinutes(selectedSlide, preview.slides, targetDurationMinutes),
+        speech_rate_cpm: DEFAULT_SPEECH_RATE_CPM,
+        source_node_ids: sourceNodeIds,
+        graph_scope: "subtree",
+        teacher_guidance: teacherGuidance,
+        style_reference: styleReference,
+        target_slide_indices: [selectedSlide.index],
+        existing_slide_lectures: slideLectures,
+        ppt_source_node_ids: pptNodeIds,
+        ppt_source_scope: pptSourceScope,
+      })
+      if (!result.success) {
+        throw new Error(result.message || result.error || `第 ${selectedSlide.index} 页讲解生成失败`)
+      }
+      setSlideLectures(mergeSlideLectures(slideLectures, result.slide_lectures || []))
+      setLectureSourceScope(result.source_scope || null)
+      setDriftReport(result.drift_report || null)
+      setStatus(result.warning || `已重生成第 ${selectedSlide.index} 页讲解`)
+    } catch (error) {
+      setStatus(`当前页讲解生成失败：${errorMessage(error)}`)
+    }
   }
 
   const handleApplyTexDraft = async () => {
@@ -1431,18 +1704,28 @@ function TeacherPreparePage() {
   const handleSaveCoursewareProject = async () => {
     if (!editableModel) return
     const title = preview?.chapter_title || chapterTitle || file?.name.replace(/\.[^.]+$/, "") || "未命名课件"
+    const modelForSave = currentEditableModelForSave(title)
+    if (!modelForSave) return
     const result = await saveCoursewareProject.mutateAsync({
       project_id: projectId || undefined,
       title,
-      editable_model: { ...editableModel, title, assets: mergedAssetMap },
+      editable_model: modelForSave,
       asset_map: mergedAssetMap,
       slides: preview?.slides || [],
-      tex_content: texContent || undefined,
+      tex_content: texContent || modelForSave.source_tex || undefined,
       ppt_artifact: pptArtifact || undefined,
       source_node_ids: pptNodeIds,
     })
     setProjectId(result.project_id)
+    navigate({ to: "/teacher/prepare", search: { chapterId: result.project_id, nodeId: "" }, replace: true })
+    await queryClient.invalidateQueries({ queryKey: ["courseware-projects"] })
     setStatus(result.message || "课件项目已保存")
+  }
+
+  const handleOpenCoursewareProject = (nextProjectId: string) => {
+    if (!nextProjectId) return
+    setLoadedRecordId("")
+    navigate({ to: "/teacher/prepare", search: { chapterId: nextProjectId, nodeId: "" } })
   }
 
   const handleExportCoursewarePptx = async () => {
@@ -1450,7 +1733,7 @@ function TeacherPreparePage() {
     const title = preview?.chapter_title || chapterTitle || file?.name.replace(/\.[^.]+$/, "") || "未命名课件"
     const result = await exportCoursewarePptx.mutateAsync({
       title,
-      editable_model: { ...editableModel, title, assets: mergedAssetMap },
+      editable_model: currentEditableModelForSave(title) || { ...editableModel, title, assets: mergedAssetMap },
       source_node_ids: pptNodeIds,
     })
     setPptArtifact(result.ppt_artifact)
@@ -1458,11 +1741,16 @@ function TeacherPreparePage() {
   }
 
   const handleSave = async () => {
-    if (!preview || !mergedLecture.trim()) return
+    if (!preview) return
+    if (!hasGeneratedSlideLectures) {
+      setStatus("暂无可保存的逐页讲解，请先生成至少一页有效文案")
+      return
+    }
     const title = preview.chapter_title || chapterTitle || file?.name.replace(/\.[^.]+$/, "") || "未命名PPT"
     const chapterId = `ppt_${Date.now()}`
     const saveSourceNodeIds = lectureNodeIds.length ? lectureNodeIds : pptNodeIds
     const saveSourceScope = lectureSourceScope || pptSourceScope || (lectureNodeContext?.success ? lectureNodeContext.scope : undefined)
+    const modelForSave = currentEditableModelForSave(title)
     const chapterResult = await saveChapter.mutateAsync({
       chapter_id: chapterId,
       title,
@@ -1473,7 +1761,7 @@ function TeacherPreparePage() {
       ppt_slides: preview.slides,
       slide_lectures: slideLectures,
       tex_content: texContent || undefined,
-      editable_model: editableModel ? { ...editableModel, title, assets: mergedAssetMap } : undefined,
+      editable_model: modelForSave,
       asset_map: Object.keys(mergedAssetMap).length ? mergedAssetMap : undefined,
       ppt_artifact: pptArtifact || undefined,
       ppt_source_node_ids: pptNodeIds.length ? pptNodeIds : undefined,
@@ -1489,7 +1777,7 @@ function TeacherPreparePage() {
       ppt_slides: preview.slides,
       slide_lectures: slideLectures,
       tex_content: texContent || undefined,
-      editable_model: editableModel ? { ...editableModel, title, assets: mergedAssetMap } : undefined,
+      editable_model: modelForSave,
       asset_map: Object.keys(mergedAssetMap).length ? mergedAssetMap : undefined,
       ppt_artifact: pptArtifact || undefined,
       ppt_source_node_ids: pptNodeIds.length ? pptNodeIds : undefined,
@@ -1514,7 +1802,7 @@ function TeacherPreparePage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="teacher-prepare-workbench space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-bold">备课工作台</h1>
@@ -1556,7 +1844,7 @@ function TeacherPreparePage() {
           </button>
           <button
             onClick={handleSave}
-            disabled={!preview || !mergedLecture.trim() || saveChapter.isPending || saveLecture.isPending}
+            disabled={!preview || !hasGeneratedSlideLectures || saveChapter.isPending || saveLecture.isPending}
             className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50"
           >
             <Save size={16} />
@@ -1648,13 +1936,39 @@ function TeacherPreparePage() {
             <FileText size={18} />
             课件设置
           </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(260px,0.45fr)_minmax(0,1fr)_auto_auto_auto]">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,0.28fr)_minmax(180px,0.28fr)_120px_minmax(0,1fr)_auto_auto_auto]">
             <input
               value={chapterTitle}
               onChange={(event) => setChapterTitle(event.target.value)}
               placeholder="可选：覆盖课件标题"
               className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
             />
+            <select
+              value={chapterId.startsWith("cw_") ? chapterId : ""}
+              onChange={(event) => handleOpenCoursewareProject(event.target.value)}
+              disabled={coursewareProjectsLoading || !coursewareProjects.length}
+              className="w-full rounded-lg border bg-background px-3 py-2 text-sm disabled:opacity-50"
+              title="打开已保存课件项目"
+            >
+              <option value="">{coursewareProjectsLoading ? "加载课件项目..." : "打开已保存课件"}</option>
+              {coursewareProjects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.title || project.id}
+                </option>
+              ))}
+            </select>
+            <label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
+              预计讲课时长
+              <input
+                type="number"
+                min={1}
+                max={180}
+                step={1}
+                value={targetDurationMinutes}
+                onChange={(event) => setTargetDurationMinutes(clampLectureDurationMinutes(Number(event.target.value)))}
+                className="w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground"
+              />
+            </label>
             <textarea
               value={teacherGuidance}
               onChange={(event) => setTeacherGuidance(event.target.value)}
@@ -1704,6 +2018,11 @@ function TeacherPreparePage() {
           ) : (
             <div className="mt-3 text-xs text-muted-foreground">可上传已有 {COURSEWARE_FORMAT_LABEL} 课件，也可直接由图谱生成。</div>
           )}
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            <span>总预算约 {totalTargetChars} 字</span>
+            <span>已生成约 {generatedLectureChars} 字 / {formatDuration(generatedLectureSeconds)}</span>
+            <span>当前页约 {selectedLecture?.estimated_chars || 0} 字 / {formatDuration(currentLectureSeconds)}</span>
+          </div>
         </section>
 
         <section className="rounded-xl border bg-card">
@@ -1711,7 +2030,7 @@ function TeacherPreparePage() {
             <h2 className="font-semibold">页面内容 / TeX</h2>
             <ArtifactLinks artifact={pptArtifact} artifactUrl={artifactUrl} />
           </div>
-          <div className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-[240px_minmax(0,1fr)] 2xl:grid-cols-[260px_minmax(0,1fr)]">
             <SlideList
               slides={preview?.slides || []}
               selectedIndex={selectedIndex}
@@ -1719,10 +2038,11 @@ function TeacherPreparePage() {
               onSelect={setSelectedIndex}
             />
             <div className="min-w-0 space-y-4">
-              <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1.05fr)_minmax(420px,0.95fr)]">
+              <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(720px,1.35fr)_minmax(380px,0.65fr)]">
                 {selectedSlide ? (
                   <SlidePreview
                     slide={selectedSlide}
+                    lecture={selectedLecture}
                     editableModel={editableModel}
                     assetMap={mergedAssetMap}
                     frameDraft={selectedFrameDraft}
@@ -1808,17 +2128,40 @@ function TeacherPreparePage() {
                 <Clipboard size={15} />
                 复制
               </button>
+              <button
+                onClick={lecturePlayback.toggle}
+                disabled={!selectedLecture?.lecture}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm hover:bg-accent disabled:opacity-50",
+                  lecturePlayback.isPlaying ? "text-amber-700" : "text-primary",
+                )}
+                title={lecturePlayback.providerLabel}
+              >
+                {lecturePlayback.isPlaying || lecturePlayback.isLoadingAudio ? <Pause size={15} /> : <Play size={15} />}
+                {lecturePlayback.isPlaying || lecturePlayback.isLoadingAudio ? "暂停" : "播放"}
+              </button>
+              <button
+                onClick={() => lecturePlayback.replay(Math.max(0, (preview?.slides || []).findIndex((slide) => slide.index === selectedIndex)))}
+                disabled={!selectedLecture?.lecture}
+                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+              >
+                <RotateCcw size={15} />
+                重播
+              </button>
             </div>
           </div>
+          <PlaybackProgress progress={lecturePlayback.progress} statusText={lecturePlayback.statusText} />
           <div className="p-4">
-            {isGeneratingLectures ? (
-              <LoadingSpinner text="生成逐页讲解中..." />
-            ) : selectedLecture?.lecture ? (
+            {hasUsableSlideLecture(selectedLecture) ? (
               <div className="space-y-4">
                 <DriftTrace driftReport={driftReport} />
                 <EvidenceTrace lecture={selectedLecture} />
                 <RichTextContent content={selectedLecture.lecture} />
               </div>
+            ) : selectedLectureError ? (
+              <EmptyPanel text={`当前页讲解生成失败：${selectedLectureError}`} />
+            ) : isGeneratingLectures ? (
+              <LoadingSpinner text="当前页讲解生成中..." />
             ) : (
               <EmptyPanel text="生成逐页讲解后将在这里显示当前页文案" />
             )}
@@ -1968,6 +2311,7 @@ function formatFormulaContext(value: unknown) {
 
 function SlidePreview({
   slide,
+  lecture,
   editableModel,
   assetMap,
   frameDraft,
@@ -1988,6 +2332,7 @@ function SlidePreview({
   onRemoveAsset,
 }: {
   slide: PptSlideDetail
+  lecture?: PptSlideLecture
   editableModel: EditableSlideModel | null
   assetMap: Record<string, CoursewareAsset>
   frameDraft: string
@@ -2088,34 +2433,6 @@ function SlidePreview({
         />
       </div>
 
-      {slide.notes && (
-        <div>
-          <div className="text-xs font-medium uppercase text-muted-foreground">备注</div>
-          <div className="mt-1 rounded-lg bg-muted p-3 text-sm">
-            <RichTextContent content={slide.notes} />
-          </div>
-        </div>
-      )}
-      {slide.tables?.length ? (
-        <div>
-          <div className="text-xs font-medium uppercase text-muted-foreground">表格</div>
-          <div className="mt-2 space-y-2">
-            {slide.tables.map((table, index) => (
-              <div key={index} className="overflow-hidden rounded-lg border">
-                {table.rows.map((row, rowIndex) => (
-                  <div key={rowIndex} className="grid grid-flow-col auto-cols-fr border-b last:border-b-0">
-                    {row.map((cell, cellIndex) => (
-                      <div key={cellIndex} className="min-w-0 border-r px-2 py-1 text-sm last:border-r-0">
-                        <RichTextContent content={cell} inline />
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
       <AssetPanel
         assets={assetMap}
         activeImageObject={editableObjects.find((object) => object.type === "image" || object.type === "placeholder")}
@@ -2393,7 +2710,7 @@ function SlideCanvasEditor({
   const columns = (slide.layout?.columns || []).filter((column) => column.content?.trim() || column.images?.length)
 
   return (
-    <div className="bg-slate-100 p-4 dark:bg-slate-900/60">
+    <div className="bg-slate-100 p-3 dark:bg-slate-900/60">
       {canEdit ? (
         <CanvasToolbar
           activeObject={activeObject}
@@ -2413,12 +2730,14 @@ function SlideCanvasEditor({
       ) : null}
       <div
         ref={stageRef}
-        className="relative aspect-video w-full overflow-hidden rounded-sm bg-white shadow-inner ring-1 ring-slate-200 dark:bg-slate-950 dark:ring-slate-800"
+        className="kgts-slide-stage relative mx-auto aspect-video overflow-hidden rounded-sm bg-white shadow-inner ring-1 ring-slate-200 dark:bg-slate-950 dark:ring-slate-800"
         style={{ touchAction: "none" }}
       >
         {[...items].sort((a, b) => {
           const aObject = editableObjects.find((object) => object.id === a.id)
           const bObject = editableObjects.find((object) => object.id === b.id)
+          if (activeId === a.id && activeId !== b.id) return 1
+          if (activeId === b.id && activeId !== a.id) return -1
           return Number(aObject?.z || 0) - Number(bObject?.z || 0)
         }).map((item, index) => {
           const object = editableObjects.find((candidate) => candidate.id === item.id)
@@ -2483,12 +2802,12 @@ function CanvasBox({
   onPointerDown: (event: React.PointerEvent, item: CanvasItem, mode: CanvasInteraction["mode"], handle?: ResizeHandle) => void
 }) {
   const isInteractiveTarget = (target: EventTarget | null) =>
-    target instanceof HTMLElement && Boolean(target.closest("textarea,input,button,select,a"))
+    target instanceof HTMLElement && Boolean(target.closest("textarea,input,button,select,a,[contenteditable='true']"))
 
   return (
     <div
       className={cn(
-        "group absolute overflow-visible border border-transparent bg-transparent p-1 text-slate-950 dark:text-slate-50",
+        "group absolute overflow-visible border border-transparent bg-white/70 p-1 text-slate-950 dark:bg-slate-950/70 dark:text-slate-50",
         canEdit && "cursor-move hover:border-primary/60 hover:bg-primary/5",
         active && canEdit && "border-primary bg-primary/5 shadow-sm",
       )}
@@ -2514,8 +2833,13 @@ function CanvasBox({
             type="button"
             aria-label="移动"
             onPointerDown={(event) => onPointerDown(event, item, "move")}
-            className="absolute left-0 top-0 h-5 w-5 cursor-move rounded-br border border-primary bg-white/95 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-slate-900"
-          />
+            className={cn(
+              "absolute left-0 top-0 z-20 inline-flex h-6 w-6 cursor-move items-center justify-center rounded-br border border-primary bg-white/95 text-primary shadow-sm transition-opacity dark:bg-slate-900",
+              active ? "opacity-100" : "opacity-70 group-hover:opacity-100",
+            )}
+          >
+            <Move size={13} />
+          </button>
           {(["n", "s", "e", "w", "ne", "nw", "se", "sw"] as ResizeHandle[]).map((handle) => (
             <button
               key={handle}
@@ -2523,7 +2847,8 @@ function CanvasBox({
               aria-label={`缩放 ${handle}`}
               onPointerDown={(event) => onPointerDown(event, item, "resize", handle)}
               className={cn(
-                "absolute h-3 w-3 border border-primary bg-white/95 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-slate-900",
+                "absolute z-20 h-3 w-3 border border-primary bg-white/95 transition-opacity group-hover:opacity-100 dark:bg-slate-900",
+                active ? "opacity-100" : "opacity-0",
                 handle.includes("n") && "top-0",
                 handle.includes("s") && "bottom-0",
                 handle.includes("e") && "right-0",
@@ -2740,7 +3065,7 @@ function EditableObjectContent({
     return (
       <div
         className={cn(
-          "flex h-full w-full items-center justify-center overflow-auto px-2 text-center kgts-canvas-math-wrap",
+          "flex h-full w-full items-center justify-center overflow-visible px-2 text-center kgts-canvas-math-wrap",
           canEdit && "cursor-default",
         )}
         style={objectTextStyle(object, defaultFontSizeForObject(object))}
@@ -2799,7 +3124,7 @@ function EditableTableObject({
     onObjectChange(object.id, { rows: rows.map((row) => [...row, ""]) })
   }
   return (
-    <div className="h-full overflow-auto" style={objectTextStyle(object, defaultFontSizeForObject(object))}>
+    <div className="h-full overflow-visible" style={objectTextStyle(object, defaultFontSizeForObject(object))}>
       <div className="grid" style={{ gridTemplateColumns: `repeat(${Math.max(...rows.map((row) => row.length), 1)}, minmax(0, 1fr))` }}>
         {rows.map((row, rowIndex) =>
           row.map((cell, cellIndex) => (
@@ -2972,7 +3297,7 @@ function EditableSlideText({
     const textarea = textareaRef.current
     if (!textarea || disabled || !multiline) return
     textarea.style.height = "auto"
-    textarea.style.height = `${textarea.scrollHeight}px`
+    textarea.style.height = `${Math.max(textarea.scrollHeight, textarea.parentElement?.clientHeight || 0, 40)}px`
   }, [draft, disabled, multiline, style])
 
   const commit = () => {

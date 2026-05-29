@@ -84,6 +84,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const requestIdRef = useRef(0)
   const synthesizedRef = useRef(new Map<string, Promise<TtsSynthesizeResponse>>())
+  const currentSegmentRef = useRef(initialSegment)
 
   const hasSegments = segmentCount > 0
   const providerReady = provider !== "loading" && provider !== "none"
@@ -124,9 +125,12 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
   }, [])
 
   const setCurrentSegment = (next: number | ((current: number) => number)) => {
+    pause()
     setCurrentSegmentState((current) => {
       const value = typeof next === "function" ? next(current) : next
-      return Math.min(Math.max(value, 0), Math.max(segmentCount - 1, 0))
+      const clamped = Math.min(Math.max(value, 0), Math.max(segmentCount - 1, 0))
+      currentSegmentRef.current = clamped
+      return clamped
     })
   }
 
@@ -150,7 +154,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     return promise
   }, [])
 
-  const play = useCallback(async () => {
+  const play = useCallback(async (segmentOverride?: number) => {
     if (!hasSegments) return
     setPlaybackError("")
 
@@ -166,7 +170,10 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
       return
     }
 
-    const sourceText = getSegmentText?.(currentSegment)?.trim()
+    const resolvedSegment = Math.min(Math.max(segmentOverride ?? currentSegmentRef.current, 0), Math.max(segmentCount - 1, 0))
+    currentSegmentRef.current = resolvedSegment
+    setCurrentSegmentState(resolvedSegment)
+    const sourceText = getSegmentText?.(resolvedSegment)?.trim()
     if (!sourceText) {
       setPlaybackError("当前片段没有可朗读文本")
       return
@@ -298,7 +305,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
       setChunkInfo((current) => ({ ...current, prefetching: false, pending: 0, stage: "error" }))
       setPlaybackError(getErrorMessage(error, "语音生成失败"))
     }
-  }, [currentSegment, getSegmentText, hasSegments, providerDetail, providerReady, stopAudio, synthesizeCached])
+  }, [getSegmentText, hasSegments, providerDetail, providerReady, segmentCount, stopAudio, synthesizeCached])
 
   const toggle = () => {
     if (isPlaying || isLoadingAudio) {
@@ -310,7 +317,19 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
 
   const reset = (segment = 0) => {
     pause()
-    setCurrentSegmentState(Math.min(Math.max(segment, 0), Math.max(segmentCount - 1, 0)))
+    const clamped = Math.min(Math.max(segment, 0), Math.max(segmentCount - 1, 0))
+    currentSegmentRef.current = clamped
+    setCurrentSegmentState(clamped)
+  }
+
+  const replay = (segment = currentSegment) => {
+    pause()
+    const clamped = Math.min(Math.max(segment, 0), Math.max(segmentCount - 1, 0))
+    currentSegmentRef.current = clamped
+    setCurrentSegmentState(clamped)
+    window.setTimeout(() => {
+      void play(clamped)
+    }, 0)
   }
 
   useEffect(() => {
@@ -362,6 +381,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     progress,
     provider,
     providerLabel,
+    replay,
     reset,
     setCurrentSegment,
     statusText,

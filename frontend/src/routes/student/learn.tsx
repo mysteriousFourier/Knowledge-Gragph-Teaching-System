@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
-import { BookOpen, CheckCircle, Pause, Play, RotateCcw, Send, Sparkles, Undo2 } from "lucide-react"
+import { useMemo, useState } from "react"
+import { BookOpen, CheckCircle, ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Send, Sparkles, Undo2 } from "lucide-react"
 import { useMarkChapter, useStudentAskQuestion, useStudentChapters, useStudentProgress, type ChapterProgressStatus } from "@/api/student"
 import { ConsistencyPanel } from "@/components/common/ConsistencyPanel"
 import { EvidenceSummary } from "@/components/common/EvidenceSummary"
@@ -11,7 +11,7 @@ import { PlaybackProgress } from "@/components/common/PlaybackProgress"
 import { RichTextContent } from "@/components/renderers/RichTextContent"
 import { useLecturePlayback } from "@/hooks/useLecturePlayback"
 import { cn } from "@/lib/utils"
-import type { StudentQuestionResponse } from "@/types/education"
+import type { PptSlideDetail, StudentQuestionResponse } from "@/types/education"
 
 export const Route = createFileRoute("/student/learn")({
   component: LearnPage,
@@ -30,12 +30,30 @@ function LearnPage() {
 
   const chapters = data?.chapters || []
   const selectedChapter = chapters.find((chapter) => chapter.id === selectedChapterId)
+  const slideLectures = selectedChapter?.slide_lectures || []
+  const isCoursewareChapter = Boolean(selectedChapter?.ppt_slides?.length)
   const selectedContent = selectedChapter?.lecture_content || selectedChapter?.content || ""
   const selectedProgress = selectedChapter ? progressData?.progress?.chapters?.[selectedChapter.id] : undefined
   const playback = useLecturePlayback({
-    segmentCount: selectedContent ? 1 : 0,
-    getSegmentText: () => selectedContent,
+    segmentCount: isCoursewareChapter ? selectedChapter?.ppt_slides?.length || 0 : selectedContent ? 1 : 0,
+    getSegmentText: (segment) => {
+      if (isCoursewareChapter) {
+        const slide = selectedChapter?.ppt_slides?.[segment]
+        const lecture = slideLectures.find((item) => item.index === slide?.index && item.lecture?.trim())
+        return lecture?.lecture || slide?.notes || slide?.content || slide?.raw_text || ""
+      }
+      return selectedContent
+    },
   })
+  const currentSlide = playback.currentSegment
+  const currentCoursewareSlide = selectedChapter?.ppt_slides?.[currentSlide]
+  const currentSlideLecture = useMemo(() => {
+    if (!isCoursewareChapter || !slideLectures.length || !currentCoursewareSlide) return undefined
+    return slideLectures.find((item) => item.index === currentCoursewareSlide.index && item.lecture?.trim())
+  }, [currentCoursewareSlide, isCoursewareChapter, slideLectures])
+  const questionContext = isCoursewareChapter
+    ? `章节标题：${selectedChapter?.title || ""}\n\n当前页：第 ${currentCoursewareSlide?.index || currentSlide + 1} 页 ${currentCoursewareSlide?.title || ""}\n\n页面内容：\n${currentCoursewareSlide?.content || currentCoursewareSlide?.raw_text || ""}\n\n页面讲稿：\n${currentSlideLecture?.lecture || ""}`
+    : `章节标题：${selectedChapter?.title || ""}\n\n章节内容：\n${selectedContent}`
 
   const handleStatus = async (status: ChapterProgressStatus) => {
     if (!selectedChapter) return
@@ -50,7 +68,7 @@ function LearnPage() {
     if (!selectedChapter || !question.trim()) return
     const result = await askQuestion.mutateAsync({
       chapter_id: selectedChapter.id,
-      context: `章节标题：${selectedChapter.title}\n\n章节内容：\n${selectedContent}`,
+      context: questionContext,
       question: question.trim(),
     })
     setAnswer(result)
@@ -120,6 +138,15 @@ function LearnPage() {
                     {playback.isPlaying || playback.isLoadingAudio ? "暂停" : "播放"}
                   </button>
                   <button
+                    onClick={() => playback.replay(currentSlide)}
+                    disabled={!playback.hasSegments}
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border hover:bg-accent disabled:opacity-50 transition-colors"
+                    title={playback.providerLabel}
+                  >
+                    <RotateCcw size={14} />
+                    重播
+                  </button>
+                  <button
                     onClick={() => handleStatus("learned")}
                     disabled={markChapter.isPending}
                     className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
@@ -152,12 +179,32 @@ function LearnPage() {
               )}
               <PlaybackProgress progress={playback.progress} statusText={playback.statusText} />
               <div className="p-4">
-                {selectedContent ? (
+                {isCoursewareChapter && currentCoursewareSlide ? (
+                  <div className="space-y-5">
+                    <PptSlideStudyView slide={currentCoursewareSlide} />
+                    <section>
+                      <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">对应讲稿</div>
+                      {currentSlideLecture?.lecture ? (
+                        <RichTextContent content={currentSlideLecture.lecture} />
+                      ) : (
+                        <EmptyState title="暂无本页讲稿" description="该页没有保存逐页讲稿。" />
+                      )}
+                    </section>
+                  </div>
+                ) : selectedContent ? (
                   <RichTextContent content={selectedContent} />
                 ) : (
                   <EmptyState title="暂无内容" description="该章节暂无课程内容" />
                 )}
               </div>
+              {isCoursewareChapter && selectedChapter.ppt_slides?.length ? (
+                <StudyPager
+                  current={currentSlide}
+                  total={selectedChapter.ppt_slides.length}
+                  onPrev={() => playback.setCurrentSegment((prev) => prev - 1)}
+                  onNext={() => playback.setCurrentSegment((prev) => prev + 1)}
+                />
+              ) : null}
             </div>
               <section className="bg-card border rounded-xl">
                 <div className="border-b p-4">
@@ -229,4 +276,87 @@ function statusLabel(status?: string) {
     unlearned: "未学习",
   }
   return labels[status || "unlearned"] || "未学习"
+}
+
+function StudyPager({ current, total, onPrev, onNext }: { current: number; total: number; onPrev: () => void; onNext: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-t p-4">
+      <button
+        onClick={onPrev}
+        disabled={current === 0}
+        className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm hover:bg-muted disabled:opacity-50"
+      >
+        <ChevronLeft size={16} />
+        上一页
+      </button>
+      <span className="text-sm text-muted-foreground">
+        {current + 1} / {total}
+      </span>
+      <button
+        onClick={onNext}
+        disabled={current === total - 1}
+        className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm hover:bg-muted disabled:opacity-50"
+      >
+        下一页
+        <ChevronRight size={16} />
+      </button>
+    </div>
+  )
+}
+
+function PptSlideStudyView({ slide }: { slide: PptSlideDetail }) {
+  return (
+    <section className="space-y-4">
+      <div>
+        <div className="text-xs font-medium uppercase text-muted-foreground">页面 {slide.index}</div>
+        <h3 className="mt-1 text-lg font-semibold">{slide.title || "无标题"}</h3>
+      </div>
+      <div className="rounded-lg bg-muted p-4 text-sm leading-relaxed">
+        <RichTextContent content={slide.content || slide.raw_text || "无正文文本"} />
+      </div>
+      {slide.notes ? (
+        <div className="rounded-lg border bg-background p-3 text-sm">
+          <div className="mb-2 text-xs font-medium uppercase text-muted-foreground">备注</div>
+          <RichTextContent content={slide.notes} />
+        </div>
+      ) : null}
+      {!!slide.tables?.length ? (
+        <div className="space-y-2">
+          <div className="text-xs font-medium uppercase text-muted-foreground">表格</div>
+          {slide.tables.map((table, index) => (
+            <div key={index} className="overflow-x-auto rounded-lg border">
+              {table.rows.map((row, rowIndex) => (
+                <div key={rowIndex} className="grid grid-flow-col auto-cols-fr border-b last:border-b-0">
+                  {row.map((cell, cellIndex) => (
+                    <div key={cellIndex} className="min-w-0 border-r px-2 py-1 text-sm last:border-r-0">
+                      <RichTextContent content={cell} inline />
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {!!slide.images?.length ? (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {slide.images.map((image, index) => (
+            <figure key={`${image.source_path || index}-${index}`} className="rounded-lg border bg-background p-2">
+              {image.data_uri ? (
+                <img
+                  src={image.data_uri}
+                  alt={image.source_path || `课件图片 ${index + 1}`}
+                  className="max-h-72 w-full rounded object-contain"
+                />
+              ) : (
+                <div className="flex min-h-32 items-center justify-center rounded bg-muted px-3 text-center text-xs text-muted-foreground">
+                  {image.oversized ? "图片过大，未内嵌预览" : "图片无法预览"}
+                </div>
+              )}
+            </figure>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  )
 }

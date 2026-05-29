@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
-import { Eye, EyeOff, Save, X } from "lucide-react"
-import { useConfigStatus, useSaveConfig } from "@/api/education"
+import { CheckCircle2, Eye, EyeOff, Save, TestTube2, X } from "lucide-react"
+import { useConfigStatus, useSaveConfig, useTestDeepSeekConfig } from "@/api/education"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { setSettingsOpen } from "@/store/slices/uiSlice"
 
@@ -9,6 +9,7 @@ export function SettingsPanel() {
   const open = useAppSelector((state) => state.ui.settingsOpen)
   const { data, refetch } = useConfigStatus()
   const saveConfig = useSaveConfig()
+  const testDeepSeekConfig = useTestDeepSeekConfig()
   const [apiKey, setApiKey] = useState("")
   const [apiBase, setApiBase] = useState("https://api.deepseek.com")
   const [flashModel, setFlashModel] = useState("deepseek-v4-flash")
@@ -16,6 +17,8 @@ export function SettingsPanel() {
   const [showKey, setShowKey] = useState(false)
   const [message, setMessage] = useState("")
   const [savedConfigured, setSavedConfigured] = useState<boolean | null>(null)
+  const [keyFingerprint, setKeyFingerprint] = useState("")
+  const [keyLength, setKeyLength] = useState<number | null>(null)
 
   useEffect(() => {
     if (!data) return
@@ -23,6 +26,8 @@ export function SettingsPanel() {
     setFlashModel(data.flash_model || "deepseek-v4-flash")
     setProModel(data.pro_model || "deepseek-v4-pro")
     setSavedConfigured(data.deepseek_api_key_configured)
+    setKeyFingerprint(data.deepseek_api_key_fingerprint || "")
+    setKeyLength(typeof data.deepseek_api_key_length === "number" ? data.deepseek_api_key_length : null)
   }, [data])
 
   if (!open) return null
@@ -40,14 +45,33 @@ export function SettingsPanel() {
       })
       setApiKey("")
       setSavedConfigured(result.deepseek_api_key_configured)
+      setKeyFingerprint(result.deepseek_api_key_fingerprint || "")
+      setKeyLength(typeof result.deepseek_api_key_length === "number" ? result.deepseek_api_key_length : null)
       setApiBase(result.deepseek_api_base || apiBase)
       setFlashModel(result.flash_model || flashModel)
       setProModel(result.pro_model || proModel)
-      setMessage(result.deepseek_api_key_configured ? "配置已保存，DeepSeek API Key 已连接。" : "配置已保存，但 API Key 仍为空。")
+      setMessage(result.deepseek_api_key_configured ? "配置已保存。建议点击连接测试确认当前 Key 可用。" : "配置已保存，但 API Key 仍为空。")
       await refetch()
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "后端配置接口不可用"
       setMessage(`保存失败：${errorMessage}。请确认服务已按当前代码重新启动。`)
+    }
+  }
+
+  const handleTest = async () => {
+    setMessage("")
+    try {
+      const result = await testDeepSeekConfig.mutateAsync()
+      setSavedConfigured(result.deepseek_api_key_configured)
+      setKeyFingerprint(result.deepseek_api_key_fingerprint || "")
+      setKeyLength(typeof result.deepseek_api_key_length === "number" ? result.deepseek_api_key_length : null)
+      setApiBase(result.deepseek_api_base || apiBase)
+      setFlashModel(result.flash_model || flashModel)
+      setMessage(result.success ? result.message || "DeepSeek 连接测试通过。" : result.message || result.error || "DeepSeek 连接测试失败")
+      await refetch()
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "后端测试接口不可用"
+      setMessage(`连接测试失败：${errorMessage}`)
     }
   }
 
@@ -75,6 +99,11 @@ export function SettingsPanel() {
           <div className="rounded-lg border bg-card p-3 text-sm">
             <div className="font-medium">当前状态</div>
             <div className="mt-2 text-muted-foreground">API Key：{apiKeyConfigured ? "已配置" : "未配置"}</div>
+            {apiKeyConfigured && (
+              <div className="text-muted-foreground">
+                Key 指纹：{keyFingerprint || "-"}，长度：{keyLength ?? "-"}
+              </div>
+            )}
             <div className="text-muted-foreground">API Base：{apiBase || "-"}</div>
             <div className="text-muted-foreground">Flash 模型：{flashModel || "-"}</div>
             <div className="text-muted-foreground">Pro 模型：{proModel || "-"}</div>
@@ -130,11 +159,21 @@ export function SettingsPanel() {
           <button
             type="button"
             onClick={handleSave}
-            disabled={saveConfig.isPending}
+            disabled={saveConfig.isPending || testDeepSeekConfig.isPending}
             className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             <Save size={16} />
             {saveConfig.isPending ? "保存中..." : "保存设置"}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleTest}
+            disabled={saveConfig.isPending || testDeepSeekConfig.isPending || !apiKeyConfigured}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border bg-card px-4 py-2.5 text-sm font-medium hover:bg-accent disabled:opacity-50"
+          >
+            {testDeepSeekConfig.isPending ? <TestTube2 size={16} /> : <CheckCircle2 size={16} />}
+            {testDeepSeekConfig.isPending ? "测试中..." : "测试 DeepSeek 连接"}
           </button>
 
           {message && <div className="rounded-lg border bg-card p-3 text-sm text-muted-foreground">{message}</div>}

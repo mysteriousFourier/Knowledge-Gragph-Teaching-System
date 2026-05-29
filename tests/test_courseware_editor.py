@@ -19,6 +19,17 @@ TINY_PNG = base64.b64decode(
 )
 
 
+def _overlap_area(left: dict, right: dict) -> float:
+    left_x2 = float(left["x"]) + float(left["width"])
+    left_y2 = float(left["y"]) + float(left["height"])
+    right_x2 = float(right["x"]) + float(right["width"])
+    right_y2 = float(right["y"]) + float(right["height"])
+    return max(0.0, min(left_x2, right_x2) - max(float(left["x"]), float(right["x"]))) * max(
+        0.0,
+        min(left_y2, right_y2) - max(float(left["y"]), float(right["y"])),
+    )
+
+
 class CoursewareEditorTest(unittest.TestCase):
     def test_build_editable_model_extracts_objects_and_assets(self):
         tex = r"""
@@ -120,6 +131,58 @@ class CoursewareEditorTest(unittest.TestCase):
         self.assertEqual(body["bbox"]["x"], 222)
         self.assertEqual(body["bbox"]["width"], 444)
 
+    def test_custom_image_macro_and_callout_do_not_overlap_content(self):
+        tex = r"""
+\documentclass{beamer}
+\usepackage{tikz}
+\newcommand{\safecontentimage}[1]{\IfFileExists{#1}{\includegraphics[width=0.7\textwidth]{#1}}{\fbox{\parbox[c][0.34\textheight][c]{0.7\textwidth}{Missing image\\\texttt{\detokenize{#1}}}}}}
+\begin{document}
+\begin{frame}{Figure 27.1}
+  \centering
+  \safecontentimage{fig/27.1.png}
+  \begin{center}
+    \parbox{0.95\textwidth}{\scriptsize Fisher caption with inline math $r$, $x$, and $\theta$.}
+  \end{center}
+\end{frame}
+\begin{frame}{Fisher Scaling Parameter}
+  \begin{itemize}
+    \item Inline variables $n$, $p_b$, and $x$ stay in the body.
+  \end{itemize}
+  \[
+    x = \frac{r\sqrt{n}}{2d}
+  \]
+  \[
+    p_b = 1 - \Phi(x)
+  \]
+  \begin{tikzpicture}[remember picture, overlay]
+    \node[rectangle callout, draw=blue, fill=white, text width=2.20cm, align=center] at ([xshift=10.41cm,yshift=-3.63cm] current page.north west)
+      {$p_b$ 仅依赖于 $x$};
+  \end{tikzpicture}
+\end{frame}
+\end{document}
+"""
+        parsed = parse_courseware(tex.encode("utf-8"), "edited.tex")
+        prompt = build_ppt_lecture_prompt_data(parsed)
+        model = editor.build_editable_model(parsed, prompt)
+
+        figure_objects = model["slides"][0]["objects"]
+        figure_types = [item["type"] for item in figure_objects]
+        self.assertEqual(figure_types.count("image"), 1)
+        self.assertEqual(figure_types.count("placeholder"), 0)
+        self.assertNotIn("equation", figure_types)
+        figure_image = next(item for item in figure_objects if item["type"] == "image")
+        self.assertEqual(figure_image["source_path"], "figures/fig_0132.png")
+        figure_body = next(item for item in figure_objects if item["type"] == "richText")
+        self.assertGreaterEqual(figure_body["bbox"]["y"], figure_image["bbox"]["y"] + figure_image["bbox"]["height"])
+
+        callout_objects = model["slides"][1]["objects"]
+        self.assertEqual([item["type"] for item in callout_objects].count("equation"), 2)
+        callout = next(item for item in callout_objects if item["type"] == "callout")
+        for item in callout_objects:
+            if item["id"] == callout["id"] or item["type"] == "title":
+                continue
+            self.assertEqual(_overlap_area(callout["bbox"], item["bbox"]), 0)
+
     def test_project_save_and_pptx_export(self):
         old_project_dir = editor.PROJECT_DIR
         old_artifact_dir = editor.ARTIFACT_DIR
@@ -150,6 +213,25 @@ class CoursewareEditorTest(unittest.TestCase):
             finally:
                 editor.PROJECT_DIR = old_project_dir
                 editor.ARTIFACT_DIR = old_artifact_dir
+
+    def test_project_save_preserves_uploaded_source_tex_from_model(self):
+        old_project_dir = editor.PROJECT_DIR
+        with tempfile.TemporaryDirectory() as temp_dir:
+            editor.PROJECT_DIR = Path(temp_dir) / "projects"
+            try:
+                model = editor.build_editable_model_from_slide_details(
+                    [{"index": 1, "title": "One", "content": "A"}],
+                    title="Deck",
+                    source_tex="\\documentclass{beamer}\n\\begin{document}\n\\end{document}",
+                )
+
+                project = editor.save_courseware_project({"title": "Deck", "editable_model": model})
+                loaded = editor.load_courseware_project(project["id"])
+
+                self.assertIn("\\documentclass{beamer}", loaded["tex_content"])
+                self.assertEqual(loaded["editable_model"]["source_tex"], loaded["tex_content"])
+            finally:
+                editor.PROJECT_DIR = old_project_dir
 
 
 if __name__ == "__main__":
