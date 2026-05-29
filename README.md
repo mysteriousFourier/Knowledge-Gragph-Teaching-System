@@ -165,6 +165,16 @@ App Service 部署包会排除运行时目录、模型权重、旧版向量索�
 - 推荐应急路径：在 GitHub repository secrets 中配置 `AZURE_WEBAPP_PUBLISH_PROFILE`，内容为 Azure Portal 中 App Service 的 Publish profile XML。workflow 会直接用该 secret 部署 zip 包，不需要 `azure/login`。
 - OIDC 路径：保留 `AZUREAPPSERVICE_CLIENTID_*`、`AZUREAPPSERVICE_TENANTID_*`、`AZUREAPPSERVICE_SUBSCRIPTIONID_*`。如果 Actions 报 `No subscriptions found`，说明该 client-id 对应的 managed identity / service principal 没有当前 subscription 或 Web App 的可见权限，需要在 Azure IAM 中给它至少 App Service 所在 resource group 的 Contributor / Website Contributor 角色，并确认 federated credential 匹配 `repo:mysteriousFourier/Knowledge-Graph-Teaching-System:ref:refs/heads/main`。
 
+大图谱数据库和预建 FAISS 索引不要放进 Git 或 App Service zip 包。App Service 如需使用本地生成的最新版运行时数据，先在 App Settings 中设置持久化路径：
+
+```text
+APP_RUNTIME_DIR=/home/site/kgts-runtime
+GRAPH_DB_PATH=/home/site/kgts-runtime/knowledge_graph.db
+KGTS_VECTOR_INDEX_DIR=/home/site/kgts-runtime/vector_index
+```
+
+然后通过 Kudu/SSH/SCM 把文件上传到 `/home/site/kgts-runtime/knowledge_graph.db` 和 `/home/site/kgts-runtime/vector_index/`。`/home` 是 App Service 的持久化存储；不要上传到部署 zip 解包目录里，否则下一次部署可能覆盖。Azure for Students VM 使用 `scp` 同步到 `~/kgts/.runtime/`，详见 VM 文档。
+
 Azure App Service 的 Startup Command 建议设置为：
 
 ```bash

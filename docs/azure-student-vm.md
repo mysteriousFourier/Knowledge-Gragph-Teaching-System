@@ -154,6 +154,8 @@ ssh azureuser@<vm-ip> "sudo systemctl start kgts && sudo systemctl status kgts -
 
 这条路径只更新 VM 运行时状态，不改变 Git 历史，也不会进入 Azure App Service 的 GitHub Actions 部署包。复制 SQLite 数据库前先停服务，避免写入过程中拿到半截文件。
 
+Azure App Service 不使用这组 `scp` 命令。若 App Service 也需要这些大运行时文件，把 `APP_RUNTIME_DIR`、`GRAPH_DB_PATH` 和 `KGTS_VECTOR_INDEX_DIR` 指到 `/home/site/kgts-runtime`，再通过 Kudu/SSH/SCM 上传到该目录。不要把它们加入仓库，也不要放回 `data/seed/`。
+
 启用本地神经向量检索时使用 CPU-only 依赖文件，避免 PyPI 自动安装 CUDA 版 torch：
 
 ```bash
