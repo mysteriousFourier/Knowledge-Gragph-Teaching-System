@@ -22,9 +22,9 @@
 
 | 路径 | 作用 |
 | --- | --- |
-| `data/seed/` | 可提交的种子章节与种子图谱数据库 |
+| `data/seed/` | 可提交的种子章节、种子图谱数据库和可选预建索引 |
 | `.runtime/` | 推荐的运行时章节、进度、日志目录 |
-| `backend/vector_index_system/knowledge_graph/` | 默认本地图谱数据库位置 |
+| `backend/vector_index_system/knowledge_graph/` | 旧版图谱页面和兼容工具目录 |
 
 ## 运行时数据位置
 
@@ -39,6 +39,8 @@
 ## 部署约定
 
 Azure App Service 和 Azure for Students VM 都应从 `data/seed/` 引导初始数据，再把运行时写入 `.runtime/` 或显式的 `APP_DATA_DIR` / `GRAPH_DB_PATH`。不要在生产运行中把教师反馈、学生进度、缓存和日志写回 `data/seed/`。
+
+Azure App Service 的 GitHub Actions zip 部署会排除 `data/seed/vector_index/`，只保留较轻的图谱数据库种子；低资源实例需要向量检索时使用 `.runtime/vector_index` 中的缓存、重建结果或 hashing fallback。Azure for Students VM 通过 VM 内 `git pull` 更新代码，Azure CLI 只用于创建和管理 VM 资源。
 
 ## 相关文档
 

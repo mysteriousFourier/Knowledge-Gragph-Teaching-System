@@ -12,6 +12,8 @@
 
 像 `chapters.json.bak-*` 这样的备份文件只是本地工作副本，不属于规范化种子集。
 
+`vector_index/` 适合本地或资源较充足的 VM 快速启动，但 Azure App Service 的 GitHub Actions 部署包会排除它，避免把 FAISS 索引和大 metadata 塞进低资源 zip 包。App Service 线上会保留 `hybrid` 接口，并在没有可用索引或 embedding 模型时使用 hashing fallback；需要重建索引时写入 `.runtime/vector_index`。
+
 `chapters.json` 里的练习题只作为初始数据。运行后教师端可以继续追加题目：每次生成 5 道新题，题库总量不设置上限；学生练习会从可用题库中随机抽取最多 10 题，并跳过教师点踩的题目。
 
 ## 启动时如何使用
@@ -22,7 +24,7 @@
 2. 在显式设置 `APP_DATA_DIR` 或 `GRAPH_DB_PATH` 时，必要时复制 `knowledge_graph.db`
 3. 在显式设置 `KGTS_VECTOR_INDEX_DIR` 或使用默认运行时目录时，必要时复制 `vector_index/`
 
-如果没有显式指定运行时图谱数据库路径，项目默认仍会读取旧路径下的图谱数据库，并在节点过少时尝试从 `structured/` 自动重建图谱。
+如果没有显式指定运行时图谱数据库路径，项目默认写入 `.runtime/knowledge_graph.db`。旧版路径只作为兼容工具目录保留。
 
 低资源线上部署建议设置：
 

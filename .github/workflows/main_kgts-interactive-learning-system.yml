@@ -86,6 +86,8 @@ jobs:
             --exclude 'backend/vector_index_system/memory_systems' \
             --exclude 'backend/vector_index_system/models' \
             --exclude 'backend/vector_index_system/vector_index' \
+            --exclude 'data/seed/vector_index' \
+            --exclude 'data/seed/vector_index/**' \
             --exclude 'third_party/Genie-TTS' \
             --exclude 'third_party/genie-tts' \
             --exclude 'Genie-TTS' \
@@ -113,6 +115,10 @@ jobs:
           zip -r ../kgts-app.zip . -x "*/__pycache__/*" "*.pyc" "*.pyo"
           cd ..
           unzip -l kgts-app.zip | head -80
+          if unzip -l kgts-app.zip | grep -q 'data/seed/vector_index/'; then
+            echo "data/seed/vector_index must not be included in the Azure App Service package" >&2
+            exit 1
+          fi
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4

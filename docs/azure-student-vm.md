@@ -61,6 +61,8 @@ TTS 必须作为独立服务运行，并让主站使用 `genie_server` 代理。
 
 下面的命令假设已经安装并登录 Azure CLI，且当前订阅是 Azure for Students。地区优先用 `eastasia` 或 `southeastasia`，如果目标地区没有 `Standard_B2ats_v2` 配额，就切换地区或退回 `Standard_B1s`。
 
+这里的 Azure CLI 只负责创建和管理 VM、网络端口等 Azure 资源，不负责把当前本机工作区推送到服务器。KGTS 应用代码在 VM 内通过 `git clone` 首次拉取，后续更新用 `git pull --ff-only`，再重建前端并重启 systemd 服务。不要把本机 `.runtime/`、模型目录、临时导出或个人配置用 `az`/`scp` 直接覆盖到 VM 的项目目录。
+
 ```bash
 az login
 az account list --output table
@@ -138,6 +140,20 @@ cd ..
 
 前端生产构建默认不生成 sourcemap，以降低 1 GB 免费 VM 的构建内存和磁盘压力。如需调试线上 bundle，可临时执行 `VITE_BUILD_SOURCEMAP=1 npm run build`。`npm ci` 也会安装公式朗读用的 MathJax/Speech Rule Engine；主站会在 TTS 合成前调用它们把 LaTeX 转成朗读文本，失败时自动回退到 Python 内置转换。
 
+后续更新代码使用本文后面的“更新部署”流程。如果更新包含种子图谱变更，`APP_BOOTSTRAP_SEED_DATA=1` 会在运行时数据库缺失或明显落后时把种子复制/合并到 `.runtime/`。生产运行数据仍应留在 `.runtime/`，不要把 `.runtime/knowledge_graph.db` 或 `.runtime/vector_index/` 反向提交回 `data/seed/`。
+
+如果本地已经生成了更好的图谱数据库或向量索引，但文件太大不适合提交到 Git，把它们作为运行时数据同步到 VM 的 `.runtime/`。从本机 PowerShell 执行：
+
+```powershell
+ssh azureuser@<vm-ip> "mkdir -p ~/kgts/.runtime/vector_index && sudo systemctl stop kgts"
+scp .runtime\knowledge_graph.db azureuser@<vm-ip>:~/kgts/.runtime/knowledge_graph.db
+scp .runtime\vector_index\metadata.json azureuser@<vm-ip>:~/kgts/.runtime/vector_index/metadata.json
+scp .runtime\vector_index\vector_index.faiss azureuser@<vm-ip>:~/kgts/.runtime/vector_index/vector_index.faiss
+ssh azureuser@<vm-ip> "sudo systemctl start kgts && sudo systemctl status kgts --no-pager"
+```
+
+这条路径只更新 VM 运行时状态，不改变 Git 历史，也不会进入 Azure App Service 的 GitHub Actions 部署包。复制 SQLite 数据库前先停服务，避免写入过程中拿到半截文件。
+
 启用本地神经向量检索时使用 CPU-only 依赖文件，避免 PyPI 自动安装 CUDA 版 torch：
 
 ```bash
@@ -150,10 +166,13 @@ python -m pip install -r requirements/vector-cpu.txt
 ```bash
 cat > .env <<'EOF'
 APP_BIND_HOST=127.0.0.1
+APP_RUNTIME_DIR=.runtime
+GRAPH_DB_PATH=.runtime/knowledge_graph.db
 APP_BOOTSTRAP_SEED_DATA=1
 APP_RUN_STARTUP_MAINTENANCE=0
 RENDER_AUTO_SYNC_STRUCTURED=0
 KGTS_RETRIEVAL_MODE=hybrid
+KGTS_VECTOR_INDEX_DIR=.runtime/vector_index
 KGTS_VECTOR_STARTUP_ENSURE=0
 KGTS_VECTOR_UNLOAD_AFTER_QUERY=1
 KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
@@ -197,6 +216,9 @@ Type=simple
 User=azureuser
 WorkingDirectory=/home/azureuser/kgts
 EnvironmentFile=/home/azureuser/kgts/.env
+Environment=APP_RUNTIME_DIR=/home/azureuser/kgts/.runtime
+Environment=GRAPH_DB_PATH=/home/azureuser/kgts/.runtime/knowledge_graph.db
+Environment=KGTS_VECTOR_INDEX_DIR=/home/azureuser/kgts/.runtime/vector_index
 ExecStart=/home/azureuser/kgts/.venv/bin/python -m uvicorn render_app:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
@@ -247,7 +269,9 @@ sudo systemctl reload nginx
 
 ```bash
 curl -I http://127.0.0.1:8000/
-curl -I http://127.0.0.1/
+curl -s http://127.0.0.1:8000/api/health
+curl -s http://127.0.0.1:8000/api/maintenance/graph/scope-tree | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; print(len(d["nodes"]), len(d["relationships"]))'
+curl -s http://127.0.0.1/api/health
 ```
 
 如果由 Nginx 直接服务前端静态资源，把构建产物复制到 Web 可读目录，避免 Nginx 无法遍历 `/home/azureuser`：
@@ -259,12 +283,15 @@ sudo cp -a /home/azureuser/kgts/frontend/dist/. /var/www/kgts/
 sudo chown -R www-data:www-data /var/www/kgts
 ```
 
+`/` 和 `/assets/` 必须来自同一次 `frontend/dist` 构建。若首页 HTML 引用的 `/assets/index-*.js` 返回 404，说明 Nginx 的 `/var/www/kgts` 静态目录和 FastAPI 读取的 `frontend/dist/index.html` 不同步；重新执行上面的复制命令并重启 `kgts`。
+
 ## 更新部署
 
 以后更新 main 分支：
 
 ```bash
 cd ~/kgts
+git fetch origin
 git pull --ff-only origin main
 . .venv/bin/activate
 python -m pip install -r requirements.txt
@@ -278,6 +305,8 @@ sudo mkdir -p /var/www/kgts
 sudo cp -a frontend/dist/. /var/www/kgts/
 sudo chown -R www-data:www-data /var/www/kgts
 sudo systemctl restart kgts
+curl -s http://127.0.0.1:8000/api/health
+curl -s http://127.0.0.1:8000/api/maintenance/graph/scope-tree | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; print(len(d["nodes"]), len(d["relationships"]))'
 sudo journalctl -u kgts -n 80 --no-pager
 ```
 

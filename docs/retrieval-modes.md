@@ -76,6 +76,7 @@ GitHub Actions 的 Azure App Service 部署包会排除这些大型本地资产�
 - `backend/vector_index_system/models/`
 - `backend/vector_index_system/vector_index/`
 - `backend/vector_index_system/memory_systems/`
+- `data/seed/vector_index/`
 
 重型向量依赖不要放在 `requirements.txt` 中。它们已拆到 `requirements/vector.txt` / `requirements/vector-cpu.txt`；Azure workflow 安装 `requirements/vector-cpu.txt`，避免拉取 CUDA 版 torch。
 
