@@ -132,6 +132,8 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      AZURE_WEBAPP_PUBLISH_PROFILE_SET: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE != '' }}
 
     steps:
       - name: Download artifact from build job
@@ -139,7 +141,17 @@ jobs:
         with:
           name: python-app
 
+      - name: Deploy to Azure Web App with publish profile
+        if: env.AZURE_WEBAPP_PUBLISH_PROFILE_SET == 'true'
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: kgts-Interactive-learning-system
+          slot-name: Production
+          package: kgts-app.zip
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+
       - name: Login to Azure
+        if: env.AZURE_WEBAPP_PUBLISH_PROFILE_SET != 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_CDE106AA5390482CB8D021E302ABE476 }}
@@ -147,6 +159,7 @@ jobs:
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_8540526E18BF4BA88AB83FDEE7892B9E }}
 
       - name: Deploy to Azure Web App
+        if: env.AZURE_WEBAPP_PUBLISH_PROFILE_SET != 'true'
         uses: azure/webapps-deploy@v3
         with:
           app-name: kgts-Interactive-learning-system

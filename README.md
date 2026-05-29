@@ -160,6 +160,11 @@ python backend/start_all.py
 
 App Service 部署包会排除运行时目录、模型权重、旧版向量索引目录、TTS 资产，以及 `data/seed/vector_index/` 预建 FAISS 索引，避免低资源实例冷启动和 zip 包体积被大文件拖垮。`data/seed/knowledge_graph.db` 仍作为轻量初始图谱种子随包发布；线上需要向量索引时会在 `.runtime/vector_index` 中按低内存配置使用缓存或 hashing fallback。
 
+部署认证支持两种方式：
+
+- 推荐应急路径：在 GitHub repository secrets 中配置 `AZURE_WEBAPP_PUBLISH_PROFILE`，内容为 Azure Portal 中 App Service 的 Publish profile XML。workflow 会直接用该 secret 部署 zip 包，不需要 `azure/login`。
+- OIDC 路径：保留 `AZUREAPPSERVICE_CLIENTID_*`、`AZUREAPPSERVICE_TENANTID_*`、`AZUREAPPSERVICE_SUBSCRIPTIONID_*`。如果 Actions 报 `No subscriptions found`，说明该 client-id 对应的 managed identity / service principal 没有当前 subscription 或 Web App 的可见权限，需要在 Azure IAM 中给它至少 App Service 所在 resource group 的 Contributor / Website Contributor 角色，并确认 federated credential 匹配 `repo:mysteriousFourier/Knowledge-Graph-Teaching-System:ref:refs/heads/main`。
+
 Azure App Service 的 Startup Command 建议设置为：
 
 ```bash
