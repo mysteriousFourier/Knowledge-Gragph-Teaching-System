@@ -17,6 +17,10 @@ from KGTS.core.bridge import (
     search_nodes as bridge_search_nodes,
 )
 
+VISUALIZATION_STRUCTURAL_NODE_TYPES = {"part", "chapter", "appendix"}
+VISUALIZATION_RESOURCE_NODE_TYPES = {"formula", "theorem", "table", "example", "figure"}
+VISUALIZATION_RESOURCE_ID_PREFIXES = ("formula::", "table::", "example::", "figure::")
+
 
 async def add_node(
     content: str,
@@ -307,11 +311,64 @@ def _visualization_relation_priority(
         endpoint_weight += 140
     if target_type in {"chapter", "appendix", "part"}:
         endpoint_weight += 140
-    if source_type in {"formula", "theorem", "table", "example"}:
+    if _is_visualization_resource_node(source_id, node_by_id.get(source_id)):
         endpoint_weight += 220
-    if target_type in {"formula", "theorem", "table", "example"}:
+    if _is_visualization_resource_node(target_id, node_by_id.get(target_id)):
         endpoint_weight += 220
     return type_weight + endpoint_weight + (degree[source_id] + degree[target_id]) * 3
+
+
+def _is_visualization_structural_node(node_id: str, node: Optional[Dict[str, Any]]) -> bool:
+    metadata = (node or {}).get("metadata") or {}
+    node_type = str((node or {}).get("type") or "")
+    return (
+        node_id == "toc::root"
+        or node_type in VISUALIZATION_STRUCTURAL_NODE_TYPES
+        or metadata.get("role") == "chapter_root"
+    )
+
+
+def _is_visualization_resource_node(node_id: str, node: Optional[Dict[str, Any]]) -> bool:
+    node_type = str((node or {}).get("type") or "")
+    return node_type in VISUALIZATION_RESOURCE_NODE_TYPES or node_id.startswith(VISUALIZATION_RESOURCE_ID_PREFIXES)
+
+
+def _visualization_node_priority(
+    node_id: str,
+    node_by_id: Dict[str, Dict[str, Any]],
+    degree: Counter[str],
+) -> int:
+    node = node_by_id.get(node_id) or {}
+    node_type = str(node.get("type") or "")
+    if _is_visualization_resource_node(node_id, node):
+        type_weight = {
+            "formula": 9800,
+            "theorem": 9600,
+            "example": 8600,
+            "figure": 7800,
+            "table": 7600,
+            "note": 7200,
+        }.get(node_type, 7400)
+    else:
+        type_weight = {
+            "chapter": 7000,
+            "appendix": 6900,
+            "part": 6800,
+            "section": 4200,
+            "proposition": 3900,
+            "derivation": 3600,
+            "discussion": 3200,
+            "concept": 3000,
+        }.get(node_type, 2400)
+    return type_weight + degree[node_id] * 12
+
+
+def _relation_key(relation: Dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(relation.get("source_id") or ""),
+        str(relation.get("relation_type") or relation.get("type") or "related"),
+        str(relation.get("target_id") or ""),
+    )
 
 
 async def get_visualization_graph(
@@ -344,14 +401,7 @@ async def get_visualization_graph(
     selected_node_ids: set[str] = set()
     for node in raw_nodes:
         node_id = str(node.get("id") or "")
-        node_type = str(node.get("type") or "")
-        metadata = node.get("metadata") or {}
-        if (
-            node_id == "toc::root"
-            or node_id.startswith("toc::")
-            or node_type in {"part", "chapter", "appendix"}
-            or metadata.get("role") == "chapter_root"
-        ):
+        if _is_visualization_structural_node(node_id, node):
             selected_node_ids.add(node_id)
 
     relation_type_quotas = {
@@ -381,7 +431,7 @@ async def get_visualization_graph(
         ]
         candidates.sort(key=lambda item: _visualization_relation_priority(item, node_by_id, degree), reverse=True)
         for relation in candidates[:quota]:
-            key = (relation["source_id"], relation["relation_type"], relation["target_id"])
+            key = _relation_key(relation)
             if key in selected_relation_keys:
                 continue
             selected_relation_keys.add(key)
@@ -393,20 +443,78 @@ async def get_visualization_graph(
         required_ids = {
             node_id
             for node_id in selected_node_ids
-            if node_id == "toc::root"
-            or node_id.startswith("toc::")
-            or str((node_by_id.get(node_id) or {}).get("type") or "") in {"part", "chapter", "appendix"}
+            if _is_visualization_structural_node(node_id, node_by_id.get(node_id))
         }
-        ranked_ids = sorted(
-            selected_node_ids - required_ids,
-            key=lambda node_id: (
-                degree[node_id],
-                str((node_by_id.get(node_id) or {}).get("type") or ""),
-                node_id,
-            ),
+        available_after_required = max(0, node_limit - len(required_ids))
+        resource_budget = min(available_after_required, max(24, min(420, node_limit // 3)))
+        resource_ids = [
+            node_id
+            for node_id, node in node_by_id.items()
+            if degree[node_id] and _is_visualization_resource_node(node_id, node)
+        ]
+        resource_ids.sort(
+            key=lambda node_id: _visualization_node_priority(node_id, node_by_id, degree),
             reverse=True,
         )
-        selected_node_ids = set(list(required_ids) + ranked_ids[: max(0, node_limit - len(required_ids))])
+        required_resource_ids = set(resource_ids[:resource_budget])
+
+        resource_context_ids: list[str] = []
+        seen_context_ids: set[str] = set()
+        for relation in sorted(
+            valid_relations,
+            key=lambda item: _visualization_relation_priority(item, node_by_id, degree),
+            reverse=True,
+        ):
+            if relation["source_id"] not in required_resource_ids and relation["target_id"] not in required_resource_ids:
+                continue
+            for endpoint_id in (relation["source_id"], relation["target_id"]):
+                if endpoint_id in required_ids or endpoint_id in required_resource_ids or endpoint_id in seen_context_ids:
+                    continue
+                seen_context_ids.add(endpoint_id)
+                resource_context_ids.append(endpoint_id)
+
+        next_selected_node_ids: set[str] = set()
+
+        def add_selected_node(node_id: str) -> None:
+            if len(next_selected_node_ids) < node_limit and node_id in node_by_id:
+                next_selected_node_ids.add(node_id)
+
+        for node_id in sorted(required_ids, key=lambda item: _visualization_node_priority(item, node_by_id, degree), reverse=True):
+            add_selected_node(node_id)
+        for node_id in resource_ids:
+            if node_id in required_resource_ids:
+                add_selected_node(node_id)
+        for node_id in resource_context_ids:
+            add_selected_node(node_id)
+
+        ranked_ids = sorted(
+            selected_node_ids - next_selected_node_ids,
+            key=lambda node_id: _visualization_node_priority(node_id, node_by_id, degree),
+            reverse=True,
+        )
+        for node_id in ranked_ids:
+            add_selected_node(node_id)
+        selected_node_ids = next_selected_node_ids
+
+    selected_resource_ids = {
+        node_id
+        for node_id in selected_node_ids
+        if _is_visualization_resource_node(node_id, node_by_id.get(node_id))
+    }
+    for relation in sorted(
+        valid_relations,
+        key=lambda item: _visualization_relation_priority(item, node_by_id, degree),
+        reverse=True,
+    ):
+        if relation["source_id"] not in selected_node_ids or relation["target_id"] not in selected_node_ids:
+            continue
+        if relation["source_id"] not in selected_resource_ids and relation["target_id"] not in selected_resource_ids:
+            continue
+        key = _relation_key(relation)
+        if key in selected_relation_keys:
+            continue
+        selected_relation_keys.add(key)
+        selected_relations.append(relation)
 
     selected_relations = [
         relation

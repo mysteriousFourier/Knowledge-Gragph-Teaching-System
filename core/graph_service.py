@@ -35,14 +35,14 @@ def _default_db_path() -> Path:
     for _ in range(5):
         seed_dir = current / "data" / "seed"
         if seed_dir.exists():
-            return current / "backend" / "vector_index_system" / "knowledge_graph" / "knowledge_graph.db"
+            runtime_dir = Path(os.getenv("APP_RUNTIME_DIR", str(current / ".runtime")))
+            return runtime_dir / "knowledge_graph.db"
         parent = current.parent
         if parent == current:
             break
         current = parent
 
-    # Fallback to legacy path for backward compatibility
-    return Path(__file__).resolve().parent.parent.parent / "backend" / "vector_index_system" / "knowledge_graph" / "knowledge_graph.db"
+    return Path(os.getenv("APP_RUNTIME_DIR", ".runtime")) / "knowledge_graph.db"
 
 
 DEFAULT_DB_PATH = _default_db_path()

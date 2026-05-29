@@ -54,6 +54,7 @@ _STRUCTURED_SECTION_BY_SOURCE_UNIT: Dict[str, str] = {}
 _STRUCTURED_SECTION_BY_CHAPTER_HEADING: Dict[str, str] = {}
 _STRUCTURED_SECTION_TO_TOC_NODE: Dict[str, str] = {}
 _RESOURCE_CONTAINER_BY_NODE_ID: Dict[str, str] = {}
+_STRUCTURED_CHAPTERS_WITH_HEADINGS: set[str] = set()
 
 
 def _reset_toc_index() -> None:
@@ -146,6 +147,7 @@ def _structured_heading_key(chapter: str, heading: Any) -> str:
 def _index_structured_section_lookup(source_paths: List[Path]) -> None:
     _STRUCTURED_SECTION_BY_SOURCE_UNIT.clear()
     _STRUCTURED_SECTION_BY_CHAPTER_HEADING.clear()
+    _STRUCTURED_CHAPTERS_WITH_HEADINGS.clear()
     for path in source_paths:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -156,6 +158,7 @@ def _index_structured_section_lookup(source_paths: List[Path]) -> None:
         heading_path = _heading_path_from_metadata(metadata)
         if not chapter or not heading_path:
             continue
+        _STRUCTURED_CHAPTERS_WITH_HEADINGS.add(chapter.strip().lower())
         deepest_section_id = _section_node_id(chapter, heading_path)
         source_unit = str(payload.get("id") or path.stem).strip()
         for key in (source_unit, path.name, path.stem):
@@ -231,6 +234,10 @@ def _resource_toc_container_node_id(
 
 def _has_toc_export_outline() -> bool:
     return _TOC_FUSION is not None and bool(_TOC_FUSION.toc_by_id)
+
+
+def _chapter_has_structured_headings(chapter: str) -> bool:
+    return str(chapter or "").strip().lower() in _STRUCTURED_CHAPTERS_WITH_HEADINGS
 
 
 def _export_toc_part_node_id_for_chapter(chapter: str) -> Optional[str]:
@@ -544,51 +551,70 @@ def _build_chunk_source(path: Path) -> SourceSpec:
     source_unit = str(payload.get("id") or path.stem)
     toc_unit_id = _structured_unit_to_toc_node_id(source_unit)
     toc_chapter_node_id = _structured_chapter_to_toc_node_id(chapter)
-    use_toc_leaf_container = bool(toc_unit_id and toc_unit_id != toc_chapter_node_id)
     chapter_root_id = _chapter_node_id(chapter)
-    parent_node_id = toc_unit_id if use_toc_leaf_container else chapter_root_id
+    parent_node_id = chapter_root_id
     toc_parent_metadata = _toc_metadata_for_node_id(toc_unit_id)
 
-    if not use_toc_leaf_container:
-        for depth, heading in enumerate(heading_path, start=1):
-            section_path = heading_path[:depth]
-            section_id = _section_node_id(chapter, section_path)
-            parent_for_section = parent_node_id if depth == 1 else _section_node_id(chapter, heading_path[: depth - 1])
-            _append_unique_node(
-                nodes,
-                seen_node_ids,
-                _node_payload(
-                    node_id=section_id,
-                    content=heading,
-                    node_type="section",
-                    label=heading,
-                    chapter=chapter,
-                    source_file=source_file,
-                    extra_metadata={
-                        "role": "heading",
-                        "heading": heading,
-                        "heading_path": section_path,
-                        "heading_depth": depth,
-                        "source_unit": source_unit,
-                        "section": metadata.get("section"),
-                        "display_heading": metadata.get("display_heading"),
-                    },
-                ),
-            )
+    for depth, heading in enumerate(heading_path, start=1):
+        section_path = heading_path[:depth]
+        section_id = _section_node_id(chapter, section_path)
+        parent_for_section = parent_node_id if depth == 1 else _section_node_id(chapter, heading_path[: depth - 1])
+        is_deepest_heading = depth == len(heading_path)
+        _append_unique_node(
+            nodes,
+            seen_node_ids,
+            _node_payload(
+                node_id=section_id,
+                content=heading,
+                node_type="section",
+                label=heading,
+                chapter=chapter,
+                source_file=source_file,
+                extra_metadata={
+                    "role": "heading",
+                    "heading": heading,
+                    "heading_path": section_path,
+                    "heading_depth": depth,
+                    "source_unit": source_unit,
+                    "toc_parent_id": toc_unit_id,
+                    **(toc_parent_metadata if is_deepest_heading else {}),
+                    "section": metadata.get("section"),
+                    "display_heading": metadata.get("display_heading"),
+                },
+            ),
+        )
+        _append_unique_relation(
+            relations,
+            seen_relation_ids,
+            _relation_payload(
+                f"rel::{parent_for_section}::contains::{section_id}",
+                parent_for_section,
+                section_id,
+                "contains",
+                description="heading tree contains subsection",
+                chapter=chapter,
+                source_file=source_file,
+            ),
+        )
+        parent_node_id = section_id
+
+    if toc_unit_id and toc_unit_id != toc_chapter_node_id:
+        if heading_path:
             _append_unique_relation(
                 relations,
                 seen_relation_ids,
                 _relation_payload(
-                    f"rel::{parent_for_section}::contains::{section_id}",
-                    parent_for_section,
-                    section_id,
+                    f"rel::{toc_unit_id}::contains::{parent_node_id}",
+                    toc_unit_id,
+                    parent_node_id,
                     "contains",
-                    description="heading tree contains subsection",
+                    description="exported TOC section contains structured heading",
                     chapter=chapter,
                     source_file=source_file,
                 ),
             )
-            parent_node_id = section_id
+        else:
+            parent_node_id = toc_unit_id
 
     for index, block in enumerate(payload.get("blocks") or [], start=1):
         block_type = str(block.get("type") or "concept")
@@ -1616,7 +1642,7 @@ def _build_chapter_specs(chapters: Dict[str, str]) -> List[SourceSpec]:
                 source_file="structured_sync",
             )
         )
-        if has_export_outline and toc_node_id:
+        if has_export_outline and toc_node_id and not _chapter_has_structured_headings(chapter):
             for child_toc_node_id in _toc_children_for_node_id(toc_node_id):
                 child_metadata = _toc_metadata_for_node_id(child_toc_node_id)
                 child_entry_type = str(child_metadata.get("toc_entry_type") or "").strip().lower()

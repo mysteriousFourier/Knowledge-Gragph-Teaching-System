@@ -87,7 +87,16 @@ def ensure_seed_chapters() -> None:
 
 def _graph_chapter_tree_health(db_path: Path) -> dict[str, int]:
     if not db_path.exists():
-        return {"nodes": 0, "chapter_roots": 0, "contains": 0, "toc_root": 0}
+        return {
+            "nodes": 0,
+            "chapter_roots": 0,
+            "contains": 0,
+            "toc_root": 0,
+            "heading_sections": 0,
+            "chapter_heading_edges": 0,
+            "legacy_toc_block_edges": 0,
+            "legacy_chapter_toc_section_edges": 0,
+        }
     try:
         with sqlite3.connect(str(db_path)) as conn:
             nodes = int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
@@ -106,9 +115,75 @@ def _graph_chapter_tree_health(db_path: Path) -> dict[str, int]:
                     "SELECT COUNT(*) FROM nodes WHERE id = 'toc::root'"
                 ).fetchone()[0]
             )
+            heading_sections = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM nodes
+                    WHERE type = 'section'
+                      AND json_extract(metadata_json, '$.role') = 'heading'
+                    """
+                ).fetchone()[0]
+            )
+            chapter_heading_edges = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM relationships AS rel
+                    JOIN nodes AS node ON node.id = rel.target_node
+                    WHERE rel.type = 'contains'
+                      AND rel.source_node LIKE 'chapter::chapter%'
+                      AND node.type = 'section'
+                      AND json_extract(node.metadata_json, '$.role') = 'heading'
+                    """
+                ).fetchone()[0]
+            )
+            legacy_toc_block_edges = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM relationships
+                    WHERE type = 'contains'
+                      AND source_node LIKE 'toc::%'
+                      AND target_node LIKE 'block::%'
+                    """
+                ).fetchone()[0]
+            )
+            legacy_chapter_toc_section_edges = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM relationships AS rel
+                    JOIN nodes AS node ON node.id = rel.target_node
+                    WHERE rel.type = 'contains'
+                      AND rel.source_node LIKE 'chapter::chapter%'
+                      AND rel.target_node LIKE 'toc::%'
+                      AND node.type = 'section'
+                      AND json_extract(node.metadata_json, '$.toc_entry_type') IN ('section', 'subsection')
+                    """
+                ).fetchone()[0]
+            )
     except sqlite3.Error:
-        return {"nodes": 0, "chapter_roots": 0, "contains": 0, "toc_root": 0}
-    return {"nodes": nodes, "chapter_roots": chapter_roots, "contains": contains, "toc_root": toc_root}
+        return {
+            "nodes": 0,
+            "chapter_roots": 0,
+            "contains": 0,
+            "toc_root": 0,
+            "heading_sections": 0,
+            "chapter_heading_edges": 0,
+            "legacy_toc_block_edges": 0,
+            "legacy_chapter_toc_section_edges": 0,
+        }
+    return {
+        "nodes": nodes,
+        "chapter_roots": chapter_roots,
+        "contains": contains,
+        "toc_root": toc_root,
+        "heading_sections": heading_sections,
+        "chapter_heading_edges": chapter_heading_edges,
+        "legacy_toc_block_edges": legacy_toc_block_edges,
+        "legacy_chapter_toc_section_edges": legacy_chapter_toc_section_edges,
+    }
 
 
 def _target_graph_needs_seed(seed_path: Path, target_path: Path) -> tuple[bool, dict[str, int], dict[str, int]]:
@@ -121,6 +196,10 @@ def _target_graph_needs_seed(seed_path: Path, target_path: Path) -> tuple[bool, 
     if seed["toc_root"] and not target["toc_root"]:
         return True, seed, target
     if target["chapter_roots"] < min(seed["chapter_roots"], 30):
+        return True, seed, target
+    if seed.get("heading_sections", 0) and target.get("heading_sections", 0) < max(1, int(seed["heading_sections"] * 0.9)):
+        return True, seed, target
+    if seed.get("chapter_heading_edges", 0) and target.get("chapter_heading_edges", 0) < max(1, int(seed["chapter_heading_edges"] * 0.9)):
         return True, seed, target
     if target["contains"] < max(1, int(seed["contains"] * 0.8)):
         return True, seed, target
@@ -145,6 +224,58 @@ def _merge_seed_graph(seed_path: Path, target_path: Path) -> None:
         target_conn.commit()
 
 
+def _cleanup_legacy_toc_content_edges(target_path: Path) -> dict[str, int]:
+    if not target_path.exists():
+        return {"toc_block_edges_deleted": 0, "chapter_toc_section_edges_deleted": 0}
+    with sqlite3.connect(str(target_path)) as conn:
+        toc_block_cursor = conn.execute(
+            """
+            DELETE FROM relationships
+            WHERE type = 'contains'
+              AND source_node LIKE 'toc::%'
+              AND target_node LIKE 'block::%'
+              AND EXISTS (
+                  SELECT 1
+                  FROM relationships AS heading_rel
+                  JOIN nodes AS heading_node ON heading_node.id = heading_rel.source_node
+                  WHERE heading_rel.type = 'contains'
+                    AND heading_rel.target_node = relationships.target_node
+                    AND heading_node.type = 'section'
+                    AND json_extract(heading_node.metadata_json, '$.role') = 'heading'
+              )
+            """
+        )
+        chapter_toc_cursor = conn.execute(
+            """
+            DELETE FROM relationships
+            WHERE type = 'contains'
+              AND source_node LIKE 'chapter::chapter%'
+              AND target_node LIKE 'toc::%'
+              AND EXISTS (
+                  SELECT 1
+                  FROM nodes AS toc_node
+                  WHERE toc_node.id = relationships.target_node
+                    AND toc_node.type = 'section'
+                    AND json_extract(toc_node.metadata_json, '$.toc_entry_type') IN ('section', 'subsection')
+              )
+              AND EXISTS (
+                  SELECT 1
+                  FROM relationships AS heading_rel
+                  JOIN nodes AS heading_node ON heading_node.id = heading_rel.target_node
+                  WHERE heading_rel.type = 'contains'
+                    AND heading_rel.source_node = relationships.source_node
+                    AND heading_node.type = 'section'
+                    AND json_extract(heading_node.metadata_json, '$.role') = 'heading'
+              )
+            """
+        )
+        conn.commit()
+    return {
+        "toc_block_edges_deleted": max(int(toc_block_cursor.rowcount or 0), 0),
+        "chapter_toc_section_edges_deleted": max(int(chapter_toc_cursor.rowcount or 0), 0),
+    }
+
+
 def ensure_seed_graph() -> None:
     if not _env_flag("APP_BOOTSTRAP_SEED_DATA", True) or not SEED_GRAPH_DB_FILE.exists():
         return
@@ -157,6 +288,9 @@ def ensure_seed_graph() -> None:
     target_path = Path(graph_db)
     needs_seed, seed_health, target_health = _target_graph_needs_seed(SEED_GRAPH_DB_FILE, target_path)
     if not needs_seed:
+        cleanup = _cleanup_legacy_toc_content_edges(target_path)
+        if cleanup["toc_block_edges_deleted"] or cleanup["chapter_toc_section_edges_deleted"]:
+            print(f"[seed] cleaned legacy graph edges: {cleanup}")
         return
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -166,10 +300,12 @@ def ensure_seed_graph() -> None:
     else:
         _merge_seed_graph(SEED_GRAPH_DB_FILE, target_path)
         action = "merged"
+    cleanup = _cleanup_legacy_toc_content_edges(target_path)
     print(
         "[seed] graph "
         f"{action}: nodes={seed_health['nodes']}, chapter_roots={seed_health['chapter_roots']}, "
-        f"contains={seed_health['contains']}, previous={target_health}"
+        f"contains={seed_health['contains']}, heading_sections={seed_health.get('heading_sections')}, "
+        f"cleanup={cleanup}, previous={target_health}"
     )
 
 

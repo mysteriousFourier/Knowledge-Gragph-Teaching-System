@@ -127,11 +127,12 @@ python render_app.py
 - `.runtime/`：运行时生成的章节、日志和缓存
 - `structured/`：可公开提交的课程结构化数据
 - `data/seed/`：可提交的启动种子数据
-- `backend/vector_index_system/knowledge_graph/`：默认本地图谱数据库位置
+- `.runtime/knowledge_graph.db`：默认运行时图谱数据库位置
+- `backend/vector_index_system/knowledge_graph/`：旧版图谱页面和兼容工具目录
 
 常见环境变量：
 
-- `APP_RUNTIME_DIR`：运行时章节与日志目录
+- `APP_RUNTIME_DIR`：运行时章节、图谱、索引、日志和缓存目录
 - `APP_DATA_DIR`：运行时数据目录
 - `GRAPH_DB_PATH`：显式指定图谱数据库路径
 - `APP_BOOTSTRAP_SEED_DATA`：是否启用种子数据引导
@@ -152,10 +153,12 @@ python backend/start_all.py
 当前 `main` 分支包含 GitHub Actions 工作流：
 
 ```text
-.github/workflows/azure-main-kgts-interactive-learning-system.yml
+.github/workflows/main_kgts-interactive-learning-system.yml
 ```
 
-该工作流会先构建 React 前端，再把单端口 Python 应用部署到 Azure App Service。
+该工作流会先构建 React 前端，再打包单端口 Python 应用，并通过 `azure/webapps-deploy` 把 zip 包部署到 Azure App Service。App Service 这条路径不是从本机用 Azure CLI 推送应用代码；本机 Azure CLI 只用于登录、创建或检查 Azure 资源。
+
+App Service 部署包会排除运行时目录、模型权重、旧版向量索引目录、TTS 资产，以及 `data/seed/vector_index/` 预建 FAISS 索引，避免低资源实例冷启动和 zip 包体积被大文件拖垮。`data/seed/knowledge_graph.db` 仍作为轻量初始图谱种子随包发布；线上需要向量索引时会在 `.runtime/vector_index` 中按低内存配置使用缓存或 hashing fallback。
 
 Azure App Service 的 Startup Command 建议设置为：
 
@@ -214,7 +217,7 @@ KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
 KGTS_VECTOR_HASH_FALLBACK=1
 ```
 
-GitHub Actions 会安装 `requirements/vector-cpu.txt`，并继续排除 `backend/vector_index_system/models/`、`backend/vector_index_system/vector_index/` 和大模型权重，避免部署包膨胀。若线上没有可用 embedding 缓存，系统会保留 hybrid 接口并使用 hashing fallback，不会把功能关掉。
+GitHub Actions 会安装 `requirements/vector-cpu.txt`，并继续排除 `backend/vector_index_system/models/`、`backend/vector_index_system/vector_index/`、`data/seed/vector_index/` 和大模型权重，避免部署包膨胀。若线上没有可用 embedding 缓存，系统会保留 hybrid 接口并使用 hashing fallback，不会把功能关掉。
 
 ### 可选本地语音推理
 
@@ -257,7 +260,7 @@ KGTS_VECTOR_UNLOAD_AFTER_QUERY=1
 KGTS_VECTOR_UNLOAD_AFTER_REBUILD=1
 ```
 
-完整 VM 创建、systemd 和 Nginx 部署步骤见 [Azure for Students VM 部署](docs/azure-student-vm.md)。
+完整 VM 创建、systemd 和 Nginx 部署步骤见 [Azure for Students VM 部署](docs/azure-student-vm.md)。VM 文档中的 Azure CLI 命令用于创建资源、开放端口和检查状态；应用代码部署是在 VM 内通过 `git clone` / `git pull` 更新仓库，不是从本机 Azure CLI 直接上传工作区。
 
 ## 文档索引
 

@@ -168,7 +168,7 @@ class StructuredTocSyncTest(unittest.TestCase):
         self.assertIn(("toc::toc_l0_0001", "contains", "toc::toc_l1_0002"), relation_keys)
         self.assertEqual(spec.chapters, {})
 
-    def test_canonical_chapter_uses_exported_toc_sections_as_children(self):
+    def test_canonical_chapter_keeps_structured_headings_with_exported_toc_sections(self):
         toc_payload = {
             "metadata": {"source_title": "Test Book", "total_nodes": 4, "root_count": 1},
             "root_nodes": ["toc_l0_0001"],
@@ -249,11 +249,24 @@ class StructuredTocSyncTest(unittest.TestCase):
             "neutral_evolution_in_one_and_two_locus_systems_introduction__the_wright_fisher_model"
         )
         self.assertIn(("toc::toc_l1_0002", "contains", "chapter::chapter2"), relation_keys)
-        self.assertIn(("chapter::chapter2", "contains", "toc::toc_l2_0003"), relation_keys)
-        self.assertIn(("chapter::chapter2", "contains", "toc::toc_l2_0004"), relation_keys)
-        self.assertIn(("toc::toc_l2_0003", "contains", "block::chapter2_002::1"), relation_keys)
-        self.assertNotIn(("chapter::chapter2", "contains", structured_section_id), relation_keys)
-        self.assertNotIn((structured_section_id, "contains", "block::chapter2_002::1"), relation_keys)
+        self.assertIn(("toc::toc_l1_0002", "contains", "toc::toc_l2_0003"), relation_keys)
+        self.assertIn(("toc::toc_l1_0002", "contains", "toc::toc_l2_0004"), relation_keys)
+        self.assertNotIn(("chapter::chapter2", "contains", "toc::toc_l2_0003"), relation_keys)
+        self.assertNotIn(("chapter::chapter2", "contains", "toc::toc_l2_0004"), relation_keys)
+        self.assertIn(
+            (
+                "chapter::chapter2",
+                "contains",
+                "section::chapter2::neutral_evolution_in_one_and_two_locus_systems_introduction",
+            ),
+            relation_keys,
+        )
+        self.assertIn(
+            ("toc::toc_l2_0003", "contains", structured_section_id),
+            relation_keys,
+        )
+        self.assertIn((structured_section_id, "contains", "block::chapter2_002::1"), relation_keys)
+        self.assertNotIn(("toc::toc_l2_0003", "contains", "block::chapter2_002::1"), relation_keys)
 
     def test_toc_mapped_structured_chapter_keeps_canonical_chapter_container(self):
         toc_payload = {

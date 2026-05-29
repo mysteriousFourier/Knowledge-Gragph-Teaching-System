@@ -285,6 +285,11 @@ export function buildGraphScopeTree(nodes: GraphNode[], relationships: GraphRela
     }
 
     if (isCanonicalChapterNode(node)) {
+      const headingChildren = directChildren.filter((childId) => isHeadingNode(nodeById.get(childId)))
+      if (headingChildren.length) {
+        headingChildren.forEach(add)
+        return displayChildren.sort((a, b) => compareGraphScopeNodes(nodeById.get(a), nodeById.get(b)))
+      }
       const tocSectionChildren = tocSectionsForCanonicalChapter(id)
       if (tocSectionChildren.length) {
         tocSectionChildren.forEach(add)
