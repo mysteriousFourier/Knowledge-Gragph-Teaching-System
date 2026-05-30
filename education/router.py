@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -88,6 +89,8 @@ router = APIRouter(prefix="/api", tags=["education"])
 
 DEFAULT_SLIDE_LECTURE_DURATION_MINUTES = 10.0
 DEFAULT_SLIDE_LECTURE_SPEECH_RATE_CPM = 250
+SLIDE_LECTURE_JOBS: Dict[str, Dict[str, Any]] = {}
+SLIDE_LECTURE_JOB_TTL_SECONDS = 60 * 60 * 4
 
 
 @router.get("/")
@@ -550,6 +553,76 @@ async def generate_ppt_tex(request: GeneratePptTexRequest):
 
 @router.post("/education/generate-slide-lectures")
 async def generate_slide_lectures(request: GenerateSlideLecturesRequest):
+    return await _generate_slide_lectures_sync(request)
+
+
+@router.post("/education/generate-slide-lectures/jobs")
+async def create_slide_lecture_job(request: GenerateSlideLecturesRequest):
+    _prune_slide_lecture_jobs()
+    job_id = f"slide_lecture_{uuid.uuid4().hex[:12]}"
+    job = {
+        "job_id": job_id,
+        "status": "queued",
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+        "result": None,
+        "error": "",
+    }
+    SLIDE_LECTURE_JOBS[job_id] = job
+
+    async def run_job() -> None:
+        job["status"] = "running"
+        job["updated_at"] = datetime.now().isoformat()
+        try:
+            job["result"] = await asyncio.to_thread(lambda: asyncio.run(_generate_slide_lectures_sync(request)))
+            job["status"] = "completed"
+        except Exception as exc:
+            job["status"] = "failed"
+            job["error"] = str(exc).strip() or exc.__class__.__name__
+        finally:
+            job["updated_at"] = datetime.now().isoformat()
+
+    asyncio.create_task(run_job())
+    return {
+        "success": True,
+        "job_id": job_id,
+        "status": job["status"],
+        "created_at": job["created_at"],
+    }
+
+
+@router.get("/education/generate-slide-lectures/jobs/{job_id}")
+async def get_slide_lecture_job(job_id: str):
+    _prune_slide_lecture_jobs()
+    job = SLIDE_LECTURE_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="逐页讲解任务不存在或已过期")
+    return {
+        "success": True,
+        "job_id": job_id,
+        "status": job.get("status"),
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+        "result": job.get("result"),
+        "error": job.get("error") or "",
+    }
+
+
+def _prune_slide_lecture_jobs() -> None:
+    now = datetime.now().timestamp()
+    expired: List[str] = []
+    for job_id, job in SLIDE_LECTURE_JOBS.items():
+        try:
+            updated = datetime.fromisoformat(str(job.get("updated_at") or job.get("created_at") or "")).timestamp()
+        except ValueError:
+            updated = now
+        if now - updated > SLIDE_LECTURE_JOB_TTL_SECONDS:
+            expired.append(job_id)
+    for job_id in expired:
+        SLIDE_LECTURE_JOBS.pop(job_id, None)
+
+
+async def _generate_slide_lectures_sync(request: GenerateSlideLecturesRequest):
     source_node_ids = _normalize_source_node_ids(request.source_node_id, request.source_node_ids)
     if not source_node_ids:
         source_node_ids = _normalize_source_node_ids(None, request.ppt_source_node_ids)

@@ -283,19 +283,37 @@ export const useExportCoursewarePptx = () => {
 
 export const useGenerateSlideLectures = () => {
   return useMutation({
-    mutationFn: (data: GenerateSlideLecturesRequest) =>
-      educationClient
-        .post<PptUploadResponse>(
-          "/api/education/generate-slide-lectures",
-          {
-            graph_scope: data.graph_scope || "subtree",
-            ...data,
-          },
-          {
-            timeout: 0,
-          },
+    mutationFn: async (data: GenerateSlideLecturesRequest) => {
+      const payload = {
+        graph_scope: data.graph_scope || "subtree",
+        ...data,
+      }
+      const started = await educationClient
+        .post<{ success: boolean; job_id: string; status: string; error?: string }>(
+          "/api/education/generate-slide-lectures/jobs",
+          payload,
+          { timeout: 30000 },
         )
-        .then((r) => r.data),
+        .then((r) => r.data)
+      if (!started.success || !started.job_id) {
+        throw new Error(started.error || "逐页讲解任务启动失败")
+      }
+
+      const startedAt = Date.now()
+      const maxWaitMs = 30 * 60 * 1000
+      while (Date.now() - startedAt < maxWaitMs) {
+        await new Promise((resolve) => window.setTimeout(resolve, 3000))
+        const job = await educationClient
+          .get<{ success: boolean; status: string; result?: PptUploadResponse; error?: string }>(
+            `/api/education/generate-slide-lectures/jobs/${encodeURIComponent(started.job_id)}`,
+            { timeout: 30000 },
+          )
+          .then((r) => r.data)
+        if (job.status === "completed" && job.result) return job.result
+        if (job.status === "failed") throw new Error(job.error || "逐页讲解任务失败")
+      }
+      throw new Error("逐页讲解任务仍在运行，请稍后刷新项目查看结果")
+    },
   })
 }
 
