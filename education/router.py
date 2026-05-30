@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import FileResponse
@@ -87,6 +88,7 @@ from KGTS.education.courseware_style import build_style_reference_guidance, buil
 load_root_env()
 
 router = APIRouter(prefix="/api", tags=["education"])
+logger = logging.getLogger(__name__)
 
 DEFAULT_SLIDE_LECTURE_DURATION_MINUTES = 10.0
 DEFAULT_SLIDE_LECTURE_SPEECH_RATE_CPM = 250
@@ -568,19 +570,40 @@ async def create_slide_lecture_job(request: GenerateSlideLecturesRequest):
         "updated_at": datetime.now().isoformat(),
         "result": None,
         "error": "",
+        "stage": "queued",
+        "message": "逐页讲解任务已排队",
+        "started_at": None,
     }
     SLIDE_LECTURE_JOBS[job_id] = job
 
+    def update_stage(stage: str, message: str) -> None:
+        job["stage"] = stage
+        job["message"] = message
+        job["updated_at"] = datetime.now().isoformat()
+        logger.info("slide lecture job %s stage=%s message=%s", job_id, stage, message)
+
     async def run_job() -> None:
         job["status"] = "running"
+        job["started_at"] = datetime.now().isoformat()
         job["updated_at"] = datetime.now().isoformat()
+        update_stage("starting", "正在准备逐页讲解任务")
         try:
-            result = await asyncio.to_thread(lambda: asyncio.run(_generate_slide_lectures_sync(request)))
+            timeout_seconds = _slide_lecture_job_timeout()
+            result = await asyncio.wait_for(
+                asyncio.to_thread(lambda: asyncio.run(_generate_slide_lectures_sync(request, progress=update_stage))),
+                timeout=timeout_seconds,
+            )
             job["result"] = _compact_slide_lecture_response(result) if isinstance(result, dict) else result
             job["status"] = "completed"
+            update_stage("completed", "逐页讲解生成完成")
+        except asyncio.TimeoutError:
+            job["status"] = "failed"
+            job["error"] = f"逐页讲解生成超时（超过 {int(_slide_lecture_job_timeout())} 秒），请减少页数或稍后重试"
+            update_stage("failed", job["error"])
         except Exception as exc:
             job["status"] = "failed"
             job["error"] = str(exc).strip() or exc.__class__.__name__
+            update_stage("failed", job["error"])
         finally:
             job["updated_at"] = datetime.now().isoformat()
 
@@ -610,6 +633,9 @@ async def get_slide_lecture_job(job_id: str):
         "updated_at": job.get("updated_at"),
         "result": result,
         "error": job.get("error") or "",
+        "stage": job.get("stage") or "",
+        "message": job.get("message") or "",
+        "elapsed_seconds": _slide_lecture_job_elapsed_seconds(job),
     }
 
 
@@ -627,7 +653,27 @@ def _prune_slide_lecture_jobs() -> None:
         SLIDE_LECTURE_JOBS.pop(job_id, None)
 
 
-async def _generate_slide_lectures_sync(request: GenerateSlideLecturesRequest):
+def _slide_lecture_job_timeout() -> float:
+    return _optional_timeout_env("KGTS_SLIDE_LECTURE_JOB_TIMEOUT_SECONDS", 12 * 60.0) or 12 * 60.0
+
+
+def _slide_lecture_job_elapsed_seconds(job: Dict[str, Any]) -> int:
+    started_at = str(job.get("started_at") or job.get("created_at") or "")
+    try:
+        started = datetime.fromisoformat(started_at)
+    except ValueError:
+        return 0
+    return max(0, int((datetime.now() - started).total_seconds()))
+
+
+async def _generate_slide_lectures_sync(
+    request: GenerateSlideLecturesRequest,
+    progress: Optional[Callable[[str, str], None]] = None,
+):
+    def mark(stage: str, message: str) -> None:
+        if progress:
+            progress(stage, message)
+
     source_node_ids = _normalize_source_node_ids(request.source_node_id, request.source_node_ids)
     if not source_node_ids:
         source_node_ids = _normalize_source_node_ids(None, request.ppt_source_node_ids)
@@ -640,6 +686,7 @@ async def _generate_slide_lectures_sync(request: GenerateSlideLecturesRequest):
         if not selected_context.get("success"):
             raise HTTPException(status_code=404, detail=selected_context.get("error") or "Graph node not found")
         chapter_title = request.chapter_title or selected_context.get("chapter_title") or "图谱生成课件"
+        mark("graphrag", "正在构建 GraphRAG 章节上下文")
         target_slide_indices = _normalize_target_slide_indices(request.target_slide_indices, request.slides)
         base_query_slides = [
             slide
@@ -670,6 +717,7 @@ async def _generate_slide_lectures_sync(request: GenerateSlideLecturesRequest):
             model=request.model or get_deepseek_model("pro"),
         )
         style_reference_guidance = build_style_reference_guidance(request.style_reference)
+        mark("pacing", "正在计算逐页讲解字数分配")
         pacing = await _build_slide_lecture_pacing_with_model(
             client,
             request.slides,
@@ -680,6 +728,7 @@ async def _generate_slide_lectures_sync(request: GenerateSlideLecturesRequest):
             teacher_guidance=str(request.teacher_guidance or "").strip(),
             style_reference_guidance=style_reference_guidance,
         )
+        mark("generating", f"正在生成逐页讲解（{len(base_query_slides) or len(request.slides)} 页）")
         slide_lectures = await _generate_per_slide_lectures(
             client,
             request.slides,
@@ -694,6 +743,7 @@ async def _generate_slide_lectures_sync(request: GenerateSlideLecturesRequest):
             target_slide_indices=target_slide_indices,
             pacing_by_index=pacing["slides"],
             speech_rate_cpm=pacing["speech_rate_cpm"],
+            progress=progress,
         )
         if _nonempty_slide_lecture_count(slide_lectures) == 0 and any(_compact_slide_for_lecture(slide).strip() for slide in request.slides):
             message = _slide_lecture_error_summary(slide_lectures) or "AI 未返回任何逐页讲解内容，请检查 DeepSeek 配置、模型返回或稍后重试。"
@@ -722,6 +772,7 @@ async def _generate_slide_lectures_sync(request: GenerateSlideLecturesRequest):
                 request.slides,
             )
         merged_lecture = _merge_slide_lectures(slide_lectures)
+        mark("summarizing", "正在整理讲解结果和教学计划")
         try:
             learning_plan = _build_ppt_learning_plan(
                 chapter_title=chapter_title,
@@ -2196,7 +2247,12 @@ async def _generate_per_slide_lectures(
     target_slide_indices: Optional[List[int]] = None,
     pacing_by_index: Optional[Dict[int, Dict[str, Any]]] = None,
     speech_rate_cpm: int = DEFAULT_SLIDE_LECTURE_SPEECH_RATE_CPM,
+    progress: Optional[Callable[[str, str], None]] = None,
 ) -> List[Dict]:
+    def mark(stage: str, message: str) -> None:
+        if progress:
+            progress(stage, message)
+
     results_by_index: Dict[int, Dict[str, Any]] = {}
     work_items: List[Dict[str, Any]] = []
     target_set = set(target_slide_indices or [])
@@ -2242,25 +2298,29 @@ async def _generate_per_slide_lectures(
         slide_graphrag_context = None
         slide_graph_data = graph_data
         slide_selected_evidence = _compact_evidence_for_prompt(selected_evidence, limit=4, content_chars=260)
-        try:
-            slide_graphrag_context = build_graphrag_context(
-                f"{chapter_title}\n{slide_text[:700]}",
-                seed_node_ids=source_node_ids,
-                limit=4,
-            )
-            slide_graph_data = slide_graphrag_context.get("graph_data") or graph_data
-            slide_selected_evidence = _compact_evidence_for_prompt(
-                evidence_from_rag(slide_graphrag_context.get("llm_context") or [], limit=4),
-                limit=4,
-                content_chars=260,
-            )
-            if slide_graphrag_context.get("context"):
-                chapter_data["content"] = (
-                    f"GraphRAG scoped context:\n{_truncate_for_prompt(_format_graphrag_generation_context(slide_graphrag_context), 1000)}\n\n"
-                    f"PPT slide content:\n{slide_text}"
+        if source_node_ids and not selected_evidence:
+            try:
+                slide_graphrag_context = build_graphrag_context(
+                    f"{chapter_title}\n{slide_text[:700]}",
+                    seed_node_ids=source_node_ids,
+                    limit=4,
                 )
-        except Exception:
+                slide_graph_data = slide_graphrag_context.get("graph_data") or graph_data
+                slide_selected_evidence = _compact_evidence_for_prompt(
+                    evidence_from_rag(slide_graphrag_context.get("llm_context") or [], limit=4),
+                    limit=4,
+                    content_chars=260,
+                )
+                if slide_graphrag_context.get("context"):
+                    chapter_data["content"] = (
+                        f"GraphRAG scoped context:\n{_truncate_for_prompt(_format_graphrag_generation_context(slide_graphrag_context), 1000)}\n\n"
+                        f"PPT slide content:\n{slide_text}"
+                    )
+            except Exception:
+                slide_graphrag_context = None
+        elif selected_graph_context:
             slide_graphrag_context = None
+
         try:
             learning_plan = _build_ppt_learning_plan(
                 chapter_title=chapter_title,
@@ -2388,6 +2448,8 @@ Output only the final slide lecture script."""
 
         async def run_one(item: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
             async with semaphore:
+                slide = item.get("slide") or {}
+                mark("generating", f"正在生成第 {slide.get('index', '?')} 页讲解（{phase}）")
                 result = await _try_generate_slide_lecture_item(
                     item_client,
                     item,
@@ -2395,6 +2457,10 @@ Output only the final slide lecture script."""
                     phase=phase,
                     attempt=attempt,
                 )
+                if result.get("lecture"):
+                    mark("generating", f"第 {slide.get('index', '?')} 页讲解已生成")
+                else:
+                    mark("retrying", f"第 {slide.get('index', '?')} 页讲解生成未成功，准备重试")
                 return item, result
 
         return await asyncio.gather(*(run_one(item) for item in items))

@@ -294,10 +294,18 @@ export const useExportCoursewarePptx = () => {
 
 export const useGenerateSlideLectures = () => {
   return useMutation({
-    mutationFn: async (data: GenerateSlideLecturesRequest) => {
+    mutationFn: async (data: GenerateSlideLecturesRequest & {
+      onProgress?: (job: {
+        status: string
+        stage?: string
+        message?: string
+        elapsed_seconds?: number
+      }) => void
+    }) => {
+      const { onProgress, ...requestData } = data
       const payload = {
-        graph_scope: data.graph_scope || "subtree",
-        ...data,
+        graph_scope: requestData.graph_scope || "subtree",
+        ...requestData,
       }
       const started = await educationClient
         .post<{ success: boolean; job_id: string; status: string; error?: string }>(
@@ -315,11 +323,20 @@ export const useGenerateSlideLectures = () => {
       while (Date.now() - startedAt < maxWaitMs) {
         await new Promise((resolve) => window.setTimeout(resolve, 3000))
         const job = await educationClient
-          .get<{ success: boolean; status: string; result?: PptUploadResponse; error?: string }>(
+          .get<{
+            success: boolean
+            status: string
+            result?: PptUploadResponse
+            error?: string
+            stage?: string
+            message?: string
+            elapsed_seconds?: number
+          }>(
             `/api/education/generate-slide-lectures/jobs/${encodeURIComponent(started.job_id)}`,
             { timeout: 120000 },
           )
           .then((r) => r.data)
+        onProgress?.(job)
         if (job.status === "completed" && job.result) return job.result
         if (job.status === "failed") throw new Error(job.error || "逐页讲解任务失败")
       }

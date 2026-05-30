@@ -163,6 +163,13 @@ function errorMessage(error: unknown) {
   return String(error || "未知错误")
 }
 
+function formatSlideLectureJobProgress(job: { message?: string; stage?: string; elapsed_seconds?: number }) {
+  const message = String(job.message || job.stage || "正在运行逐页讲解生成").trim()
+  const elapsed = typeof job.elapsed_seconds === "number" && Number.isFinite(job.elapsed_seconds) ? Math.max(0, Math.round(job.elapsed_seconds)) : 0
+  if (!elapsed) return message
+  return `${message}（已运行 ${elapsed} 秒）`
+}
+
 function estimateSlideDurationMinutes(slide: PptSlideDetail, allSlides: PptSlideDetail[], targetDurationMinutes: number) {
   const slideTextLength = Math.max(1, [slide.title, slide.content, slide.notes, slide.raw_text].join("").length)
   const totalTextLength = Math.max(
@@ -1390,6 +1397,11 @@ function TeacherPreparePage() {
         style_reference: styleReference,
         ppt_source_node_ids: pptNodeIds,
         ppt_source_scope: pptSourceScope,
+        onProgress: (job) => {
+          if (job.status === "running") {
+            setStatus(formatSlideLectureJobProgress(job))
+          }
+        },
       })
       if (!result.success) {
         if (result.slide_lectures?.length) {
@@ -1430,6 +1442,11 @@ function TeacherPreparePage() {
         existing_slide_lectures: slideLectures,
         ppt_source_node_ids: pptNodeIds,
         ppt_source_scope: pptSourceScope,
+        onProgress: (job) => {
+          if (job.status === "running") {
+            setStatus(formatSlideLectureJobProgress(job))
+          }
+        },
       })
       if (!result.success) {
         throw new Error(result.message || result.error || `第 ${selectedSlide.index} 页讲解生成失败`)
