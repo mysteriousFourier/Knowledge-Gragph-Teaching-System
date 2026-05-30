@@ -575,7 +575,8 @@ async def create_slide_lecture_job(request: GenerateSlideLecturesRequest):
         job["status"] = "running"
         job["updated_at"] = datetime.now().isoformat()
         try:
-            job["result"] = await asyncio.to_thread(lambda: asyncio.run(_generate_slide_lectures_sync(request)))
+            result = await asyncio.to_thread(lambda: asyncio.run(_generate_slide_lectures_sync(request)))
+            job["result"] = _compact_slide_lecture_response(result) if isinstance(result, dict) else result
             job["status"] = "completed"
         except Exception as exc:
             job["status"] = "failed"
@@ -598,13 +599,16 @@ async def get_slide_lecture_job(job_id: str):
     job = SLIDE_LECTURE_JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="逐页讲解任务不存在或已过期")
+    result = job.get("result")
+    if isinstance(result, dict):
+        result = _compact_slide_lecture_response(result)
     return {
         "success": True,
         "job_id": job_id,
         "status": job.get("status"),
         "created_at": job.get("created_at"),
         "updated_at": job.get("updated_at"),
-        "result": job.get("result"),
+        "result": result,
         "error": job.get("error") or "",
     }
 
