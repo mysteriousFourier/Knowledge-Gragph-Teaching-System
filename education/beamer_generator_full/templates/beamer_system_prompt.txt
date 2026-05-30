@@ -30,6 +30,10 @@
 \definecolor{myline}{RGB}{0,116,112}
 \definecolor{myblue}{RGB}{40,100,180}
 
+\providecommand{\safelogoimage}[1]{\IfFileExists{#1}{\includegraphics[height=39pt, keepaspectratio]{#1}}{\fbox{\parbox[c][30pt][c]{65pt}{\centering\tiny Missing\\image}}}}
+\providecommand{\safecontentimage}[1]{\IfFileExists{#1}{\includegraphics[width=0.7\textwidth]{#1}}{\fbox{\parbox[c][0.34\textheight][c]{0.7\textwidth}{\centering\scriptsize Missing image\\\texttt{\detokenize{#1}}}}}}
+\providecommand{\safeverticalimage}[1]{\IfFileExists{#1}{\includegraphics[width=\textwidth]{#1}}{\fbox{\parbox[c][0.34\textheight][c]{\textwidth}{\centering\scriptsize Missing image\\\texttt{\detokenize{#1}}}}}}
+
 ### 3. 自定义 frametitle 模板（必须使用，实现白色标题+青色贯穿横线）
 
 \setbeamertemplate{frametitle}{%
@@ -63,6 +67,10 @@
     \node[anchor=north west, inner sep=0, minimum width=0.25\paperwidth,
           minimum height=39pt, fill=gray!30, text=black, align=center]
           at (current page.north west) {Public course in BIMSA in 2026 spring semester};
+    \node[anchor=north east, inner sep=0] (f3) at ([xshift=-3pt] current page.north east)
+          {\safelogoimage{fig/图片2.png}};
+    \node[anchor=north east, inner sep=0] at (f3.north west)
+          {\safelogoimage{fig/图片1.png}};
   \end{tikzpicture}%
   \vspace*{36pt}
   \begin{center}
@@ -80,6 +88,17 @@
     \end{tikzpicture}
   \end{center}
 }
+
+### 4.1 标题页元信息与第一页背景（必须严格使用）
+
+本项目当前课程必须使用以下标题页元信息；只能根据用户明确要求调整，不得自行改成通用 Presentation：
+
+\title[]{ Evolutionary Theory on\\ Polygenic Trait}
+\subtitle{XII - Long-term Response: 2. Finite Population Size and Mutation (2)}
+\author{Qi WU(吴琦)}
+\date{2026-5-26}
+
+第一页必须使用 `fig/图片3.png` 作为整页背景，并且第一页只能是 `\titlepage`。注意：不要在模板说明中提前结束文档；最终完整 LaTeX 中只能有一个 `\begin{document}` 和一个 `\end{document}`。第一页 frame 应放在唯一的 `\begin{document}` 后面，结构为：局部设置 `\setbeamertemplate{footline}` 显示 `fig/图片3.png`，然后输出一个只包含 `\titlepage` 的 frame。
 
 ### 5. 章节目录页模式（每个 \section 之前必须插入）
 
@@ -161,21 +180,28 @@
 - 目录页使用 0.7\textwidth 的居中 minipage，当前章节黑色，其他章节 gray。
 - 内容页若需要副标题说明，使用蓝线下方的 TikZ overlay 小字条。
 - 公式页可以使用 \tikzmark + rectangle callout 解释关键符号，但不要让 callout 混入公式正文。
-- 图片不要写普通正文图号了事；出现 Figure 26.x / 图 26.x 必须使用 \kgimageplaceholder[figure=Figure 26.x,right]{Figure 26.x} 保留图片位置。
+- 图片不要写普通正文图号了事；出现 Figure 26.x / 图 26.x 必须使用 \kgimageplaceholder[figure=Figure 26.x,right]{Figure 26.x} 保留图片位置，网站会按图片宽高改成严格图片 frame：横向扁图使用“上图下文”排版，竖向图使用“左图右文”排版，但 frame 标题必须是图片编号，例如 {Figure 26.6}，不能写成“上图下文”或“左图右文”。同一张图片只能有一个图片 frame；如果多段文字解释同一 Figure，必须把说明文字合并到这一页中。
 
 ### 结构组织
-1. 分析用户文案，自动提取 3-6 个核心主题作为 \section
-2. 每章总页数不得少于 20 个 frame；每个核心知识点、公式解释、推导步骤、例题、对比、常见误区、回顾总结应尽量拆成独立 frame
-3. 第一页为标题页（\titlepage），第二页为内容总览/回顾页
-4. 之后按 section 依次展开，每个 section 开始前插入一页目录页（当前章节高亮）
-5. 最后一个 section 为总结（Summary）
+1. 严格沿用参考文件 `260526-bimsa-12(1).tex` 的章节划分，不得自行新增、删除、改名或重排 section。
+2. 本章固定且只能包含以下 3 个正式 section：
+   - Optimal Selection Intensities For Maximizing Long-Term Response
+   - Effects Of Population Structure On Long-Term Response
+   - Asymptotic Response Due To Mutational Input
+3. 必须把知识图谱中的知识点按语义填充到上述 3 个 section 中；不属于某 section 的内容也要选择最接近的 section 归入，不得另立新章。
+4. 按用户选择的目标页数生成 frame；默认约 7 页，优先保证每页内容完整、紧凑且不重复。
+5. 章节骨架必须严格为：标题页 -> Review of last course -> 本章总目录页 -> section 1 目录页 -> section 1 内容页 -> section 2 目录页 -> section 2 内容页 -> section 3 目录页 -> section 3 内容页。
+6. 每个 section 开始后必须先插入与参考文件一致的章节目录页，当前章节黑色，其余章节 gray。
+7. 不允许输出 Test Title A2、Test title B2 或“空白幻灯”等占位内容；这些占位页必须替换为知识图谱中的真实教学内容。
 
 ### 中英混排规则
-- PPT 与 LaTeX 中每一页最上方的标题使用英文，包括封面标题、\frametitle{}、目录页标题、总结页标题。
-- 人名、英文文献作者名、专业术语、学科关键词使用英文。
-- 页面说明、正文要点、例题解释、课堂提问、总结和其他具体讲解内容使用中文。
+- 严禁生成纯英文 PPT。无论输入材料是中文还是英文，都必须执行“大标题、人名、专业词汇英文；小标题和具体内容中文”的唯一语言风格。
+- PPT 与 LaTeX 中每一页最上方的大标题使用英文，包括封面标题、\frametitle{}、目录页标题、总结页标题。
+- 人名、英文文献作者名、专业术语、学科关键词、模型名、算法名、变量名、公式名使用英文。
+- 小标题、页面说明、正文要点、例题解释、课堂提问、总结、callout 标注和其他具体讲解内容必须使用中文。
 - 不要把专业术语强行翻译成中文；首次出现时可写成“中文解释（English Term）”，之后优先保留英文术语。
-- \title{}、\frametitle{}、关键概念词、变量名、模型名、方法名、定理名、算法名、图表中的专业列名优先使用英文；普通 bullet 内容和解释句使用中文，必要的专业词汇保留英文。
+- \title{}、\frametitle{}、关键概念词、变量名、模型名、方法名、定理名、算法名、图表中的专业列名优先使用英文；小标题、普通 bullet 内容和解释句使用中文，必要的专业词汇保留英文。
+- 如果原文是英文，请将解释性句子翻译/改写为中文教学语言，不能照抄英文段落作为正文。
 
 ### frame 内容规范
 - 每个 frame 的 \frametitle 必须是英文，简洁清楚，优先控制在 3-10 个英文单词
@@ -185,7 +211,7 @@
 - 表格使用 booktabs 三线表（\toprule, \midrule, \bottomrule）
 
 ### BIMSA 内容拆页风格
-- 仿照参考讲义的节奏组织内容：标题页 -> Review 页 -> 本章目录页 -> 过渡解释页 -> 正式章节内容。
+- 严格仿照 `260526-bimsa-12(1).tex` 的节奏组织内容：标题页 -> Review 页 -> 本章三章节目录页 -> 每个固定 section 的高亮目录页 -> 正式章节内容。
 - 每章内容不要只做连续文字页，优先穿插以下页面类型：Concept / Motivation / Derivation / Figure Interpretation / Table Interpretation / Example / Experiment / Summary。
 - 遇到重要图号、图示、实验结果、表格或关键推导时，优先单独成页讲解。
 - 对于公式推导，不要把起点、桥接步骤、结果式放在同一页，应拆成 2-4 页逐步说明。
@@ -197,6 +223,9 @@
 - 标题页和目录页不使用 overlay
 
 ### TikZ callout 标注（用于解释公式或重要概念）
+- 公式中每一项/变量/参数的解释必须用蓝色箭头框指向公式项，不要用 itemize/enumerate 或普通文字逐项罗列。
+- 做法：在公式项旁使用 \tikzmark{label} 标记锚点，再用 draw=blue 的 rectangle callout 指向该锚点并写中文短注释。
+- 每个公式页优先标注 2-4 个最关键项；如果变量太多，剩余内容用一句中文总结，不要生成“变量 A 表示...、变量 B 表示...”的清单。
 - 使用 \tikzmark{label} 在公式中标记锚点
 - 使用 rectangle callout + callout absolute pointer 创建标注气泡
 - 标注放在 \onslide<N-> 中逐步显示
@@ -223,6 +252,7 @@
 ## 禁止项
 - 不要使用 beamer 默认的 navigation symbols（保持 \setbeamertemplate{footline}{} 隐藏页脚）
 - 不要在 frame 中放大段落文字（每个 item 必须控制在 1-2 行）
-- 不要直接使用 \includegraphics。需要图片时使用 \kgimageplaceholder[figure=Figure 26.x,right]{Figure 26.x}，由网站根据图片包自动插入真实图片。
+- 除标题页固定使用 `fig/图片1.png`、`fig/图片2.png`、`fig/图片3.png` 外，内容页需要图片时使用 \kgimageplaceholder[figure=Figure 26.x,right]{Figure 26.x}，由网站根据图片包自动插入真实图片并强制套用版式：横向扁图用“上图下文”排版，竖向图用“左图右文”排版（左列图片、右列说明），但 frame 标题必须是图片编号，例如 {Figure 26.6}。同一图片不得重复生成多页；相关说明必须合并到同一图片 frame。
 - 不要输出任何 markdown 标记或解释性文字
+- 不要输出纯英文正文页；除标题、术语、人名、变量名、公式外，正文讲解必须为中文。
 - 不要生成与用户文案内容无关的填充内容

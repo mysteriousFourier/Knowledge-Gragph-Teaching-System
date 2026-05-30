@@ -7,7 +7,7 @@ PORT = int(os.getenv("BG_PORT", "8080"))
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
-MAX_TOKENS = int(os.getenv("BG_MAX_TOKENS", "8192"))
+MAX_TOKENS = int(os.getenv("BG_MAX_TOKENS", "16000"))
 TEMPERATURE = float(os.getenv("BG_TEMPERATURE", "0.7"))
 
 CORS_ORIGINS = os.getenv("BG_CORS_ORIGINS", "*").split(",")

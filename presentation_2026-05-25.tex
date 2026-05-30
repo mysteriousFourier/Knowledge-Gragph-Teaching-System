@@ -1,0 +1,319 @@
+\documentclass[10pt, aspectratio=169]{ctexbeamer}
+\usetheme{Madrid}
+
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{caption}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{shapes.callouts, tikzmark}
+\usetikzlibrary{shapes, positioning}
+
+\definecolor{myline}{RGB}{0,116,112}
+\definecolor{myblue}{RGB}{40,100,180}
+
+\setbeamertemplate{frametitle}{%
+  \vspace*{0.2cm}%
+  \begin{beamercolorbox}[wd=\paperwidth, leftskip=0.5cm, rightskip=0.5cm, ht=0.3cm, dp=0pt]{whitebg}%
+    \usebeamerfont{frametitle}\textcolor{black}{\insertframetitle}%
+  \end{beamercolorbox}%
+  \vspace{0pt}%
+  \begin{tikzpicture}[remember picture, overlay]
+    \draw[myline, line width=1.5pt]
+      ([yshift=-1.3cm] current page.north west) -- ([yshift=-1.3cm] current page.north east);
+  \end{tikzpicture}%
+  \vspace{0.1cm}%
+}
+
+\setbeamertemplate{title page}{%
+  \begin{tikzpicture}[remember picture, overlay]
+    \draw[line width=1.5pt, color=myline]
+      ([yshift=-40pt] current page.north west) -- ([yshift=-40pt] current page.north east);
+    \node[anchor=north west, inner sep=0, minimum width=0.25\paperwidth,
+          minimum height=39pt, fill=gray!30, text=black, align=center]
+          at (current page.north west) {Public course in BIMSA in 2026 spring semester};
+  \end{tikzpicture}%
+  \vspace*{36pt}
+  \begin{center}
+    \begin{tikzpicture}
+      \node[draw=none, inner sep=8pt, fill=white, text=black,
+            align=center, font=\Huge\bfseries] (titlebox) {\inserttitle};
+      \node[draw=none, rounded corners=2pt,
+            inner sep=8pt, fill=white, text=black,
+            align=center, font=\large,
+            below=5pt of titlebox] (subtitlebox) {\insertsubtitle};
+      \node[below=5pt of subtitlebox.south east, anchor=north east, align=center, text=black] {
+        \insertauthor \\[3pt]
+        \insertdate
+      };
+    \end{tikzpicture}
+  \end{center}
+}
+
+\setbeamertemplate{footline}{}
+\setbeamertemplate{navigation symbols}{}
+
+\providecommand{\kgimageplaceholder}[2][]{%
+  \begin{center}
+    \fbox{\parbox{0.55\textwidth}{\centering\vspace{1.2cm} #2 \vspace{1.2cm}}}
+  \end{center}%
+}
+
+\title{暂无内容。}
+\subtitle{暂无内容。}
+\author{BIMSA}
+\date{2026 Spring Semester}
+
+
+
+\begin{document}
+
+{
+\setbeamertemplate{footline}{}
+\begin{frame}
+  \titlepage
+\end{frame}
+}
+
+\begin{frame}{Review Key Concepts}
+  \textit{暂无内容。}
+  \vspace{0.3cm}
+  \begin{itemize}
+    \item 回顾 Robertson 选择极限理论：最终响应取决于初始加性方差 $\sigma_A^2(0)$ 和有效群体大小 $N_e$
+    \item 选择强度 $\bar{\imath}$ 与 $N_e$ 之间存在权衡：增加 $\bar{\imath}$ 会减少 $N_e$
+    \item 长期响应由 $N_e \bar{\imath}$ 的乘积决定，而非单独任何一个因素
+    \item 突变（Mutation）为选择提供持续的新遗传变异来源
+    \item 群体结构（Population Structure）、奠基者效应（Founder Effects）和瓶颈（Bottlenecks）显著影响长期响应
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{1 Optimal Selection Intensities and Population Structure}
+  \vfill
+  \begin{center}
+    \begin{minipage}{0.7\textwidth}
+      \begin{itemize}
+        \setlength{\itemsep}{0.3\baselineskip}
+        \item[\textcolor{black}{\textbf{1.}}] \textcolor{black}{Optimal Selection Intensities for Long-term Response [2.]}
+        \item[\textcolor{black}{\textbf{2.}}] \textcolor{black}{Founder Effects and Population Bottlenecks [3.]}
+        \item[\textcolor{black}{\textbf{3.}}] \textcolor{black}{Population Subdivision \& Within-family Selection [4.]}
+        \item[\textcolor{black}{\textbf{4.}}] \textcolor{black}{Asymptotic Response from Mutational Input [5.]}
+        \item[\textcolor{black}{\textbf{5.}}] \textcolor{black}{General Conditions \& Optimization}
+      \end{itemize}
+    \end{minipage}
+  \end{center}
+  \vfill
+\end{frame}
+
+\begin{frame}{Tradeoff Between Selection Intensity and Drift}
+  \textit{暂无内容。}
+  \vspace{0.3cm}
+  \begin{itemize}
+    \item 设 $M$ 个个体被测量，$N$ 个个体允许繁殖，保存比例 $p = N/M$
+    \item 减小 $N$（从而减小 $p$）会增加 $\bar{\imath}$，但同时减少 $N_e$
+    \item 短期响应受益于高选择强度，但长期响应因 $N_e$ 减小而受损
+    \item 核心权衡：最大化短期增益 vs. 维持长期遗传变异
+    \item Robertson (1960a) 提出：存在使总响应最大化的中间 $p$ 值
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Robertson's Selection Limit Formula}
+  \textit{暂无内容。}
+  \vspace{0.3cm}
+  \begin{itemize}
+    \item Robertson 选择极限（Equation 26.15b）重新表达为：
+    \item 最终响应（来自初始变异）依赖于 $N_e \bar{\imath}$ 的乘积
+    \item 减小 $p$ 增加 $\bar{\imath}$ 从而增加短期响应
+    \item 但减小 $p$ 也减小 $N_e$，从而减小长期响应极限
+    \item $N_e \bar{\imath}$ 在 $p$ 过大或过小时都会减小，暗示存在最优中间值
+  \end{itemize}
+  \[
+    2N_{e}R(1) = N_{e}\bar{\imath}\left(\frac{2\sigma_{A}^{2}(0)}{\sigma_{z}}\right) \tag{26.22}
+  \]
+\end{frame}
+
+\begin{frame}{Table 26.3 and Figure 26.5: Data Interpretation}
+  \textit{暂无内容。}
+  \vspace{0.3cm}
+  \kgimageplaceholder[figure=Figure 26.5,center,x=500,y=120,width=235,height=165]{Figure 26.5}
+  \begin{itemize}
+    \item 回顾 Robertson 选择极限理论：最终响应取决于初始加性方差 $\sigma_A^2(0)$ 和有效群体大小 $N_e$
+    \item 选择强度 $\bar{\imath}$ 与 $N_e$ 之间存在权衡：增加 $\bar{\imath}$ 会减少 $N_e$
+    \item 长期响应由 $N_e \bar{\imath}$ 的乘积决定，而非单独任何一个因素
+    \item 突变（Mutation）为选择提供持续的新遗传变异来源
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Tradeoff Between Selection Intensity and Drift - Key Points}
+  \begin{itemize}
+    \item 设 $M$ 个个体被测量，$N$ 个个体允许繁殖，保存比例 $p = N/M$
+    \item 减小 $N$（从而减小 $p$）会增加 $\bar{\imath}$，但同时减少 $N_e$
+    \item 短期响应受益于高选择强度，但长期响应因 $N_e$ 减小而受损
+    \item 核心权衡：最大化短期增益 vs. 维持长期遗传变异
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Robertson's Selection Limit Formula - Example Walkthrough}
+  \begin{itemize}
+    \item Robertson 选择极限（Equation 26.15b）重新表达为：
+    \item 最终响应（来自初始变异）依赖于 $N_e \bar{\imath}$ 的乘积
+    \item 减小 $p$ 增加 $\bar{\imath}$ 从而增加短期响应
+    \item 但减小 $p$ 也减小 $N_e$，从而减小长期响应极限
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Review Key Concepts - Review Summary}
+  \begin{itemize}
+    \item 回顾 Robertson 选择极限理论：最终响应取决于初始加性方差 $\sigma_A^2(0)$ 和有效群体大小 $N_e$
+    \item 选择强度 $\bar{\imath}$ 与 $N_e$ 之间存在权衡：增加 $\bar{\imath}$ 会减少 $N_e$
+    \item 长期响应由 $N_e \bar{\imath}$ 的乘积决定，而非单独任何一个因素
+    \item 突变（Mutation）为选择提供持续的新遗传变异来源
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Tradeoff Between Selection Intensity and Drift - Concept Check}
+  \begin{itemize}
+    \item 设 $M$ 个个体被测量，$N$ 个个体允许繁殖，保存比例 $p = N/M$
+    \item 减小 $N$（从而减小 $p$）会增加 $\bar{\imath}$，但同时减少 $N_e$
+    \item 短期响应受益于高选择强度，但长期响应因 $N_e$ 减小而受损
+    \item 核心权衡：最大化短期增益 vs. 维持长期遗传变异
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Robertson's Selection Limit Formula - Application Notes}
+  \begin{itemize}
+    \item Robertson 选择极限（Equation 26.15b）重新表达为：
+    \item 最终响应（来自初始变异）依赖于 $N_e \bar{\imath}$ 的乘积
+    \item 减小 $p$ 增加 $\bar{\imath}$ 从而增加短期响应
+    \item 但减小 $p$ 也减小 $N_e$，从而减小长期响应极限
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Review Key Concepts - Detailed Explanation}
+  \begin{itemize}
+    \item 回顾 Robertson 选择极限理论：最终响应取决于初始加性方差 $\sigma_A^2(0)$ 和有效群体大小 $N_e$
+    \item 选择强度 $\bar{\imath}$ 与 $N_e$ 之间存在权衡：增加 $\bar{\imath}$ 会减少 $N_e$
+    \item 长期响应由 $N_e \bar{\imath}$ 的乘积决定，而非单独任何一个因素
+    \item 突变（Mutation）为选择提供持续的新遗传变异来源
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Tradeoff Between Selection Intensity and Drift - Key Points}
+  \begin{itemize}
+    \item 设 $M$ 个个体被测量，$N$ 个个体允许繁殖，保存比例 $p = N/M$
+    \item 减小 $N$（从而减小 $p$）会增加 $\bar{\imath}$，但同时减少 $N_e$
+    \item 短期响应受益于高选择强度，但长期响应因 $N_e$ 减小而受损
+    \item 核心权衡：最大化短期增益 vs. 维持长期遗传变异
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Robertson's Selection Limit Formula - Example Walkthrough}
+  \begin{itemize}
+    \item Robertson 选择极限（Equation 26.15b）重新表达为：
+    \item 最终响应（来自初始变异）依赖于 $N_e \bar{\imath}$ 的乘积
+    \item 减小 $p$ 增加 $\bar{\imath}$ 从而增加短期响应
+    \item 但减小 $p$ 也减小 $N_e$，从而减小长期响应极限
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Review Key Concepts - Review Summary}
+  \begin{itemize}
+    \item 回顾 Robertson 选择极限理论：最终响应取决于初始加性方差 $\sigma_A^2(0)$ 和有效群体大小 $N_e$
+    \item 选择强度 $\bar{\imath}$ 与 $N_e$ 之间存在权衡：增加 $\bar{\imath}$ 会减少 $N_e$
+    \item 长期响应由 $N_e \bar{\imath}$ 的乘积决定，而非单独任何一个因素
+    \item 突变（Mutation）为选择提供持续的新遗传变异来源
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Tradeoff Between Selection Intensity and Drift - Concept Check}
+  \begin{itemize}
+    \item 设 $M$ 个个体被测量，$N$ 个个体允许繁殖，保存比例 $p = N/M$
+    \item 减小 $N$（从而减小 $p$）会增加 $\bar{\imath}$，但同时减少 $N_e$
+    \item 短期响应受益于高选择强度，但长期响应因 $N_e$ 减小而受损
+    \item 核心权衡：最大化短期增益 vs. 维持长期遗传变异
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Robertson's Selection Limit Formula - Application Notes}
+  \begin{itemize}
+    \item Robertson 选择极限（Equation 26.15b）重新表达为：
+    \item 最终响应（来自初始变异）依赖于 $N_e \bar{\imath}$ 的乘积
+    \item 减小 $p$ 增加 $\bar{\imath}$ 从而增加短期响应
+    \item 但减小 $p$ 也减小 $N_e$，从而减小长期响应极限
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Review Key Concepts - Detailed Explanation}
+  \begin{itemize}
+    \item 回顾 Robertson 选择极限理论：最终响应取决于初始加性方差 $\sigma_A^2(0)$ 和有效群体大小 $N_e$
+    \item 选择强度 $\bar{\imath}$ 与 $N_e$ 之间存在权衡：增加 $\bar{\imath}$ 会减少 $N_e$
+    \item 长期响应由 $N_e \bar{\imath}$ 的乘积决定，而非单独任何一个因素
+    \item 突变（Mutation）为选择提供持续的新遗传变异来源
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Tradeoff Between Selection Intensity and Drift - Key Points}
+  \begin{itemize}
+    \item 设 $M$ 个个体被测量，$N$ 个个体允许繁殖，保存比例 $p = N/M$
+    \item 减小 $N$（从而减小 $p$）会增加 $\bar{\imath}$，但同时减少 $N_e$
+    \item 短期响应受益于高选择强度，但长期响应因 $N_e$ 减小而受损
+    \item 核心权衡：最大化短期增益 vs. 维持长期遗传变异
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Robertson's Selection Limit Formula - Example Walkthrough}
+  \begin{itemize}
+    \item Robertson 选择极限（Equation 26.15b）重新表达为：
+    \item 最终响应（来自初始变异）依赖于 $N_e \bar{\imath}$ 的乘积
+    \item 减小 $p$ 增加 $\bar{\imath}$ 从而增加短期响应
+    \item 但减小 $p$ 也减小 $N_e$，从而减小长期响应极限
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Review Key Concepts - Review Summary}
+  \begin{itemize}
+    \item 回顾 Robertson 选择极限理论：最终响应取决于初始加性方差 $\sigma_A^2(0)$ 和有效群体大小 $N_e$
+    \item 选择强度 $\bar{\imath}$ 与 $N_e$ 之间存在权衡：增加 $\bar{\imath}$ 会减少 $N_e$
+    \item 长期响应由 $N_e \bar{\imath}$ 的乘积决定，而非单独任何一个因素
+    \item 突变（Mutation）为选择提供持续的新遗传变异来源
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Tradeoff Between Selection Intensity and Drift - Concept Check}
+  \begin{itemize}
+    \item 设 $M$ 个个体被测量，$N$ 个个体允许繁殖，保存比例 $p = N/M$
+    \item 减小 $N$（从而减小 $p$）会增加 $\bar{\imath}$，但同时减少 $N_e$
+    \item 短期响应受益于高选择强度，但长期响应因 $N_e$ 减小而受损
+    \item 核心权衡：最大化短期增益 vs. 维持长期遗传变异
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Robertson's Selection Limit Formula - Application Notes}
+  \begin{itemize}
+    \item Robertson 选择极限（Equation 26.15b）重新表达为：
+    \item 最终响应（来自初始变异）依赖于 $N_e \bar{\imath}$ 的乘积
+    \item 减小 $p$ 增加 $\bar{\imath}$ 从而增加短期响应
+    \item 但减小 $p$ 也减小 $N_e$，从而减小长期响应极限
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Review Key Concepts - Detailed Explanation}
+  \begin{itemize}
+    \item 回顾 Robertson 选择极限理论：最终响应取决于初始加性方差 $\sigma_A^2(0)$ 和有效群体大小 $N_e$
+    \item 选择强度 $\bar{\imath}$ 与 $N_e$ 之间存在权衡：增加 $\bar{\imath}$ 会减少 $N_e$
+    \item 长期响应由 $N_e \bar{\imath}$ 的乘积决定，而非单独任何一个因素
+    \item 突变（Mutation）为选择提供持续的新遗传变异来源
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Tradeoff Between Selection Intensity and Drift - Key Points}
+  \begin{itemize}
+    \item 设 $M$ 个个体被测量，$N$ 个个体允许繁殖，保存比例 $p = N/M$
+    \item 减小 $N$（从而减小 $p$）会增加 $\bar{\imath}$，但同时减少 $N_e$
+    \item 短期响应受益于高选择强度，但长期响应因 $N_e$ 减小而受损
+    \item 核心权衡：最大化短期增益 vs. 维持长期遗传变异
+  \end{itemize}
+\end{frame}
+
+\end{document}

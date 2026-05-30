@@ -1,4 +1,5 @@
 """PPTX 生成器 — 将结构化幻灯片 JSON 转为 .pptx 文件"""
+import base64
 import io
 import os
 import re
@@ -463,6 +464,21 @@ def generate_pptx(slides_data: dict, upload_dir: str = "") -> bytes:
     prs.slide_height = SLIDE_HEIGHT
 
     meta = slides_data
+    rendered_slides = slides_data.get("rendered_slides") or []
+    if rendered_slides:
+        for rendered in rendered_slides:
+            image_stream = _rendered_slide_stream(rendered)
+            if not image_stream:
+                continue
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
+            slide.shapes.add_picture(image_stream, 0, 0, width=SLIDE_WIDTH, height=SLIDE_HEIGHT)
+
+        if len(prs.slides):
+            buf = io.BytesIO()
+            prs.save(buf)
+            buf.seek(0)
+            return buf.read()
+
     slides = slides_data.get("slides", [])
     figure_asset_paths = _build_figure_asset_lookup(slides_data.get("figure_assets", {}), upload_dir)
 
@@ -480,6 +496,19 @@ def generate_pptx(slides_data: dict, upload_dir: str = "") -> bytes:
     prs.save(buf)
     buf.seek(0)
     return buf.read()
+
+
+def _rendered_slide_stream(rendered: dict) -> Optional[io.BytesIO]:
+    image = str((rendered or {}).get("image") or "").strip()
+    if not image:
+        return None
+    try:
+        if "," in image and image.lower().startswith("data:image/"):
+            image = image.split(",", 1)[1]
+        data = base64.b64decode(image)
+        return io.BytesIO(data)
+    except Exception:
+        return None
 
 
 # ================================================================
@@ -669,9 +698,14 @@ def _add_content_slide(prs: Presentation, slide_data: dict, upload_dir: str, fig
     # 图片占位
     images = slide_data.get("images", [])
     for img in images:
-        img_path = img.get("path", "")
-        if upload_dir:
-            img_path = os.path.join(upload_dir, os.path.basename(img_path))
+        raw_img_path = str(img.get("path") or img.get("url") or img.get("asset") or "")
+        img_path = _resolve_uploaded_asset_path(raw_img_path, upload_dir)
+        if not os.path.exists(img_path) and raw_img_path.replace("\\", "/").startswith("fig/"):
+            wanted_name = os.path.basename(raw_img_path.replace("\\", "/"))
+            for candidate in figure_asset_paths.values():
+                if os.path.basename(candidate) == wanted_name and os.path.exists(candidate):
+                    img_path = candidate
+                    break
         if os.path.exists(img_path):
             x = _editor_px_to_slide_x(img.get("x", 0))
             y = _editor_px_to_slide_y(img.get("y", 0))

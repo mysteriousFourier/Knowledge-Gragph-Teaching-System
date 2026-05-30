@@ -22,7 +22,7 @@ def parse_latex_to_slides(latex: str) -> dict:
 
     slide_id = 0
     for frame in frames:
-        slide = _parse_frame(frame, slide_id)
+        slide = _parse_frame(frame, slide_id, result)
         if slide:
             result["slides"].append(slide)
             slide_id += 1
@@ -74,6 +74,23 @@ def _match_braces(text: str, open_pos: int) -> Optional[str]:
     return None
 
 
+def _matching_brace_end(text: str, open_pos: int) -> Optional[int]:
+    """Return the index of the matching closing brace for text[open_pos]."""
+    if open_pos >= len(text) or text[open_pos] != "{":
+        return None
+    depth = 0
+    i = open_pos
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
 def _extract_frames(body: str) -> List[str]:
     """提取所有 frame"""
     frames = []
@@ -101,7 +118,7 @@ def _looks_like_review_background_prefix(prefix: str) -> bool:
     return has_background and has_review_marker
 
 
-def _parse_frame(frame_text: str, slide_id: int) -> Optional[dict]:
+def _parse_frame(frame_text: str, slide_id: int, metadata: Optional[dict] = None) -> Optional[dict]:
     """解析单个 frame"""
     review_background = "%__KG_REVIEW_BACKGROUND__" in frame_text
     # ---- 标题提取（支持嵌套花括号）----
@@ -133,26 +150,41 @@ def _parse_frame(frame_text: str, slide_id: int) -> Optional[dict]:
     )
     if sub_match:
         subtitle = _clean_latex_text(sub_match.group(1))
+    if frame_type == "title":
+        metadata = metadata or {}
+        title = title or metadata.get("title", "")
+        subtitle = subtitle or metadata.get("subtitle", "")
 
     # ---- 提取各类内容 ----
     items = _extract_items(frame_text)
     equations = _extract_equations(frame_text)
+    missing_equations = _extract_missing_equations(frame_text)
     table = _extract_table(frame_text)
     placeholders = _extract_image_placeholders(frame_text)
     images = _extract_includegraphics(frame_text)
     callouts = _extract_callouts(frame_text)
     overview = _extract_overview(frame_text)
+    plain_caption = _extract_plain_parbox_caption(frame_text)
 
     notes_parts = []
     if overview:
         notes_parts.append(overview)
-    return {
+    if plain_caption and plain_caption not in notes_parts:
+        notes_parts.append(plain_caption)
+    title_credit = ""
+    if frame_type == "title":
+        author = str((metadata or {}).get("author") or "").strip()
+        date = str((metadata or {}).get("date") or "").strip()
+        if author or date:
+            title_credit = "\n".join(part for part in [author, date] if part)
+    slide = {
         "id": slide_id,
         "type": frame_type,
         "title": title,
         "subtitle": subtitle,
         "items": items,
         "equations": equations,
+        "missing_equations": missing_equations,
         "table": table,
         "images": images,
         "placeholders": placeholders,
@@ -160,6 +192,9 @@ def _parse_frame(frame_text: str, slide_id: int) -> Optional[dict]:
         "reviewBackground": review_background,
         "notes": "\n".join(notes_parts) if notes_parts else "",
     }
+    if title_credit:
+        slide["titleCredit"] = title_credit
+    return slide
 
 
 def _is_toc_frame(frame_text: str) -> bool:
@@ -332,12 +367,38 @@ def _extract_equations(frame_text: str) -> List[str]:
         if _is_readable_equation(eq) and not _has_equivalent_equation(equations, eq):
             equations.append(eq)
     for m in re.finditer(
-        r"\\begin\{align\*?\}(.*?)\\end\{align\*?\}", frame_text, re.DOTALL
+        r"\\begin\{(equation|gather|multline)\*?\}(.*?)\\end\{\1\*?\}",
+        frame_text,
+        re.DOTALL,
     ):
-        eq = _clean_latex_equation(m.group(1))
+        eq = _clean_latex_equation(m.group(2))
+        if _is_readable_equation(eq) and not _has_equivalent_equation(equations, eq):
+            equations.append(eq)
+    for m in re.finditer(
+        r"\\begin\{(align|alignat)\*?\}(.*?)\\end\{\1\*?\}", frame_text, re.DOTALL
+    ):
+        eq = _clean_latex_equation(m.group(2))
         if _is_readable_equation(eq) and not _has_equivalent_equation(equations, eq):
             equations.append(eq)
     return equations
+
+
+def _extract_missing_equations(frame_text: str) -> List[dict]:
+    missing: List[dict] = []
+    seen = set()
+    pattern = re.compile(
+        r"\\begin\{alertblock\}\{(?:缺失公式|Missing Equation|Missing Equations|缂哄け鍏紡)\}\s*"
+        r"\\kgmissingequation\{([^{}]+)\}\{([^{}]*)\}\s*"
+        r"\\end\{alertblock\}",
+        re.DOTALL,
+    )
+    for match in pattern.finditer(frame_text or ""):
+        key = _clean_latex_text(match.group(1))
+        label = _clean_latex_text(match.group(2)) or key
+        if key and key not in seen:
+            seen.add(key)
+            missing.append({"key": key, "label": label})
+    return missing
 
 
 def _clean_latex_equation(text: str) -> str:
@@ -432,33 +493,85 @@ def _is_readable_equation(eq: str) -> bool:
 
 def _extract_table(frame_text: str) -> Optional[dict]:
     """提取表格结构"""
-    table_match = re.search(
-        r"\\begin\{tabular\}\{([^}]+)\}(.*?)\\end\{tabular\}",
-        frame_text, re.DOTALL
-    )
-    if not table_match:
+    begin_match = re.search(r"\\begin\{tabular\}\s*\{", frame_text)
+    if not begin_match:
+        return None
+    spec_open = begin_match.end() - 1
+    spec_end = _matching_brace_end(frame_text, spec_open)
+    if spec_end is None:
+        return None
+    column_spec = frame_text[spec_open + 1:spec_end]
+    end_match = re.search(r"\\end\{tabular\}", frame_text[spec_end + 1:], re.DOTALL)
+    if not end_match:
         return None
 
-    table_body = table_match.group(2)
+    table_body = frame_text[spec_end + 1:spec_end + 1 + end_match.start()]
     rows = []
-    for line in table_body.split("\\\\"):
+    for line in _split_latex_table_rows(table_body):
         line = line.strip()
         if not line:
             continue
-        line = re.sub(r"\\(?:toprule|midrule|bottomrule|hline)", "", line).strip()
+        line = re.sub(r"\\(?:toprule|midrule|bottomrule|hline|cline|cmidrule)(?:\s*\([^)]*\))?(?:\s*\{[^}]*\})*", "", line).strip()
         if not line:
             continue
-        cells = [_clean_latex_text(c.strip()) for c in line.split("&")]
+        cells = [_clean_latex_text(c.strip()) for c in _split_latex_table_cells(line)]
         if any(c for c in cells):
             rows.append(cells)
 
     if not rows:
         return None
 
+    max_cols = max(len(row) for row in rows)
+    rows = [row + [""] * (max_cols - len(row)) for row in rows]
     return {
         "headers": rows[0],
         "rows": rows[1:] if len(rows) > 1 else [],
+        "columnSpec": column_spec,
     }
+
+
+def _split_latex_table_rows(table_body: str) -> List[str]:
+    rows: List[str] = []
+    start = 0
+    depth = 0
+    i = 0
+    while i < len(table_body):
+        ch = table_body[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth = max(0, depth - 1)
+        elif ch == "\\" and i + 1 < len(table_body) and table_body[i + 1] == "\\" and depth == 0:
+            rows.append(table_body[start:i])
+            i += 2
+            while i < len(table_body) and table_body[i].isspace():
+                i += 1
+            start = i
+            continue
+        i += 1
+    tail = table_body[start:].strip()
+    if tail:
+        rows.append(tail)
+    return rows
+
+
+def _split_latex_table_cells(row: str) -> List[str]:
+    cells: List[str] = []
+    start = 0
+    depth = 0
+    i = 0
+    while i < len(row):
+        ch = row[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth = max(0, depth - 1)
+        elif ch == "&" and depth == 0:
+            cells.append(row[start:i])
+            start = i + 1
+        i += 1
+    cells.append(row[start:])
+    return cells
 
 
 def _extract_image_placeholders(frame_text: str) -> List[dict]:
@@ -487,16 +600,28 @@ def _extract_image_placeholders(frame_text: str) -> List[dict]:
 
 
 def _extract_includegraphics(frame_text: str) -> List[dict]:
-    """Extract raw includegraphics commands so real images survive export."""
+    """Extract real image commands so image frames survive export."""
     images: List[dict] = []
-    pattern = re.compile(r"\\includegraphics(?:\[([^\]]*)\])?\{([^}]*)\}", re.DOTALL)
+    pattern = re.compile(
+        r"\\(?P<cmd>includegraphics|safecontentimage|safeverticalimage|safelogoimage)"
+        r"(?:\[(?P<options>[^\]]*)\])?\s*\{",
+        re.DOTALL,
+    )
     for match in pattern.finditer(frame_text):
-        path = _clean_latex_text(match.group(2) or "")
+        path_arg = _match_braces(frame_text, match.end() - 1)
+        path = _clean_latex_text(path_arg or "")
         if not path:
             continue
-        options = match.group(1) or ""
-        width = 200.0
-        height = 160.0
+        cmd = match.group("cmd") or "includegraphics"
+        options = match.group("options") or ""
+        if cmd == "safelogoimage":
+            x, y, width, height = 40.0, 24.0, 120.0, 60.0
+        elif cmd == "safeverticalimage":
+            x, y, width, height = 120.0, 76.0, 520.0, 285.0
+        elif cmd == "safecontentimage":
+            x, y, width, height = 110.0, 84.0, 540.0, 255.0
+        else:
+            x, y, width, height = 40.0, 170.0, 200.0, 160.0
         width_match = re.search(r"width\s*=\s*([^,\]]+)", options)
         height_match = re.search(r"height\s*=\s*([^,\]]+)", options)
         x_match = re.search(r"(?:^|,)\s*x\s*=\s*([^,\]]+)", options)
@@ -505,9 +630,18 @@ def _extract_includegraphics(frame_text: str) -> List[dict]:
             width = _estimate_editor_px_from_latex_dimension(width_match.group(1), width)
         if height_match:
             height = _estimate_editor_px_from_latex_dimension(height_match.group(1), height)
-        x = _estimate_editor_px_from_latex_dimension(x_match.group(1), 40.0) if x_match else 40.0
-        y = _estimate_editor_px_from_latex_dimension(y_match.group(1), 170.0) if y_match else 170.0
-        images.append({"path": path, "x": x, "y": y, "width": width, "height": height})
+        if x_match:
+            x = _estimate_editor_px_from_latex_dimension(x_match.group(1), x)
+        if y_match:
+            y = _estimate_editor_px_from_latex_dimension(y_match.group(1), y)
+        images.append({
+            "path": path,
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "latexMacro": cmd,
+        })
     return images
 
 
@@ -634,27 +768,51 @@ def _parse_placeholder_custom_box(location: str) -> dict:
 def _extract_callouts(frame_text: str) -> List[dict]:
     """提取 tikz callout 标注"""
     callouts = []
-    pattern = r"\\node\[(?P<opts>[^\]]*rectangle callout[^\]]*)\]\s*at\s*\([\s\S]*?\)\s*\{(?P<text>.*?)\}\s*;"
+    pattern = r"\\node\[(?P<opts>[^\]]*rectangle callout[^\]]*)\]\s*at\s*\((?P<at>[\s\S]*?)\)\s*\{(?P<text>.*?)\}\s*;"
     for m in re.finditer(pattern, frame_text, re.DOTALL):
         opts = m.group("opts")
         pointer = re.search(r"cs:([A-Za-z0-9_:-]+)", opts)
         width_match = re.search(r"text width\s*=\s*([0-9.]+\s*(?:cm|mm|pt|px|in)?)", opts)
         align_match = re.search(r"align\s*=\s*(left|right|center)", opts)
+        font_match = re.search(r"font\s*=\s*\\(?:footnotesize|small|scriptsize|tiny|normalsize)", opts)
         width = _estimate_editor_px_from_latex_dimension(width_match.group(1), 250.0) if width_match else 250.0
         text = _clean_latex_text(m.group("text").strip())
         if not text:
             continue
+        x, y = _estimate_callout_position(m.group("at"), len(callouts))
+        font_size = {
+            r"\tiny": 8,
+            r"\scriptsize": 9,
+            r"\footnotesize": 10,
+            r"\small": 11,
+            r"\normalsize": 12,
+        }.get(font_match.group(0).split("=")[-1] if font_match else "", 12)
+        height = max(56.0, min(150.0, 32.0 + len(text) / 26.0 * 18.0))
         callouts.append({
             "label": pointer.group(1) if pointer else "",
             "text": text,
-            "x": 130.0 + len(callouts) * 18.0,
-            "y": 178.0 + len(callouts) * 18.0,
+            "x": x,
+            "y": y,
             "width": max(120.0, min(520.0, width)),
-            "height": 92.0,
-            "fontSize": 12,
+            "height": height,
+            "fontSize": font_size,
             "align": align_match.group(1) if align_match else "center",
         })
     return callouts
+
+
+def _estimate_callout_position(at_expr: str, index: int) -> tuple[float, float]:
+    expr = re.sub(r"\s+", " ", at_expr or "")
+    shift = re.search(r"shift\s*=\s*\{\s*\(\s*([+-]?[0-9.]+)\s*cm\s*,\s*([+-]?[0-9.]+)\s*cm\s*\)\s*\}", expr)
+    if shift:
+        sx = float(shift.group(1))
+        sy = float(shift.group(2))
+        x = 380.0 + sx * 37.8
+        y = 205.0 - sy * 37.8
+        return max(16.0, min(650.0, x)), max(70.0, min(350.0, y))
+    x = 130.0 + index * 18.0
+    y = 178.0 + index * 18.0
+    return x, y
 
 
 def _extract_overview(frame_text: str) -> Optional[str]:
@@ -666,6 +824,33 @@ def _extract_overview(frame_text: str) -> Optional[str]:
     if match:
         return _clean_latex_text(match.group(1))
     return None
+
+
+def _extract_plain_parbox_caption(frame_text: str) -> Optional[str]:
+    """Extract plain parbox captions, especially image-frame descriptions."""
+    captions: List[str] = []
+    pattern = re.compile(r"\\parbox(?:\[[^\]]*\])?\s*\{", re.DOTALL)
+    for match in pattern.finditer(frame_text):
+        width_arg = _match_braces(frame_text, match.end() - 1)
+        if width_arg is None:
+            continue
+        width_end = _matching_brace_end(frame_text, match.end() - 1)
+        if width_end is None:
+            continue
+        content_open = width_end + 1
+        while content_open < len(frame_text) and frame_text[content_open].isspace():
+            content_open += 1
+        if content_open >= len(frame_text) or frame_text[content_open] != "{":
+            continue
+        content = _match_braces(frame_text, content_open)
+        if content is None:
+            continue
+        cleaned = _clean_latex_text(content)
+        if cleaned:
+            captions.append(cleaned)
+    if not captions:
+        return None
+    return "\n".join(dict.fromkeys(captions))
 
 
 def _clean_latex_text(text: str) -> str:
