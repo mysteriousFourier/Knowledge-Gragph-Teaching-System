@@ -283,6 +283,17 @@ def load_courseware_project(project_id: str) -> Optional[Dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def delete_courseware_project(project_id: str) -> bool:
+    safe_id = _safe_project_id(project_id)
+    if not safe_id:
+        return False
+    path = PROJECT_DIR / f"{safe_id}.json"
+    if not path.exists() or not path.is_file():
+        return False
+    path.unlink()
+    return True
+
+
 def _editable_slide_from_detail(slide: Dict[str, Any], asset_map: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     index = int(slide.get("index") or 1)
     content = str(slide.get("content") or "\n".join(slide.get("body_texts") or []) or "")

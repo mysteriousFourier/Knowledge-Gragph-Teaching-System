@@ -29,6 +29,7 @@ import {
   useExportCoursewarePptx,
   useCoursewareProject,
   useCoursewareProjects,
+  useDeleteCoursewareProject,
   useGeneratePptLectures,
   useGeneratePptTex,
   useGenerateSlideLectures,
@@ -248,6 +249,13 @@ function formatDuration(seconds?: number) {
   if (minutes <= 0) return `${rest} 秒`
   if (rest === 0) return `${minutes} 分钟`
   return `${minutes} 分 ${rest} 秒`
+}
+
+function coursewareProjectDedupeKey(project: CoursewareProject) {
+  const title = String(project.title || "").trim().toLowerCase()
+  const sourceIds = (project.source_node_ids || []).map((id) => String(id || "").trim()).filter(Boolean).sort().join("|")
+  const slideCount = project.slide_count ?? project.slides?.length ?? project.editable_model?.slides?.length ?? 0
+  return `${title || project.id}::${sourceIds}::${slideCount}`
 }
 
 function hydratePreviewImages(images: SlideImage[], imageBySourcePath: Map<string, SlideImage>) {
@@ -1055,12 +1063,29 @@ function TeacherPreparePage() {
   const generateUploadedPptLectures = useGeneratePptLectures()
   const generatePptTex = useGeneratePptTex()
   const generateSlideLectures = useGenerateSlideLectures()
+  const deleteCoursewareProject = useDeleteCoursewareProject()
   const saveChapter = useSaveChapter()
   const saveLecture = useSaveLecture()
   const savedCoursewareProject = useCoursewareProject(chapterId.startsWith("cw_") ? chapterId : "")
   const { data: coursewareProjectsData, isLoading: coursewareProjectsLoading } = useCoursewareProjects()
   const savedTeacherChapter = useTeacherChapter(chapterId && !chapterId.startsWith("cw_") ? chapterId : "")
-  const coursewareProjects = coursewareProjectsData?.projects || []
+  const allCoursewareProjects = coursewareProjectsData?.projects || []
+  const coursewareProjects = useMemo(() => {
+    const latestByKey = new Map<string, CoursewareProject>()
+    for (const project of allCoursewareProjects) {
+      const key = coursewareProjectDedupeKey(project)
+      const previous = latestByKey.get(key)
+      if (!previous || String(project.updated_at || "") > String(previous.updated_at || "")) {
+        latestByKey.set(key, project)
+      }
+    }
+    return Array.from(latestByKey.values()).sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")))
+  }, [allCoursewareProjects])
+  const duplicateCoursewareCount = Math.max(0, allCoursewareProjects.length - coursewareProjects.length)
+  const selectedCoursewareProject = allCoursewareProjects.find((project) => project.id === projectId || project.id === chapterId)
+  const selectedCoursewareProjectIsHidden = Boolean(
+    selectedCoursewareProject && !coursewareProjects.some((project) => project.id === selectedCoursewareProject.id),
+  )
   const { data: scopeTreeData, isLoading: scopeTreeLoading } = useGraphScopeTree()
   const { data: pptNodeContext, isLoading: pptContextLoading } = useGraphNodeContext(pptNodeIds)
   const { data: lectureNodeContext, isLoading: lectureContextLoading } = useGraphNodeContext(lectureNodeIds)
@@ -1728,6 +1753,22 @@ function TeacherPreparePage() {
     navigate({ to: "/teacher/prepare", search: { chapterId: nextProjectId, nodeId: "" } })
   }
 
+  const handleDeleteCoursewareProject = async () => {
+    const target = selectedCoursewareProject
+    if (!target) {
+      setStatus("请先选择要删除的已保存课件")
+      return
+    }
+    const label = target.title || target.id
+    if (!window.confirm(`删除已保存课件「${label}」？当前画布内容不会自动清空。`)) return
+    const result = await deleteCoursewareProject.mutateAsync(target.id)
+    if (projectId === target.id) setProjectId("")
+    if (chapterId === target.id) navigate({ to: "/teacher/prepare", search: { chapterId: "", nodeId: nodeId || "" }, replace: true })
+    await queryClient.invalidateQueries({ queryKey: ["courseware-projects"] })
+    await queryClient.removeQueries({ queryKey: ["courseware-project", target.id] })
+    setStatus(result.message || "课件项目已删除")
+  }
+
   const handleExportCoursewarePptx = async () => {
     if (!editableModel) return
     const title = preview?.chapter_title || chapterTitle || file?.name.replace(/\.[^.]+$/, "") || "未命名课件"
@@ -1936,27 +1977,46 @@ function TeacherPreparePage() {
             <FileText size={18} />
             课件设置
           </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,0.28fr)_minmax(180px,0.28fr)_120px_minmax(0,1fr)_auto_auto_auto]">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,0.28fr)_minmax(220px,0.32fr)_120px_minmax(0,1fr)_auto_auto_auto]">
             <input
               value={chapterTitle}
               onChange={(event) => setChapterTitle(event.target.value)}
               placeholder="可选：覆盖课件标题"
               className="w-full rounded-lg border bg-background px-3 py-2 text-sm"
             />
-            <select
-              value={chapterId.startsWith("cw_") ? chapterId : ""}
-              onChange={(event) => handleOpenCoursewareProject(event.target.value)}
-              disabled={coursewareProjectsLoading || !coursewareProjects.length}
-              className="w-full rounded-lg border bg-background px-3 py-2 text-sm disabled:opacity-50"
-              title="打开已保存课件项目"
-            >
-              <option value="">{coursewareProjectsLoading ? "加载课件项目..." : "打开已保存课件"}</option>
-              {coursewareProjects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.title || project.id}
-                </option>
-              ))}
-            </select>
+            <div className="min-w-0">
+              <div className="flex min-w-0 gap-2">
+                <select
+                  value={chapterId.startsWith("cw_") ? chapterId : ""}
+                  onChange={(event) => handleOpenCoursewareProject(event.target.value)}
+                  disabled={coursewareProjectsLoading || !coursewareProjects.length}
+                  className="min-w-0 flex-1 rounded-lg border bg-background px-3 py-2 text-sm disabled:opacity-50"
+                  title="打开已保存课件项目"
+                >
+                  <option value="">{coursewareProjectsLoading ? "加载课件项目..." : "打开已保存课件"}</option>
+                  {coursewareProjects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.title || project.id}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleDeleteCoursewareProject}
+                  disabled={!selectedCoursewareProject || deleteCoursewareProject.isPending}
+                  className="inline-flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg border bg-card text-muted-foreground hover:bg-destructive hover:text-destructive-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  title="删除选中的已保存课件"
+                  aria-label="删除选中的已保存课件"
+                >
+                  {deleteCoursewareProject.isPending ? <LoadingSpinner size={15} /> : <Trash2 size={15} />}
+                </button>
+              </div>
+              {duplicateCoursewareCount > 0 ? (
+                <div className="mt-1 truncate text-xs text-muted-foreground">
+                  已隐藏 {duplicateCoursewareCount} 条重复保存记录{selectedCoursewareProjectIsHidden ? "，当前打开项可直接删除" : ""}
+                </div>
+              ) : null}
+            </div>
             <label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
               预计讲课时长
               <input

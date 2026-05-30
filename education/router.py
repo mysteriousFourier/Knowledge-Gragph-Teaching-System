@@ -79,6 +79,7 @@ from KGTS.education.courseware_editor import (
     list_courseware_projects,
     load_courseware_project,
     save_courseware_project,
+    delete_courseware_project,
     serialize_editable_model_to_tex,
 )
 from KGTS.education.courseware_style import build_style_reference_guidance, build_style_reference_profile
@@ -130,7 +131,7 @@ async def health_check():
 
 @router.get("/config-status")
 async def config_status():
-    load_root_env(override=True)
+    load_root_env()
     api_key = os.getenv("DEEPSEEK_API_KEY", "")
     return {
         "success": True,
@@ -190,7 +191,7 @@ async def save_config(payload: dict[str, Any]):
 
 @router.post("/test-deepseek-config")
 async def test_deepseek_config():
-    load_root_env(override=True)
+    load_root_env()
     api_key = os.getenv("DEEPSEEK_API_KEY", "")
     model = get_deepseek_model("flash")
     base_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com")
@@ -210,7 +211,7 @@ async def test_deepseek_config():
     try:
         response = await client._call_deepseek(
             "请只回复 OK。",
-            max_tokens=8,
+            max_tokens=64,
             system_prompt="You are a connectivity test endpoint. Reply only OK.",
             read_timeout_seconds=20.0,
         )
@@ -692,7 +693,7 @@ async def _generate_slide_lectures_sync(request: GenerateSlideLecturesRequest):
         )
         if _nonempty_slide_lecture_count(slide_lectures) == 0 and any(_compact_slide_for_lecture(slide).strip() for slide in request.slides):
             message = _slide_lecture_error_summary(slide_lectures) or "AI 未返回任何逐页讲解内容，请检查 DeepSeek 配置、模型返回或稍后重试。"
-            return {
+            return _compact_slide_lecture_response({
                 "success": False,
                 "error": "slide_lecture_generation_empty",
                 "message": message,
@@ -709,7 +710,7 @@ async def _generate_slide_lectures_sync(request: GenerateSlideLecturesRequest):
                 "ppt_source_node_ids": request.ppt_source_node_ids or [],
                 "lecture_source_node_ids": source_node_ids,
                 "drift_report": _build_source_drift_report(request.ppt_source_node_ids or [], source_node_ids),
-            }
+            })
         if target_slide_indices:
             slide_lectures = _merge_existing_slide_lectures(
                 request.existing_slide_lectures,
@@ -736,7 +737,7 @@ async def _generate_slide_lectures_sync(request: GenerateSlideLecturesRequest):
             route_warnings.append(f"整体讲解计划构建失败，已使用逐页结果生成汇总：{e}")
         drift_report = _build_source_drift_report(request.ppt_source_node_ids or [], source_node_ids)
         warning = drift_report.get("warning") or "；".join(route_warnings) or None
-        return {
+        return _compact_slide_lecture_response({
             "success": True,
             "chapter_title": request.chapter_title or selected_context.get("chapter_title") or "图谱生成课件",
             "slide_count": len(request.slides),
@@ -766,7 +767,7 @@ async def _generate_slide_lectures_sync(request: GenerateSlideLecturesRequest):
             "regenerated_slide_indices": target_slide_indices or [int(slide.get("index")) for slide in request.slides if isinstance(slide.get("index"), int)],
             "model": client.model,
             "generated_at": datetime.now().isoformat(),
-        }
+        })
     except HTTPException:
         raise
     except ValueError as e:
@@ -980,6 +981,67 @@ def _compact_evidence_for_prompt(evidence: Any, limit: int = 4, content_chars: i
         compacted.append(next_item)
         if len(compacted) >= limit:
             break
+    return compacted
+
+
+def _compact_source_for_response(item: Any, content_chars: int = 180) -> Dict[str, Any]:
+    if not isinstance(item, dict):
+        return {}
+    allowed_keys = ("id", "label", "title", "name", "type", "source", "index", "content")
+    compacted = {key: item.get(key) for key in allowed_keys if item.get(key) is not None}
+    if "content" in compacted:
+        compacted["content"] = _truncate_for_prompt(compacted.get("content"), content_chars)
+    return compacted
+
+
+def _compact_learning_plan_for_response(plan: Any) -> Any:
+    if not isinstance(plan, dict):
+        return plan
+    compacted = {
+        key: plan.get(key)
+        for key in ("query", "task", "learner_intent", "learning_level", "allowed_concepts", "coverage")
+        if plan.get(key) is not None
+    }
+    compacted["evidence"] = [
+        item
+        for item in (_compact_source_for_response(source) for source in (plan.get("evidence") or [])[:6])
+        if item
+    ]
+    return compacted
+
+
+def _compact_slide_lecture_for_response(item: Any) -> Any:
+    if not isinstance(item, dict):
+        return item
+    compacted = {
+        key: value
+        for key, value in item.items()
+        if key not in {"retrieval_stats", "graphrag_context", "vector_hits"}
+    }
+    compacted["sources"] = [
+        source
+        for source in (_compact_source_for_response(source) for source in (item.get("sources") or [])[:6])
+        if source
+    ]
+    compacted["graph_paths"] = (item.get("graph_paths") or [])[:4]
+    compacted["formula_context"] = (item.get("formula_context") or [])[:4]
+    compacted["learning_plan"] = _compact_learning_plan_for_response(item.get("learning_plan"))
+    return compacted
+
+
+def _compact_slide_lectures_for_response(items: Any) -> List[Any]:
+    return [_compact_slide_lecture_for_response(item) for item in (items or [])]
+
+
+def _compact_slide_lecture_response(payload: Dict[str, Any]) -> Dict[str, Any]:
+    compacted = dict(payload)
+    compacted["slide_lectures"] = _compact_slide_lectures_for_response(payload.get("slide_lectures") or [])
+    compacted["learning_plan"] = _compact_learning_plan_for_response(payload.get("learning_plan"))
+    compacted.pop("graphrag_context", None)
+    compacted.pop("vector_hits", None)
+    compacted.pop("retrieval_stats", None)
+    compacted["graph_paths"] = (payload.get("graph_paths") or [])[:8]
+    compacted["formula_context"] = (payload.get("formula_context") or [])[:8]
     return compacted
 
 
@@ -2028,7 +2090,7 @@ async def upload_ppt(
         )
         if _nonempty_slide_lecture_count(slide_lectures) == 0 and any(_compact_slide_for_lecture(slide).strip() for slide in slide_details):
             message = _slide_lecture_error_summary(slide_lectures) or "AI 未返回任何逐页讲解内容，请检查 DeepSeek 配置、模型返回或稍后重试。"
-            return {
+            return _compact_slide_lecture_response({
                 "success": False,
                 "error": "slide_lecture_generation_empty",
                 "message": message,
@@ -2049,7 +2111,7 @@ async def upload_ppt(
                 "source_scope": source_scope,
                 "model": claude_client.model,
                 "generated_at": datetime.now().isoformat(),
-            }
+            })
         lecture_content = _merge_slide_lectures(slide_lectures)
         try:
             lecture_learning_plan = _build_ppt_learning_plan(
@@ -2075,7 +2137,7 @@ async def upload_ppt(
         lecture_formula_context = formula_context_for_text(chapter_content[:1800], limit=4)
         lecture_consistency_report = _safe_consistency_report(lecture_content, lecture_learning_plan, task="lecture")
 
-        return {
+        return _compact_slide_lecture_response({
             "success": True,
             "chapter_title": chapter_title,
             "slide_count": prompt_data["total_slides"],
@@ -2100,7 +2162,7 @@ async def upload_ppt(
             "style": style,
             "model": claude_client.model,
             "generated_at": datetime.now().isoformat(),
-        }
+        })
 
     except HTTPException:
         raise
@@ -2821,6 +2883,19 @@ async def load_courseware_project_route(project_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"课件项目读取失败: {str(e)}")
+
+
+@router.delete("/education/courseware/projects/{project_id}")
+async def delete_courseware_project_route(project_id: str):
+    try:
+        deleted = delete_courseware_project(project_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="课件项目不存在")
+        return {"success": True, "project_id": project_id, "message": "课件项目已删除"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"课件项目删除失败: {str(e)}")
 
 
 @router.post("/education/courseware/export-pptx")

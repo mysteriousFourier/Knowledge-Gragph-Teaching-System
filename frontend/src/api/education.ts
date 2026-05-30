@@ -268,6 +268,17 @@ export const useCoursewareProject = (projectId: string) => {
   })
 }
 
+export const useDeleteCoursewareProject = () => {
+  return useMutation({
+    mutationFn: (projectId: string) =>
+      educationClient
+        .delete<{ success: boolean; project_id: string; message?: string }>(
+          `/api/education/courseware/projects/${encodeURIComponent(projectId)}`,
+        )
+        .then((r) => r.data),
+  })
+}
+
 export const useExportCoursewarePptx = () => {
   return useMutation({
     mutationFn: (data: { title: string; editable_model: EditableSlideModel; source_node_ids?: string[] }) =>
@@ -306,7 +317,7 @@ export const useGenerateSlideLectures = () => {
         const job = await educationClient
           .get<{ success: boolean; status: string; result?: PptUploadResponse; error?: string }>(
             `/api/education/generate-slide-lectures/jobs/${encodeURIComponent(started.job_id)}`,
-            { timeout: 30000 },
+            { timeout: 120000 },
           )
           .then((r) => r.data)
         if (job.status === "completed" && job.result) return job.result

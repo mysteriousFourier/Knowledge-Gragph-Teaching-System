@@ -137,7 +137,7 @@ def _extract_deepseek_response_text(result: Dict[str, Any]) -> str:
         content = _message_content_to_text(message.get("content")).strip()
         if content:
             return content
-        for key in ("text", "output_text"):
+        for key in ("text", "output_text", "reasoning_content"):
             content = _message_content_to_text(message.get(key)).strip()
             if content:
                 return content
@@ -174,7 +174,7 @@ class DeepSeekAPIClient:
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
         if not str(api_key or "").strip():
-            load_root_env(override=True)
+            load_root_env()
         self.api_key = (api_key or os.getenv("DEEPSEEK_API_KEY", "")).strip()
         self.base_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
         self.model = (model or get_deepseek_model("flash")).strip() or DEFAULT_DEEPSEEK_FLASH_MODEL
