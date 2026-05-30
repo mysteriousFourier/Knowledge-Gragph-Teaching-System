@@ -258,11 +258,28 @@ server {
 
     client_max_body_size 32m;
 
+    location ~ /\.(?!well-known) {
+        return 404;
+    }
+
     location /assets/ {
         root /var/www/kgts;
         try_files $uri =404;
         access_log off;
         expires 1h;
+    }
+
+    location ~ ^/api/education/(generate-slide-lectures|upload-ppt|generate-ppt-tex|generate-lecture)$ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_connect_timeout 30s;
+        send_timeout 600s;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     location / {
@@ -289,6 +306,8 @@ curl -s http://127.0.0.1:8000/api/health
 curl -s http://127.0.0.1:8000/api/maintenance/graph/scope-tree | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; print(len(d["nodes"]), len(d["relationships"]))'
 curl -s http://127.0.0.1/api/health
 ```
+
+逐页讲解、PPT/TeX 生成和整章讲稿生成会等待外部模型返回，耗时可能超过 Nginx 默认 60 秒。上面的单独 `location` 把这些长任务接口的 `proxy_read_timeout` 提高到 600 秒，避免前端看到 `Request failed with status code 504`，而后端仍在继续生成。dotfile 规则用于让 `/.env` 这类扫描请求直接返回 404，避免被 SPA fallback 误判为有效路径。
 
 如果由 Nginx 直接服务前端静态资源，把构建产物复制到 Web 可读目录，避免 Nginx 无法遍历 `/home/azureuser`：
 

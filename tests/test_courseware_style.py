@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import sys
 import unittest
 import zipfile
@@ -19,6 +20,8 @@ from KGTS.education.router import (
     _merge_existing_slide_lectures,
     _nonempty_slide_lecture_count,
     _normalize_target_slide_indices,
+    _slide_lecture_read_timeout,
+    _slide_lecture_concurrency,
     _slide_lecture_error_summary,
 )
 from KGTS.models.education import GenerateSlideLecturesRequest
@@ -115,6 +118,34 @@ class CoursewareStyleTest(unittest.TestCase):
 
         self.assertEqual(request.target_duration_minutes, 15)
         self.assertEqual(request.speech_rate_cpm, 250)
+
+    def test_slide_lecture_concurrency_is_bounded(self):
+        old_value = os.environ.get("KGTS_SLIDE_LECTURE_CONCURRENCY")
+        try:
+            os.environ["KGTS_SLIDE_LECTURE_CONCURRENCY"] = "12"
+            self.assertEqual(_slide_lecture_concurrency(), 6)
+            os.environ["KGTS_SLIDE_LECTURE_CONCURRENCY"] = "0"
+            self.assertEqual(_slide_lecture_concurrency(), 1)
+            os.environ["KGTS_SLIDE_LECTURE_CONCURRENCY"] = "bad"
+            self.assertEqual(_slide_lecture_concurrency(), 3)
+        finally:
+            if old_value is None:
+                os.environ.pop("KGTS_SLIDE_LECTURE_CONCURRENCY", None)
+            else:
+                os.environ["KGTS_SLIDE_LECTURE_CONCURRENCY"] = old_value
+
+    def test_slide_lecture_timeout_can_be_disabled_for_experiments(self):
+        old_value = os.environ.get("KGTS_SLIDE_LECTURE_READ_TIMEOUT_SECONDS")
+        try:
+            os.environ["KGTS_SLIDE_LECTURE_READ_TIMEOUT_SECONDS"] = "0"
+            self.assertIsNone(_slide_lecture_read_timeout("initial"))
+            os.environ["KGTS_SLIDE_LECTURE_READ_TIMEOUT_SECONDS"] = "120"
+            self.assertEqual(_slide_lecture_read_timeout("initial"), 120)
+        finally:
+            if old_value is None:
+                os.environ.pop("KGTS_SLIDE_LECTURE_READ_TIMEOUT_SECONDS", None)
+            else:
+                os.environ["KGTS_SLIDE_LECTURE_READ_TIMEOUT_SECONDS"] = old_value
 
     def test_slide_lecture_pacing_allocates_total_character_budget(self):
         slides = [

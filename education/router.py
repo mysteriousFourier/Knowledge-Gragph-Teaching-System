@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -971,6 +972,40 @@ def _normalize_slide_lecture_speech_rate_cpm(value: Optional[int]) -> int:
     return max(80, min(rate, 800))
 
 
+def _slide_lecture_concurrency() -> int:
+    try:
+        concurrency = int(os.getenv("KGTS_SLIDE_LECTURE_CONCURRENCY", "3"))
+    except (TypeError, ValueError):
+        concurrency = 3
+    return max(1, min(concurrency, 6))
+
+
+def _optional_timeout_env(name: str, default: float | None) -> float | None:
+    text = str(os.getenv(name, "")).strip().lower()
+    if not text or text == "default":
+        return default
+    if text in {"0", "none", "off", "false"}:
+        return None
+    try:
+        return max(float(text), 1.0)
+    except ValueError:
+        return default
+
+
+def _slide_lecture_pacing_timeout() -> float | None:
+    return _optional_timeout_env("KGTS_SLIDE_LECTURE_PACING_TIMEOUT_SECONDS", 90.0)
+
+
+def _slide_lecture_read_timeout(phase: str) -> float | None:
+    if phase == "flash_fallback":
+        return _optional_timeout_env("KGTS_SLIDE_LECTURE_FLASH_READ_TIMEOUT_SECONDS", 60.0)
+    return _optional_timeout_env("KGTS_SLIDE_LECTURE_READ_TIMEOUT_SECONDS", 90.0)
+
+
+def _slide_lecture_completion_timeout() -> float | None:
+    return _optional_timeout_env("KGTS_SLIDE_LECTURE_COMPLETION_TIMEOUT_SECONDS", 60.0)
+
+
 def _count_speech_chars(text: str) -> int:
     return len(re.findall(r"[\u4e00-\u9fff]|[A-Za-z0-9]+", str(text or "")))
 
@@ -1214,7 +1249,7 @@ async def _build_slide_lecture_pacing_with_model(
             prompt,
             max_tokens=1600,
             system_prompt="你是课程讲稿节奏规划器。只返回可解析 JSON。",
-            read_timeout_seconds=45.0,
+            read_timeout_seconds=_slide_lecture_pacing_timeout(),
         )
         payload = json.loads(_strip_json_fence(response))
         planned = _apply_model_slide_lecture_allocations(base_pacing, payload)
@@ -2203,15 +2238,30 @@ Output only the final slide lecture script."""
             "learning_plan": learning_plan,
         })
 
+    async def run_items(
+        items: List[Dict[str, Any]],
+        item_client: DeepSeekAPIClient,
+        *,
+        phase: str,
+        attempt: int,
+    ) -> List[tuple[Dict[str, Any], Dict[str, Any]]]:
+        semaphore = asyncio.Semaphore(_slide_lecture_concurrency())
+
+        async def run_one(item: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
+            async with semaphore:
+                result = await _try_generate_slide_lecture_item(
+                    item_client,
+                    item,
+                    speech_rate_cpm=speech_rate_cpm,
+                    phase=phase,
+                    attempt=attempt,
+                )
+                return item, result
+
+        return await asyncio.gather(*(run_one(item) for item in items))
+
     failed_items: List[Dict[str, Any]] = []
-    for item in work_items:
-        result = await _try_generate_slide_lecture_item(
-            client,
-            item,
-            speech_rate_cpm=speech_rate_cpm,
-            phase="initial",
-            attempt=1,
-        )
+    for item, result in await run_items(work_items, client, phase="initial", attempt=1):
         if result.get("lecture"):
             results_by_index[int(item["slide"]["index"])] = result
         else:
@@ -2223,14 +2273,7 @@ Output only the final slide lecture script."""
             break
         retry_items = failed_items
         failed_items = []
-        for item in retry_items:
-            result = await _try_generate_slide_lecture_item(
-                client,
-                item,
-                speech_rate_cpm=speech_rate_cpm,
-                phase="pro_retry",
-                attempt=attempt,
-            )
+        for item, result in await run_items(retry_items, client, phase="pro_retry", attempt=attempt):
             if result.get("lecture"):
                 results_by_index[int(item["slide"]["index"])] = result
             else:
@@ -2241,14 +2284,7 @@ Output only the final slide lecture script."""
         flash_client = DeepSeekAPIClient(api_key=client.api_key, model=get_deepseek_model("flash"))
         retry_items = failed_items
         failed_items = []
-        for item in retry_items:
-            result = await _try_generate_slide_lecture_item(
-                flash_client,
-                item,
-                speech_rate_cpm=speech_rate_cpm,
-                phase="flash_fallback",
-                attempt=1,
-            )
+        for item, result in await run_items(retry_items, flash_client, phase="flash_fallback", attempt=1):
             if result.get("lecture"):
                 results_by_index[int(item["slide"]["index"])] = result
             else:
@@ -2329,7 +2365,7 @@ async def _try_generate_slide_lecture_item(
                 prompt + retry_note,
                 max_tokens=min(2600, max(800, int(pacing.get("target_chars") or 700) * 2)),
                 system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
-                read_timeout_seconds=45.0 if phase != "flash_fallback" else 35.0,
+                read_timeout_seconds=_slide_lecture_read_timeout(phase),
             ),
             expand_labels=True,
         )
@@ -2446,7 +2482,7 @@ async def _complete_short_slide_lecture_with_flash(
                 prompt,
                 max_tokens=min(1400, max(300, gap * 2)),
                 system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
-                read_timeout_seconds=30.0,
+                read_timeout_seconds=_slide_lecture_completion_timeout(),
             ),
             expand_labels=True,
         )
