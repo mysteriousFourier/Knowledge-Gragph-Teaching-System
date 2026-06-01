@@ -11,7 +11,8 @@ import { PlaybackProgress } from "@/components/common/PlaybackProgress"
 import { RichTextContent } from "@/components/renderers/RichTextContent"
 import { useLecturePlayback } from "@/hooks/useLecturePlayback"
 import { cn } from "@/lib/utils"
-import type { PptSlideDetail } from "@/types/education"
+import type { Chapter } from "@/types/chapter"
+import type { CoursewareAsset, EditableSlideObject, PptSlideDetail } from "@/types/education"
 
 export const Route = createFileRoute("/teacher/lecture")({
   component: LecturePage,
@@ -36,14 +37,15 @@ function LecturePage() {
   const selectedChapter = chapters.find((chapter) => chapter.id === selectedChapterId)
   const slideLectures = selectedChapter?.slide_lectures || []
   const lectureContent = isEditing ? draftContent : selectedChapter?.lecture_content || ""
+  const coursewareSlides = useMemo(() => buildLectureSlides(selectedChapter), [selectedChapter])
   const markdownSlides = lectureContent.trim() ? [lectureContent] : []
-  const isCoursewareChapter = !isEditing && !!selectedChapter?.ppt_slides?.length
-  const segmentCount = isCoursewareChapter ? selectedChapter?.ppt_slides?.length || 0 : markdownSlides.length
+  const isCoursewareChapter = !isEditing && coursewareSlides.length > 0
+  const segmentCount = isCoursewareChapter ? coursewareSlides.length : markdownSlides.length
   const playback = useLecturePlayback({
     segmentCount,
     getSegmentText: (segment) => {
       if (isCoursewareChapter) {
-        const slide = selectedChapter?.ppt_slides?.[segment]
+        const slide = coursewareSlides[segment]
         const lecture = slideLectures.find((item) => item.index === slide?.index && item.lecture?.trim())
         return lecture?.lecture || slide?.notes || slide?.content || slide?.raw_text || ""
       }
@@ -63,7 +65,7 @@ function LecturePage() {
     setSelectedChapterId((fromSearch || withLecture || chapters[0]).id)
   }, [chapterId, chapters, selectedChapterId])
 
-  const currentCoursewareSlide = selectedChapter?.ppt_slides?.[currentSlide]
+  const currentCoursewareSlide = coursewareSlides[currentSlide]
   const currentSlideLecture = useMemo(() => {
     if (!slideLectures.length || !currentCoursewareSlide) return undefined
     return slideLectures.find((item) => item.index === currentCoursewareSlide.index && item.lecture?.trim())
@@ -266,18 +268,24 @@ function LecturePage() {
                 <EmptyState title="暂无预览内容" description="请先在编辑模式输入授课文案。" icon={<BookOpen size={48} />} />
               )}
             </div>
-          ) : isCoursewareChapter && selectedChapter?.ppt_slides?.length ? (
+          ) : isCoursewareChapter && coursewareSlides.length ? (
             <>
               <PlaybackProgress progress={playback.progress} statusText={playback.statusText} />
-              <div className="space-y-0">
-                <div className="border-b p-5">
-                  {currentCoursewareSlide ? <PptSlidePreview slide={currentCoursewareSlide} /> : <EmptyState title="暂无页面" description="该课件缺少页面预览数据。" />}
+              <div className="grid gap-0 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
+                <div className="border-b p-4 xl:border-b-0 xl:border-r xl:p-5">
+                  {currentCoursewareSlide ? (
+                    <PptSlidePreview slide={currentCoursewareSlide} assetMap={selectedChapter.asset_map || selectedChapter.editable_model?.assets || {}} />
+                  ) : (
+                    <EmptyState title="暂无页面" description="该课件缺少页面预览数据。" />
+                  )}
                 </div>
-                <div className="p-5">
+                <div className="p-4 xl:p-5">
                   {currentSlideLecture?.lecture ? (
                     <RichTextContent content={currentSlideLecture.lecture} />
+                  ) : lectureContent.trim() ? (
+                    <RichTextContent content={lectureContent} />
                   ) : (
-                    <EmptyState title="暂无本页讲稿" description="该页没有保存逐页讲稿。" />
+                    <EmptyState title="暂无本页讲稿" description="左侧可先浏览课件展示页；逐页讲稿可在备课工作台生成。" />
                   )}
                   {(currentSlideLecture?.learning_plan || currentSlideLecture?.sources?.length) && (
                     <div className="mt-4">
@@ -298,7 +306,7 @@ function LecturePage() {
 
               <Pager
                 current={currentSlide}
-                total={selectedChapter.ppt_slides.length}
+                total={coursewareSlides.length}
                 onPrev={() => playback.setCurrentSegment((prev) => prev - 1)}
                 onNext={() => playback.setCurrentSegment((prev) => prev + 1)}
               />
@@ -363,48 +371,89 @@ function Pager({ current, total, onPrev, onNext }: { current: number; total: num
   )
 }
 
-function PptSlidePreview({ slide }: { slide: PptSlideDetail }) {
+function PptSlidePreview({ slide, assetMap = {} }: { slide: PptSlideDetail; assetMap?: Record<string, CoursewareAsset> }) {
+  const images = hydrateSlideImages(slide, assetMap)
+  const hasVisualContent = Boolean(slide.title || slide.content || slide.raw_text || images.length || slide.tables?.length)
+
   return (
     <div className="space-y-4">
-      <div>
-        <div className="text-xs font-medium uppercase text-muted-foreground">页面 {slide.index}</div>
-        <h3 className="mt-1 text-lg font-semibold">{slide.title || "无标题"}</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">页面 {slide.index}</div>
+        <div className="text-xs text-muted-foreground">{formatSlideKind(slide)}</div>
       </div>
-      <div>
-        <div className="text-xs font-medium uppercase text-muted-foreground">页面文本</div>
-        <div className="mt-2 min-h-40 overflow-x-auto rounded-lg bg-muted p-4 text-sm leading-relaxed">
-          <RichTextContent content={slide.content || slide.raw_text || "无正文文本"} />
+
+      <div className="mx-auto w-full max-w-5xl">
+        <div className="relative aspect-video overflow-hidden rounded-lg border bg-white text-slate-950 shadow-sm">
+          <div className="absolute inset-x-0 top-0 h-1 bg-primary" />
+          {hasVisualContent ? (
+            <div className="flex h-full flex-col p-[4.8%]">
+              <div className="min-h-[13%] border-b border-slate-200 pb-3">
+                <h3 className="text-balance text-[clamp(1.15rem,2.2vw,2.45rem)] font-semibold leading-tight tracking-normal text-slate-950">
+                  {slide.title || `第 ${slide.index} 页`}
+                </h3>
+              </div>
+              <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 pt-4 lg:grid-cols-[minmax(0,1fr)_minmax(210px,0.42fr)]">
+                <div className="min-h-0 overflow-hidden text-[clamp(0.82rem,1.12vw,1.08rem)] leading-relaxed text-slate-800">
+                  <RichTextContent content={slide.content || slide.raw_text || "无正文文本"} className="lecture-slide-prose" />
+                </div>
+                {(images.length > 0 || !!slide.tables?.length) && (
+                  <div className="min-h-0 space-y-3 overflow-hidden">
+                    <SlideImageStrip images={images} />
+                    <SlideTableStrip slide={slide} />
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-500">该页暂无可展示内容</div>
+          )}
         </div>
       </div>
+
       {slide.notes && (
-        <div>
-          <div className="text-xs font-medium uppercase text-muted-foreground">备注</div>
-          <div className="mt-2 overflow-x-auto rounded-lg bg-muted p-3 text-sm">
+        <section className="rounded-lg border bg-muted/35 p-3">
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">备注</div>
+          <div className="mt-2 text-sm">
             <RichTextContent content={slide.notes} />
           </div>
-        </div>
+        </section>
       )}
-      {!!slide.tables?.length && (
-        <div>
-          <div className="text-xs font-medium uppercase text-muted-foreground">表格</div>
-          <div className="mt-2 space-y-2">
-            {slide.tables.map((table, index) => (
-              <div key={index} className="overflow-x-auto rounded-lg border">
-                {table.rows.map((row, rowIndex) => (
-                  <div key={rowIndex} className="grid grid-flow-col auto-cols-fr border-b last:border-b-0">
-                    {row.map((cell, cellIndex) => (
-                      <div key={cellIndex} className="min-w-0 border-r px-2 py-1 text-sm last:border-r-0">
-                        <RichTextContent content={cell} inline />
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
+    </div>
+  )
+}
+
+function SlideImageStrip({ images }: { images: PptSlideDetail["images"] }) {
+  if (!images?.length) return null
+  return (
+    <div className="grid h-full max-h-[250px] gap-2">
+      {images.slice(0, 2).map((image, index) => (
+        <figure key={`${image.source_path || image.tex_ref || index}-${index}`} className="min-h-0 overflow-hidden rounded border border-slate-200 bg-slate-50 p-1.5">
+          {image.data_uri ? (
+            <img src={image.data_uri} alt={image.source_path || `课件图片 ${index + 1}`} className="h-full max-h-48 w-full object-contain" />
+          ) : (
+            <div className="flex h-24 items-center justify-center px-2 text-center text-xs text-slate-500">
+              {image.oversized ? "图片过大，未内嵌预览" : "图片无法预览"}
+            </div>
+          )}
+        </figure>
+      ))}
+    </div>
+  )
+}
+
+function SlideTableStrip({ slide }: { slide: PptSlideDetail }) {
+  if (!slide.tables?.length) return null
+  return (
+    <div className="max-h-44 overflow-hidden rounded border border-slate-200 bg-white text-[0.62rem] text-slate-700">
+      {slide.tables[0].rows.slice(0, 5).map((row, rowIndex) => (
+        <div key={rowIndex} className="grid grid-flow-col auto-cols-fr border-b border-slate-200 last:border-b-0">
+          {row.slice(0, 4).map((cell, cellIndex) => (
+            <div key={cellIndex} className="min-w-0 border-r border-slate-200 px-1.5 py-1 last:border-r-0">
+              <RichTextContent content={cell} inline />
+            </div>
+          ))}
         </div>
-      )}
-      <PptSlideImages slide={slide} />
+      ))}
     </div>
   )
 }
@@ -438,4 +487,181 @@ function PptSlideImages({ slide }: { slide: PptSlideDetail }) {
       </div>
     </div>
   )
+}
+
+function buildLectureSlides(chapter?: Chapter): PptSlideDetail[] {
+  if (!chapter) return []
+  if (chapter.ppt_slides?.length) return chapter.ppt_slides
+  const editableSlides = chapter.editable_model?.slides || []
+  if (editableSlides.length) {
+    const assetMap = { ...(chapter.asset_map || {}), ...(chapter.editable_model?.assets || {}) }
+    return editableSlides.map((slide, index) => slideFromEditableSlide(slide, index + 1, assetMap))
+  }
+  if (chapter.tex_content?.trim()) return parseTexSlides(chapter.tex_content)
+  return []
+}
+
+function slideFromEditableSlide(
+  slide: NonNullable<Chapter["editable_model"]>["slides"][number],
+  fallbackIndex: number,
+  assetMap: Record<string, CoursewareAsset>,
+): PptSlideDetail {
+  const objects = dedupeEditableObjects([...(slide.objects || []), ...(slide.items || [])])
+  const titleObject = objects.find((item) => item.type === "title" || item.role === "title")
+  const contentBlocks = objects
+    .filter((item) => item !== titleObject && item.type !== "image" && item.type !== "placeholder")
+    .map(formatEditableObject)
+    .filter(Boolean)
+  const imageObjects = objects.filter((item) => item.type === "image" || item.type === "placeholder")
+  const images = imageObjects.map((object) => imageFromEditableObject(object, assetMap))
+  const tables = objects.filter((item) => item.rows?.length).map((item) => ({ rows: item.rows || [] }))
+
+  return {
+    index: slide.index || fallbackIndex,
+    title: slide.title || titleObject?.text || titleObject?.title || `第 ${slide.index || fallbackIndex} 页`,
+    content: contentBlocks.join("\n\n"),
+    notes: slide.notes,
+    images,
+    image_count: images.length,
+    has_images: images.length > 0,
+    tables,
+    raw_text: contentBlocks.join("\n"),
+    source_tex: slide.source_tex,
+    source_body_tex: slide.source_body_tex,
+    layout: slide.layout,
+  }
+}
+
+function dedupeEditableObjects(objects: EditableSlideObject[]) {
+  const seen = new Set<string>()
+  return objects.filter((object, index) => {
+    const key = object.id || `${object.type}-${index}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function formatEditableObject(object: EditableSlideObject) {
+  if (object.type === "equation" || object.latex) return object.latex ? `$$\n${object.latex}\n$$` : ""
+  if (object.rows?.length) return object.rows.map((row) => row.join(" | ")).join("\n")
+  return String(object.text || object.rich_html || object.label || "").trim()
+}
+
+function imageFromEditableObject(object: EditableSlideObject, assetMap: Record<string, CoursewareAsset>): NonNullable<PptSlideDetail["images"]>[number] {
+  const asset = object.asset_id ? assetMap[object.asset_id] : undefined
+  return {
+    data_uri: asset?.data_uri || null,
+    width_emu: 0,
+    height_emu: 0,
+    left_emu: 0,
+    top_emu: 0,
+    source_path: object.source_path || asset?.source_path || asset?.name,
+    tex_ref: object.tex_ref || asset?.tex_ref,
+    width_ratio: object.width_ratio,
+    oversized: asset?.oversized,
+  }
+}
+
+function hydrateSlideImages(slide: PptSlideDetail, assetMap: Record<string, CoursewareAsset>) {
+  const assets = Object.values(assetMap)
+  return (slide.images || []).map((image) => {
+    if (image.data_uri) return image
+    const key = normalizeAssetKey(image.source_path || image.tex_ref || "")
+    const asset = assets.find((candidate) => {
+      const candidates = [candidate.id, candidate.source_path, candidate.tex_ref, candidate.name, ...(candidate.aliases || [])]
+      return candidates.some((item) => normalizeAssetKey(item || "") === key)
+    })
+    return asset?.data_uri ? { ...image, data_uri: asset.data_uri, oversized: asset.oversized } : image
+  })
+}
+
+function normalizeAssetKey(value: string) {
+  return (
+    String(value || "")
+      .replace(/\\/g, "/")
+      .split("/")
+      .pop()
+      ?.replace(/\.(png|jpe?g|gif|webp|bmp|svg)$/i, "")
+      .toLowerCase()
+      .trim() || ""
+  )
+}
+
+function parseTexSlides(texContent: string): PptSlideDetail[] {
+  const source = texContent.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
+  const frames = Array.from(source.matchAll(/\\begin\{frame\}([\s\S]*?)\\end\{frame\}/g))
+  if (!frames.length) {
+    const readable = texToReadableMarkdown(source)
+    return readable ? [{ index: 1, title: "TeX 课件", content: readable, raw_text: readable, source_tex: source }] : []
+  }
+  return frames.map((match, index) => {
+    const frameSource = match[0]
+    const body = match[1] || ""
+    const title = extractFrameTitle(frameSource) || `第 ${index + 1} 页`
+    const content = texToReadableMarkdown(removeFrameTitle(body))
+    return {
+      index: index + 1,
+      title,
+      content,
+      raw_text: content,
+      source_tex: frameSource,
+      source_body_tex: body,
+    }
+  })
+}
+
+function extractFrameTitle(frameSource: string) {
+  const beginTitle = /\\begin\{frame\}(?:\s*(?:<[^>]*>|\[[^\]]*\]))*\s*\{([^{}]*)\}/.exec(frameSource)
+  if (beginTitle?.[1]) return cleanTexInline(beginTitle[1])
+  const frameTitle = /\\frametitle(?:\s*(?:<[^>]*>|\[[^\]]*\]))*\s*\{([^{}]*)\}/.exec(frameSource)
+  if (frameTitle?.[1]) return cleanTexInline(frameTitle[1])
+  return ""
+}
+
+function removeFrameTitle(value: string) {
+  return value
+    .replace(/^\s*(?:<[^>]*>|\[[^\]]*\])*\s*\{[^{}]*\}/, "")
+    .replace(/\\frametitle(?:\s*(?:<[^>]*>|\[[^\]]*\]))*\s*\{[^{}]*\}/g, "")
+}
+
+function texToReadableMarkdown(value: string) {
+  return value
+    .replace(/%.*$/gm, "")
+    .replace(/\\begin\{(?:itemize|enumerate)\}/g, "\n")
+    .replace(/\\end\{(?:itemize|enumerate)\}/g, "\n")
+    .replace(/\\item(?:<[^>]*>)?(?:\[[^\]]*\])?/g, "\n- ")
+    .replace(/\\begin\{(?:equation|align|aligned|gather|split)\*?\}([\s\S]*?)\\end\{(?:equation|align|aligned|gather|split)\*?\}/g, (_match, formula) => `\n\n$$\n${formula.trim()}\n$$\n\n`)
+    .replace(/\\\[((?:.|\n)*?)\\\]/g, (_match, formula) => `\n\n$$\n${formula.trim()}\n$$\n\n`)
+    .replace(/\\\(((?:.|\n)*?)\\\)/g, (_match, formula) => `$${formula.trim()}$`)
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_match, formula) => `\n\n$$\n${formula.trim()}\n$$\n\n`)
+    .replace(/\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}/g, "\n\n[图：$1]\n\n")
+    .replace(/\\(textbf|textit|emph|alert)\{([^{}]*)\}/g, "$2")
+    .replace(/\\(small|footnotesize|scriptsize|large|Large|centering|pause)\b/g, "")
+    .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^{}]*)\})?/g, (_match, inner) => inner || "")
+    .replace(/[{}]/g, "")
+    .split("\n")
+    .map((line) => cleanTexInline(line).trim())
+    .filter(Boolean)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}
+
+function cleanTexInline(value: string) {
+  return String(value || "")
+    .replace(/\\&/g, "&")
+    .replace(/\\%/g, "%")
+    .replace(/\\_/g, "_")
+    .replace(/\\#/g, "#")
+    .replace(/~/g, " ")
+    .trim()
+}
+
+function formatSlideKind(slide: PptSlideDetail) {
+  const parts = []
+  if (slide.images?.length || slide.image_count) parts.push(`${slide.images?.length || slide.image_count} 图`)
+  if (slide.tables?.length) parts.push(`${slide.tables.length} 表`)
+  if (slide.source_tex) parts.push("TeX")
+  return parts.length ? parts.join(" · ") : "讲授展示"
 }
