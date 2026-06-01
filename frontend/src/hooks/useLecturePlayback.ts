@@ -40,6 +40,8 @@ export interface PlaybackProgress {
 const LONG_TEXT_THRESHOLD = 420
 const TTS_CHUNK_CHARS = 260
 const PREFETCH_AHEAD = 2
+const SILENT_WAV_DATA_URI =
+  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="
 const initialChunkInfo: ChunkInfo = {
   current: 0,
   total: 0,
@@ -135,6 +137,17 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     audioRef.current = null
   }, [])
 
+  const primeAudioForUserGesture = useCallback(() => {
+    const audio = new Audio(SILENT_WAV_DATA_URI)
+    audio.preload = "auto"
+    audioRef.current = audio
+    void audio.play().then(() => {
+      audio.pause()
+      audio.currentTime = 0
+    }).catch(() => undefined)
+    return audio
+  }, [])
+
   const setCurrentSegment = (next: number | ((current: number) => number)) => {
     pause()
     setCurrentSegmentState((current) => {
@@ -204,6 +217,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     setIsLoadingAudio(true)
     setChunkInfo({ ...initialChunkInfo, stage: "splitting" })
     stopAudio()
+    const gestureAudio = primeAudioForUserGesture()
 
     try {
       const splitResult = sourceText.length > LONG_TEXT_THRESHOLD
@@ -294,7 +308,8 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
         }
         markReady(chunkIndex, result)
         syncProgress({ lastCacheHit: !!result.cache_hit, stage: "synthesizing" })
-        const audio = new Audio(result.audio_url)
+        const audio = audioRef.current || gestureAudio || new Audio()
+        audio.src = result.audio_url
         audio.preload = "auto"
         audioRef.current = audio
         audio.onended = () => {
