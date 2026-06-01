@@ -24,7 +24,7 @@ LEGACY_CHAPTERS_FILE = BACKEND_DIR / "data" / "chapters.json"
 LEGACY_PROGRESS_FILE = BACKEND_DIR / "data" / "chapter_progress.json"
 CHAPTERS_FILE = RUNTIME_DIR / "chapters.json"
 PROGRESS_FILE = RUNTIME_DIR / "chapter_progress.json"
-TTS_COURSE_AUDIO_DIR = PROJECT_ROOT / ".runtime" / "tts" / "audio" / "course"
+TTS_COURSE_AUDIO_DIR = RUNTIME_DIR / "tts" / "audio" / "course"
 
 from KGTS.core.cli_dispatch import dispatch_tool
 from KGTS.core.memory_runtime import MemoryService
@@ -1065,6 +1065,7 @@ class ChapterStore:
             )
         )
         record = self._best_chapter_record(chapters, aliases)
+        previous_lecture_content = record.get("lecture_content")
         previous_slide_lectures = record.get("slide_lectures")
         record.update(
             {
@@ -1097,6 +1098,8 @@ class ChapterStore:
                 "updated_at": _now(),
             }
         )
+        if content is not None and content != previous_lecture_content:
+            _clear_tts_course_audio(resolved_id)
         if slide_lectures is not None and slide_lectures != previous_slide_lectures:
             _clear_tts_course_audio(resolved_id)
         self._store_chapter_record(chapters, resolved_id, record, aliases)
@@ -1138,8 +1141,11 @@ class ChapterStore:
             "created_at": _now(),
         }
         resolved_id = canonical_chapter_id(resolved_id, chapter.get("title")) or resolved_id
+        previous_lecture_content = chapter.get("lecture_content")
         chapter["lecture_content"] = lecture_content
         chapter["updated_at"] = _now()
+        if lecture_content != previous_lecture_content:
+            _clear_tts_course_audio(resolved_id)
         if graph_data is not None:
             chapter["graph_data"] = graph_data
         if source_type is not None:
