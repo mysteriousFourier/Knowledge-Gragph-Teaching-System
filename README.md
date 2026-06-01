@@ -148,15 +148,21 @@ python backend/start_all.py
 
 该模式会分别启动前端静态服务、教育 API、维护 API 和图谱后台页，但日常开发与部署优先使用根目录单端口模式。
 
-## Azure App Service 部署
+## 当前线上部署
 
-当前 `main` 分支包含 GitHub Actions 工作流：
+当前公开演示站点 `http://kgts.southeastasia.cloudapp.azure.com` 运行在 Azure for Students VM 上，服务由 VM 内的 Git 仓库、systemd 和 Nginx 管理。更新这个站点时，需要 SSH 到 VM，在 `/home/azureuser/kgts` 中拉取或应用代码、重建前端，并重启对应 systemd 服务。仅把提交推到 GitHub 不会更新当前公开演示站点。
+
+VM 更新流程见 [Azure for Students VM 部署](docs/azure-student-vm.md#更新部署)。如果改动涉及 TTS 后端、TTS 代理或语音配置，例如 `core/tts_*`、`education/tts_router.py`、`scripts/genie_tts_proxy_server.py` 或 `KGTS_TTS_*`，除了 `kgts.service` 外还要重启 `kgts-tts.service`。
+
+## Azure App Service 部署（可选，不是当前演示站点）
+
+`main` 分支保留 GitHub Actions 工作流：
 
 ```text
 .github/workflows/main_kgts-interactive-learning-system.yml
 ```
 
-该工作流会先构建 React 前端，再打包单端口 Python 应用，并通过 `azure/webapps-deploy` 把 zip 包部署到 Azure App Service。App Service 这条路径不是从本机用 Azure CLI 推送应用代码；本机 Azure CLI 只用于登录、创建或检查 Azure 资源。
+该工作流会先构建 React 前端，再打包单端口 Python 应用，并通过 `azure/webapps-deploy` 把 zip 包部署到 Azure App Service。它只适用于另行配置的 App Service，不是当前公开演示 VM 的更新路径。App Service 这条路径也不是从本机用 Azure CLI 推送应用代码；本机 Azure CLI 只用于登录、创建或检查 Azure 资源。
 
 App Service 部署包会排除运行时目录、模型权重、旧版向量索引目录、TTS 资产，以及 `data/seed/vector_index/` 预建 FAISS 索引，避免低资源实例冷启动和 zip 包体积被大文件拖垮。`data/seed/knowledge_graph.db` 仍作为轻量初始图谱种子随包发布；线上需要向量索引时会在 `.runtime/vector_index` 中按低内存配置使用缓存或 hashing fallback。
 

@@ -324,6 +324,8 @@ sudo chown -R www-data:www-data /var/www/kgts
 
 以后更新 main 分支：
 
+> 当前公开演示站点使用本节 VM 流程更新。不要把“推送到 GitHub”或 App Service GitHub Actions 当成这个 VM 的部署完成信号；VM 的 `/home/azureuser/kgts` 必须实际更新并重启服务。
+
 ```bash
 cd ~/kgts
 git fetch origin
@@ -344,6 +346,17 @@ curl -s http://127.0.0.1:8000/api/health
 curl -s http://127.0.0.1:8000/api/maintenance/graph/scope-tree | python3 -c 'import json,sys; d=json.load(sys.stdin)["data"]; print(len(d["nodes"]), len(d["relationships"]))'
 sudo journalctl -u kgts -n 80 --no-pager
 ```
+
+如果改动涉及 TTS 代理或语音路由，例如 `core/tts_text.py`、`core/tts_service.py`、`education/tts_router.py`、`scripts/genie_tts_proxy_server.py` 或 `.env` 中的 `KGTS_TTS_*`，还需要重启 TTS 代理：
+
+```bash
+sudo systemctl restart kgts-tts
+curl -s http://127.0.0.1:9880/status
+curl -s http://127.0.0.1:8000/api/tts/status
+sudo journalctl -u kgts-tts -n 80 --no-pager
+```
+
+如果 VM 工作区不是干净的，先查清本地修改来源，不要直接 `git reset --hard` 或覆盖项目目录。生产运行数据应留在 `.runtime/`，不要混进 Git 工作区；确实需要同步大文件时只按前文运行时数据同步方式处理。
 
 ## 可选：本地图结构向量检索
 
