@@ -1039,6 +1039,100 @@ def _compact_evidence_for_prompt(evidence: Any, limit: int = 4, content_chars: i
     return compacted
 
 
+def _slide_match_tokens(text: Any) -> set[str]:
+    value = str(text or "").lower()
+    tokens = {token for token in re.findall(r"[a-zA-Z0-9_]{2,}", value) if len(token) >= 2}
+    cjk_phrases = re.findall(r"[\u4e00-\u9fff]{2,}", value)
+    for phrase in cjk_phrases:
+        tokens.update(phrase[index : index + 2] for index in range(max(1, len(phrase) - 1)))
+    return {token for token in tokens if token not in _SLIDE_EVIDENCE_STOPWORDS}
+
+
+_SLIDE_EVIDENCE_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "this",
+    "that",
+    "from",
+    "into",
+    "slide",
+    "page",
+    "ppt",
+    "title",
+    "content",
+    "chapter",
+    "figure",
+    "table",
+    "equation",
+    "example",
+    "标题",
+    "内容",
+    "本页",
+    "课件",
+    "章节",
+}
+
+
+def _slide_evidence_score(item: Dict[str, Any], slide_text: str, slide_tokens: set[str]) -> int:
+    label = str(item.get("label") or item.get("title") or item.get("id") or "")
+    content = str(item.get("content") or "")
+    target = f"{label}\n{content}".lower()
+    score = sum(1 for token in slide_tokens if token in target)
+    label_tokens = _slide_match_tokens(label)
+    score += 3 * sum(1 for token in label_tokens if token in slide_text.lower())
+    for formula_id in re.findall(r"\b(?:Equation|Eq\.)\s+([A-Za-z]?\d+(?:\.\d+)*[a-z]?)\b|\(([A-Za-z]?\d+(?:\.\d+)*[a-z]?)\)", slide_text, flags=re.I):
+        value = next((part for part in formula_id if part), "")
+        if value and value.lower() in target:
+            score += 6
+    return score
+
+
+def _select_slide_evidence_for_prompt(
+    evidence: Any,
+    slide_text: str,
+    *,
+    limit: int = 4,
+    content_chars: int = 260,
+) -> List[Dict[str, Any]]:
+    items = [item for item in (evidence or []) if isinstance(item, dict)]
+    if not items:
+        return []
+    slide_tokens = _slide_match_tokens(slide_text)
+    if not slide_tokens:
+        return []
+    scored: List[tuple[int, int, Dict[str, Any]]] = []
+    for index, item in enumerate(items):
+        score = _slide_evidence_score(item, slide_text, slide_tokens)
+        if score <= 0:
+            continue
+        scored.append((score, -index, item))
+    scored.sort(reverse=True)
+    return _compact_evidence_for_prompt([item for _, _, item in scored], limit=limit, content_chars=content_chars)
+
+
+def _build_slide_transition_context(slides: List[Dict[str, Any]], slide_index: Any) -> str:
+    if not isinstance(slide_index, int):
+        return ""
+    ordered = [
+        slide
+        for slide in sorted(slides, key=lambda item: int(item.get("index") or 0))
+        if isinstance(slide, dict) and isinstance(slide.get("index"), int)
+    ]
+    position = next((idx for idx, slide in enumerate(ordered) if slide.get("index") == slide_index), -1)
+    if position < 0:
+        return ""
+    lines: List[str] = []
+    if position > 0:
+        previous_slide = ordered[position - 1]
+        lines.append(f"Previous slide: {_truncate_for_prompt(_compact_slide_for_lecture(previous_slide, max_chars=360), 360)}")
+    if position + 1 < len(ordered):
+        next_slide = ordered[position + 1]
+        lines.append(f"Next slide: {_truncate_for_prompt(_compact_slide_for_lecture(next_slide, max_chars=360), 360)}")
+    return "\n\n".join(lines)
+
+
 def _compact_source_for_response(item: Any, content_chars: int = 180) -> Dict[str, Any]:
     if not isinstance(item, dict):
         return {}
@@ -1918,6 +2012,9 @@ async def save_chapter(request: SaveChapterRequest):
             ppt_artifact=request.ppt_artifact,
             ppt_source_node_ids=request.ppt_source_node_ids,
             lecture_source_node_ids=request.lecture_source_node_ids,
+            lecture_target_duration_minutes=request.lecture_target_duration_minutes,
+            lecture_speech_rate_cpm=request.lecture_speech_rate_cpm,
+            lecture_pacing=request.lecture_pacing,
         )
         return {
             "success": True,
@@ -1993,6 +2090,9 @@ async def save_lecture(request: SaveLectureRequest):
             ppt_artifact=request.ppt_artifact,
             ppt_source_node_ids=request.ppt_source_node_ids,
             lecture_source_node_ids=request.lecture_source_node_ids,
+            lecture_target_duration_minutes=request.lecture_target_duration_minutes,
+            lecture_speech_rate_cpm=request.lecture_speech_rate_cpm,
+            lecture_pacing=request.lecture_pacing,
             learning_plan=learning_plan if isinstance(learning_plan, dict) else None,
             consistency_report=consistency_report if isinstance(consistency_report, dict) else None,
         )
@@ -2297,7 +2397,7 @@ async def _generate_per_slide_lectures(
         }
         slide_graphrag_context = None
         slide_graph_data = graph_data
-        slide_selected_evidence = _compact_evidence_for_prompt(selected_evidence, limit=4, content_chars=260)
+        slide_selected_evidence = _select_slide_evidence_for_prompt(selected_evidence, slide_text, limit=4, content_chars=260)
         if source_node_ids and not selected_evidence:
             try:
                 slide_graphrag_context = build_graphrag_context(
@@ -2306,8 +2406,9 @@ async def _generate_per_slide_lectures(
                     limit=4,
                 )
                 slide_graph_data = slide_graphrag_context.get("graph_data") or graph_data
-                slide_selected_evidence = _compact_evidence_for_prompt(
-                    evidence_from_rag(slide_graphrag_context.get("llm_context") or [], limit=4),
+                slide_selected_evidence = _select_slide_evidence_for_prompt(
+                    evidence_from_rag(slide_graphrag_context.get("llm_context") or [], limit=6),
+                    slide_text,
                     limit=4,
                     content_chars=260,
                 )
@@ -2357,20 +2458,25 @@ async def _generate_per_slide_lectures(
             except Exception:
                 sources = []
         prompt_evidence = _compact_evidence_for_prompt(learning_plan.get("evidence") or [], limit=4, content_chars=260)
-        graph_paths = ((slide_graphrag_context or {}).get("graph_paths") or graph_paths_for_evidence(slide_graph_data, prompt_evidence, limit=4))[:4]
+        prompt_evidence = _select_slide_evidence_for_prompt(prompt_evidence, slide_text, limit=4, content_chars=260)
+        graph_paths = graph_paths_for_evidence(slide_graph_data, prompt_evidence, limit=4)[:4]
         formula_context = ((slide_graphrag_context or {}).get("formula_context") or formula_context_for_text(slide_text, limit=4))[:4]
+        transition_context = _build_slide_transition_context(slide_details, slide.get("index"))
+        sources = prompt_evidence
 
         requirements = [
             *build_lecture_gc_dpg_requirements(style, slide_level=True),
-            "Use the selected graph subtree evidence first when it is provided, then use this slide's own text as the slide-specific anchor.",
+            "The current slide text is the main anchor. Use only graph/RAG evidence that directly matches this slide's title, wording, formulas, examples, or immediate transition need.",
+            "Do not mention graph entities that are not relevant to the current slide.",
             "Explain this slide in accessible classroom language.",
             "Add only the background needed to make the slide teachable; keep unsupported extensions bounded.",
             "Use the graph relation paths as the main teaching order when they are relevant.",
             "If formulas appear, explain the meaning of the main symbols.",
             "When the same symbol can mean different things elsewhere, explain only the meaning in this slide/chapter scope.",
             "If a formula is derived from earlier formulas, mention the immediate derivation dependency in teacher-friendly language.",
+            "Use the neighboring-slide context only to add one natural transition sentence when helpful; do not teach the previous or next slide here.",
             "Include 1-2 natural classroom questions when useful.",
-            "Output directly usable Markdown prose for this slide.",
+            "Output directly usable Markdown prose for this slide. Do not output analysis, reasoning, planning notes, entity selection notes, or comments about the prompt.",
         ]
         if pacing:
             target_chars = int(pacing.get("target_chars") or 0)
@@ -2407,6 +2513,9 @@ Current slide: {slide['index']}
 
 Slide content:
 {slide_text}
+
+Neighboring-slide context for continuity:
+{transition_context or "No neighboring-slide context."}
 
 Available graph/RAG evidence for this slide:
 {format_evidence(prompt_evidence)}
@@ -2577,6 +2686,8 @@ async def _try_generate_slide_lecture_item(
         lecture = clean_generated_lecture_output(lecture)
         if not lecture.strip():
             raise ValueError("AI 返回为空")
+        if _looks_like_reasoning_contaminated_lecture(lecture):
+            raise ValueError("AI 返回疑似思考过程而非逐页文案")
         return _finalize_slide_lecture_result(
             item,
             lecture=lecture,
@@ -2607,6 +2718,37 @@ def _generation_attempt_count(phase: str, attempt: int) -> int:
     if phase == "flash_fallback":
         return 5
     return max(1, attempt)
+
+
+def _looks_like_reasoning_contaminated_lecture(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return True
+    head = value[:1400]
+    reasoning_markers = [
+        r"\bI\s+need\s+to\b",
+        r"\bWe\s+need\s+to\b",
+        r"\bthe\s+user\s+(?:wants|asks|requested)\b",
+        r"\bI\s+should\b",
+        r"\bLet's\s+(?:craft|generate|answer|analyze)\b",
+        r"\bNeed\s+to\s+(?:craft|generate|answer|include)\b",
+        r"\bfinal\s+answer\b",
+        r"\bchain\s+of\s+thought\b",
+        r"\breasoning\b",
+        r"思考过程",
+        r"推理过程",
+        r"我需要先",
+        r"我会先",
+        r"先分析",
+    ]
+    marker_hits = sum(1 for pattern in reasoning_markers if re.search(pattern, head, flags=re.I))
+    ascii_words = re.findall(r"[A-Za-z]{3,}", head)
+    cjk_chars = re.findall(r"[\u4e00-\u9fff]", head)
+    if marker_hits >= 2:
+        return True
+    if marker_hits >= 1 and len(ascii_words) > max(40, len(cjk_chars) * 2):
+        return True
+    return False
 
 
 def _finalize_slide_lecture_result(
@@ -2694,6 +2836,8 @@ async def _complete_short_slide_lecture_with_flash(
         addition = clean_generated_lecture_output(addition)
         if not addition.strip():
             raise ValueError("flash 补全返回为空")
+        if _looks_like_reasoning_contaminated_lecture(addition):
+            raise ValueError("flash 补全返回疑似思考过程")
         lecture = f"{str(result.get('lecture') or '').rstrip()}\n\n{addition.strip()}"
         completed = _finalize_slide_lecture_result(
             item,
@@ -2927,6 +3071,9 @@ async def save_courseware_project_route(request: CoursewareProjectSaveRequest):
                 "tex_content": tex_content or "",
                 "ppt_artifact": request.ppt_artifact,
                 "source_node_ids": request.source_node_ids or [],
+                "lecture_target_duration_minutes": request.lecture_target_duration_minutes,
+                "lecture_speech_rate_cpm": request.lecture_speech_rate_cpm,
+                "lecture_pacing": request.lecture_pacing,
             }
         )
         return {"success": True, "project": record, "project_id": record["id"], "message": "课件项目保存成功"}

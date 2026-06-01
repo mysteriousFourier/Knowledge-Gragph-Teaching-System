@@ -16,6 +16,9 @@ export interface Chapter {
   ppt_artifact?: import("./education").PptArtifact
   ppt_source_node_ids?: string[]
   lecture_source_node_ids?: string[]
+  lecture_target_duration_minutes?: number
+  lecture_speech_rate_cpm?: number
+  lecture_pacing?: import("./education").SlideLecturePacingSummary
   created_at?: string | number
   updated_at?: string | number
   source?: string
@@ -50,6 +53,9 @@ export interface SaveChapterRequest {
   ppt_artifact?: import("./education").PptArtifact
   ppt_source_node_ids?: string[]
   lecture_source_node_ids?: string[]
+  lecture_target_duration_minutes?: number
+  lecture_speech_rate_cpm?: number
+  lecture_pacing?: import("./education").SlideLecturePacingSummary
 }
 
 export interface SaveLectureRequest {
@@ -69,4 +75,7 @@ export interface SaveLectureRequest {
   ppt_artifact?: import("./education").PptArtifact
   ppt_source_node_ids?: string[]
   lecture_source_node_ids?: string[]
+  lecture_target_duration_minutes?: number
+  lecture_speech_rate_cpm?: number
+  lecture_pacing?: import("./education").SlideLecturePacingSummary
 }

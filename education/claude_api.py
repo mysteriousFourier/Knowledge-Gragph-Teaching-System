@@ -137,7 +137,7 @@ def _extract_deepseek_response_text(result: Dict[str, Any]) -> str:
         content = _message_content_to_text(message.get("content")).strip()
         if content:
             return content
-        for key in ("text", "output_text", "reasoning_content"):
+        for key in ("text", "output_text"):
             content = _message_content_to_text(message.get(key)).strip()
             if content:
                 return content
@@ -149,7 +149,10 @@ def _extract_deepseek_response_text(result: Dict[str, Any]) -> str:
 
     finish_reason = str(choice.get("finish_reason") or "").strip() or "unknown"
     message_keys = ",".join(sorted(message.keys())) if isinstance(message, dict) else "none"
-    raise Exception(f"DeepSeek API 返回正文为空：finish_reason={finish_reason}, message_keys={message_keys}")
+    reasoning_note = ""
+    if isinstance(message, dict) and _message_content_to_text(message.get("reasoning_content")).strip():
+        reasoning_note = "；返回中只有 reasoning_content，已拒绝作为正文使用"
+    raise Exception(f"DeepSeek API 返回正文为空：finish_reason={finish_reason}, message_keys={message_keys}{reasoning_note}")
 
 
 def _format_graphrag_context_for_prompt(graphrag_context: Dict[str, Any]) -> str:

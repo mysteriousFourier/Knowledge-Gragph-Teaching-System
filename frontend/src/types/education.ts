@@ -336,6 +336,9 @@ export interface CoursewareProject {
   tex_content?: string
   ppt_artifact?: PptArtifact
   source_node_ids?: string[]
+  lecture_target_duration_minutes?: number
+  lecture_speech_rate_cpm?: number
+  lecture_pacing?: SlideLecturePacingSummary
   slide_count?: number
   created_at?: string
   updated_at?: string

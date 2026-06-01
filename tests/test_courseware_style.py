@@ -17,9 +17,12 @@ from KGTS.education.kg_constraints import clean_generated_lecture_output
 from KGTS.education.router import (
     _apply_model_slide_lecture_allocations,
     _build_slide_lecture_pacing,
+    _build_slide_transition_context,
+    _looks_like_reasoning_contaminated_lecture,
     _merge_existing_slide_lectures,
     _nonempty_slide_lecture_count,
     _normalize_target_slide_indices,
+    _select_slide_evidence_for_prompt,
     _slide_lecture_read_timeout,
     _slide_lecture_concurrency,
     _slide_lecture_error_summary,
@@ -246,6 +249,22 @@ class CoursewareStyleTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "finish_reason=stop"):
             _extract_deepseek_response_text({"choices": [{"finish_reason": "stop", "message": {"content": ""}}]})
 
+    def test_deepseek_reasoning_content_is_not_used_as_text(self):
+        with self.assertRaisesRegex(Exception, "reasoning_content"):
+            _extract_deepseek_response_text(
+                {
+                    "choices": [
+                        {
+                            "finish_reason": "length",
+                            "message": {
+                                "content": "",
+                                "reasoning_content": "我需要先分析课件结构，然后生成逐页讲稿。",
+                            },
+                        }
+                    ]
+                }
+            )
+
     def test_deepseek_content_list_is_extracted(self):
         text = _extract_deepseek_response_text(
             {"choices": [{"message": {"content": [{"type": "text", "text": "有效讲稿"}]}}]}
@@ -275,6 +294,50 @@ class CoursewareStyleTest(unittest.TestCase):
         raw = "最终文案: 这是一段有效讲解。"
 
         self.assertEqual(clean_generated_lecture_output(raw), "这是一段有效讲解。")
+
+    def test_clean_lecture_output_returns_empty_for_reasoning_only(self):
+        raw = "思考过程：\n我需要先分析图谱并规划讲稿。"
+
+        self.assertEqual(clean_generated_lecture_output(raw), "")
+
+    def test_clean_lecture_output_returns_empty_for_english_reasoning_only(self):
+        raw = "Okay, I need to craft the lecture script for slide 3. The user wants concise Chinese output."
+
+        self.assertEqual(clean_generated_lecture_output(raw), "")
+
+    def test_reasoning_contaminated_slide_lecture_is_rejected(self):
+        text = "Okay, I need to craft this slide. First analyze evidence.\n\n现在我们来看这一页，它主要说明选择响应。"
+
+        self.assertTrue(_looks_like_reasoning_contaminated_lecture(text))
+
+    def test_slide_evidence_filter_keeps_only_current_slide_matches(self):
+        evidence = [
+            {"id": "price", "label": "Price equation", "content": "Covariance between fitness and trait value."},
+            {"id": "drift", "label": "Genetic drift", "content": "Random sampling changes allele frequencies."},
+            {"id": "maize", "label": "Maize yield", "content": "A later case study unrelated to the current slide."},
+        ]
+
+        selected = _select_slide_evidence_for_prompt(
+            evidence,
+            "标题: Price equation\nThis slide explains covariance and trait value.",
+            limit=4,
+        )
+
+        self.assertEqual([item["id"] for item in selected], ["price"])
+
+    def test_slide_transition_context_includes_neighbors(self):
+        slides = [
+            {"index": 1, "title": "Intro", "content": "Opening question"},
+            {"index": 2, "title": "Equation", "content": "Main formula"},
+            {"index": 3, "title": "Example", "content": "Worked example"},
+        ]
+
+        context = _build_slide_transition_context(slides, 2)
+
+        self.assertIn("Previous slide", context)
+        self.assertIn("Intro", context)
+        self.assertIn("Next slide", context)
+        self.assertIn("Example", context)
 
 
 if __name__ == "__main__":

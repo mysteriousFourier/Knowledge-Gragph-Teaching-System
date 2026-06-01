@@ -1037,6 +1037,7 @@ function TeacherPreparePage() {
   const [file, setFile] = useState<File | null>(null)
   const [style, setStyle] = useState("引导式教学")
   const [chapterTitle, setChapterTitle] = useState("")
+  const [durationDraftMinutes, setDurationDraftMinutes] = useState(DEFAULT_LECTURE_DURATION_MINUTES)
   const [targetDurationMinutes, setTargetDurationMinutes] = useState(DEFAULT_LECTURE_DURATION_MINUTES)
   const [preview, setPreview] = useState<PptPreviewResponse | null>(null)
   const [editableModel, setEditableModel] = useState<EditableSlideModel | null>(null)
@@ -1117,6 +1118,7 @@ function TeacherPreparePage() {
   const isGeneratingPpt = generatePptTex.isPending || previewPpt.isPending || previewTex.isPending
   const isGeneratingLectures = isGeneratingSlideLecturesBatch || generateSlideLectures.isPending || generateUploadedPptLectures.isPending
   const hasGeneratedSlideLectures = useMemo(() => slideLectures.some(hasUsableSlideLecture), [slideLectures])
+  const durationDraftChanged = durationDraftMinutes !== targetDurationMinutes
   const selectedLectureError = selectedLecture?.error?.trim() || ""
   const lectureStatusText = hasUsableSlideLecture(selectedLecture)
     ? "已生成"
@@ -1234,6 +1236,7 @@ function TeacherPreparePage() {
       setSlideLectures(chapter.slide_lectures || [])
       setLectureNodeIds(chapter.lecture_source_node_ids || chapter.source_node_ids || [])
       setPptNodeIds(chapter.ppt_source_node_ids || chapter.source_node_ids || [])
+      restoreLectureTiming(chapter)
     }
   }, [chapterId, loadedRecordId, savedTeacherChapter.data?.chapter])
 
@@ -1288,7 +1291,84 @@ function TeacherPreparePage() {
     setSlideLectures([])
     setLectureSourceScope(null)
     setDriftReport(null)
+    restoreLectureTiming(project)
     setStatus(`已恢复保存的课件：${project.title || project.id}`)
+  }
+
+  const restoreLectureTiming = (record: {
+    lecture_target_duration_minutes?: number
+    lecture_speech_rate_cpm?: number
+    lecture_pacing?: { target_duration_minutes?: number }
+  }) => {
+    const restoredDuration = clampLectureDurationMinutes(
+      Number(record.lecture_target_duration_minutes ?? record.lecture_pacing?.target_duration_minutes ?? DEFAULT_LECTURE_DURATION_MINUTES),
+    )
+    setTargetDurationMinutes(restoredDuration)
+    setDurationDraftMinutes(restoredDuration)
+  }
+
+  const currentLecturePacingForSave = () => ({
+    target_duration_minutes: targetDurationMinutes,
+    speech_rate_cpm: DEFAULT_SPEECH_RATE_CPM,
+    total_target_chars: totalTargetChars,
+    estimated_chars: generatedLectureChars,
+    estimated_duration_seconds: generatedLectureSeconds,
+  })
+
+  const persistLectureTiming = async (duration: number, options: { clearLectures?: boolean } = {}) => {
+    if (!preview || !chapterId || chapterId.startsWith("cw_")) return false
+    const existingChapter = savedTeacherChapter.data?.chapter
+    if (!existingChapter) return false
+    const title = preview.chapter_title || chapterTitle || existingChapter.title || "未命名PPT"
+    const saveSourceNodeIds = lectureNodeIds.length ? lectureNodeIds : pptNodeIds
+    const saveSourceScope = lectureSourceScope || pptSourceScope || (lectureNodeContext?.success ? lectureNodeContext.scope : existingChapter.source_scope)
+    await saveChapter.mutateAsync({
+      chapter_id: existingChapter.id || chapterId,
+      title,
+      content: preview.full_text || existingChapter.content,
+      source_type: existingChapter.source_type || (mode === "graph" ? "graph_ppt_tex" : "courseware"),
+      source_node_ids: saveSourceNodeIds.length ? saveSourceNodeIds : existingChapter.source_node_ids,
+      source_scope: saveSourceScope,
+      ppt_slides: preview.slides,
+      slide_lectures: options.clearLectures ? [] : slideLectures,
+      tex_content: texContent || existingChapter.tex_content,
+      editable_model: currentEditableModelForSave(title) || existingChapter.editable_model,
+      asset_map: Object.keys(mergedAssetMap).length ? mergedAssetMap : existingChapter.asset_map,
+      ppt_artifact: pptArtifact || existingChapter.ppt_artifact,
+      ppt_source_node_ids: pptNodeIds.length ? pptNodeIds : existingChapter.ppt_source_node_ids,
+      lecture_source_node_ids: saveSourceNodeIds.length ? saveSourceNodeIds : existingChapter.lecture_source_node_ids,
+      lecture_target_duration_minutes: duration,
+      lecture_speech_rate_cpm: DEFAULT_SPEECH_RATE_CPM,
+      lecture_pacing: {
+        ...currentLecturePacingForSave(),
+        target_duration_minutes: duration,
+        total_target_chars: Math.round(duration * DEFAULT_SPEECH_RATE_CPM),
+      },
+    })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["teacher-chapter", existingChapter.id || chapterId] }),
+      queryClient.invalidateQueries({ queryKey: ["teacher-chapters"] }),
+      queryClient.invalidateQueries({ queryKey: ["student-chapters"] }),
+    ])
+    return true
+  }
+
+  const handleConfirmLectureDuration = async () => {
+    const nextDuration = clampLectureDurationMinutes(durationDraftMinutes)
+    const changed = nextDuration !== targetDurationMinutes
+    setDurationDraftMinutes(nextDuration)
+    setTargetDurationMinutes(nextDuration)
+    if (changed) resetGeneratedLectures()
+    try {
+      const persisted = await persistLectureTiming(nextDuration, { clearLectures: changed })
+      setStatus(
+        persisted
+          ? `已确认并保存讲解时长：${nextDuration} 分钟。下次打开该课程会继续使用该时长。`
+          : `已确认讲解时长：${nextDuration} 分钟。保存为课程后会持久化。`,
+      )
+    } catch (error) {
+      setStatus(`讲解时长已在当前页面确认，但保存失败：${errorMessage(error)}`)
+    }
   }
 
   const handleGeneratePptTex = async () => {
@@ -1757,6 +1837,9 @@ function TeacherPreparePage() {
       tex_content: texContent || modelForSave.source_tex || undefined,
       ppt_artifact: pptArtifact || undefined,
       source_node_ids: pptNodeIds,
+      lecture_target_duration_minutes: targetDurationMinutes,
+      lecture_speech_rate_cpm: DEFAULT_SPEECH_RATE_CPM,
+      lecture_pacing: currentLecturePacingForSave(),
     })
     setProjectId(result.project_id)
     navigate({ to: "/teacher/prepare", search: { chapterId: result.project_id, nodeId: "" }, replace: true })
@@ -1824,6 +1907,9 @@ function TeacherPreparePage() {
       ppt_artifact: pptArtifact || undefined,
       ppt_source_node_ids: pptNodeIds.length ? pptNodeIds : undefined,
       lecture_source_node_ids: saveSourceNodeIds.length ? saveSourceNodeIds : undefined,
+      lecture_target_duration_minutes: targetDurationMinutes,
+      lecture_speech_rate_cpm: DEFAULT_SPEECH_RATE_CPM,
+      lecture_pacing: currentLecturePacingForSave(),
     })
     const savedChapterId = chapterResult.chapter?.id || chapterResult.chapter_id || chapterId
     await saveLecture.mutateAsync({
@@ -1840,6 +1926,9 @@ function TeacherPreparePage() {
       ppt_artifact: pptArtifact || undefined,
       ppt_source_node_ids: pptNodeIds.length ? pptNodeIds : undefined,
       lecture_source_node_ids: saveSourceNodeIds.length ? saveSourceNodeIds : undefined,
+      lecture_target_duration_minutes: targetDurationMinutes,
+      lecture_speech_rate_cpm: DEFAULT_SPEECH_RATE_CPM,
+      lecture_pacing: currentLecturePacingForSave(),
     })
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["teacher-chapters"] }),
@@ -1994,7 +2083,7 @@ function TeacherPreparePage() {
             <FileText size={18} />
             课件设置
           </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,0.28fr)_minmax(220px,0.32fr)_120px_minmax(0,1fr)_auto_auto_auto]">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(180px,0.26fr)_minmax(220px,0.3fr)_minmax(190px,0.22fr)_minmax(0,1fr)_auto_auto_auto]">
             <input
               value={chapterTitle}
               onChange={(event) => setChapterTitle(event.target.value)}
@@ -2034,18 +2123,37 @@ function TeacherPreparePage() {
                 </div>
               ) : null}
             </div>
-            <label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
-              预计讲课时长
-              <input
-                type="number"
-                min={1}
-                max={180}
-                step={1}
-                value={targetDurationMinutes}
-                onChange={(event) => setTargetDurationMinutes(clampLectureDurationMinutes(Number(event.target.value)))}
-                className="w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground"
-              />
-            </label>
+            <div className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
+              <span>预计讲课时长</span>
+              <div className="flex min-w-0 gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={180}
+                  step={1}
+                  value={durationDraftMinutes}
+                  onChange={(event) => setDurationDraftMinutes(clampLectureDurationMinutes(Number(event.target.value)))}
+                  className={cn(
+                    "min-w-0 flex-1 rounded-lg border bg-background px-3 py-2 text-sm text-foreground",
+                    durationDraftChanged && "border-amber-500 focus:border-amber-600",
+                  )}
+                  title="修改后需要点击确认，逐页生成才会使用新时长"
+                />
+                <button
+                  type="button"
+                  onClick={handleConfirmLectureDuration}
+                  disabled={!preview || saveChapter.isPending}
+                  className="inline-flex h-[38px] shrink-0 items-center justify-center gap-1.5 rounded-lg border bg-card px-2.5 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                  title="确认并持久化讲解时长"
+                >
+                  {saveChapter.isPending ? <LoadingSpinner size={14} /> : <CheckCircle2 size={14} />}
+                  确认
+                </button>
+              </div>
+              <span className={cn("truncate", durationDraftChanged ? "text-amber-600" : "text-muted-foreground")}>
+                {durationDraftChanged ? `未确认，生成仍按 ${targetDurationMinutes} 分钟` : `已确认 ${targetDurationMinutes} 分钟`}
+              </span>
+            </div>
             <textarea
               value={teacherGuidance}
               onChange={(event) => setTeacherGuidance(event.target.value)}

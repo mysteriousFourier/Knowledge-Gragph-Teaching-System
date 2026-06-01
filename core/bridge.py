@@ -1029,6 +1029,9 @@ class ChapterStore:
         ppt_artifact: Optional[Dict[str, Any]] = None,
         ppt_source_node_ids: Optional[List[str]] = None,
         lecture_source_node_ids: Optional[List[str]] = None,
+        lecture_target_duration_minutes: Optional[float] = None,
+        lecture_speech_rate_cpm: Optional[int] = None,
+        lecture_pacing: Optional[Dict[str, Any]] = None,
         sync_backend: bool = True,
     ) -> Dict[str, Any]:
         chapters = self._load_chapters()
@@ -1066,6 +1069,9 @@ class ChapterStore:
                 "ppt_artifact": ppt_artifact if ppt_artifact is not None else record.get("ppt_artifact"),
                 "ppt_source_node_ids": ppt_source_node_ids if ppt_source_node_ids is not None else record.get("ppt_source_node_ids"),
                 "lecture_source_node_ids": lecture_source_node_ids if lecture_source_node_ids is not None else record.get("lecture_source_node_ids"),
+                "lecture_target_duration_minutes": lecture_target_duration_minutes if lecture_target_duration_minutes is not None else record.get("lecture_target_duration_minutes"),
+                "lecture_speech_rate_cpm": lecture_speech_rate_cpm if lecture_speech_rate_cpm is not None else record.get("lecture_speech_rate_cpm"),
+                "lecture_pacing": lecture_pacing if lecture_pacing is not None else record.get("lecture_pacing"),
                 "created_at": record.get("created_at") or _now(),
                 "updated_at": _now(),
             }
@@ -1095,6 +1101,9 @@ class ChapterStore:
         ppt_artifact: Optional[Dict[str, Any]] = None,
         ppt_source_node_ids: Optional[List[str]] = None,
         lecture_source_node_ids: Optional[List[str]] = None,
+        lecture_target_duration_minutes: Optional[float] = None,
+        lecture_speech_rate_cpm: Optional[int] = None,
+        lecture_pacing: Optional[Dict[str, Any]] = None,
         learning_plan: Optional[Dict[str, Any]] = None,
         consistency_report: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -1132,6 +1141,12 @@ class ChapterStore:
             chapter["ppt_source_node_ids"] = ppt_source_node_ids
         if lecture_source_node_ids is not None:
             chapter["lecture_source_node_ids"] = lecture_source_node_ids
+        if lecture_target_duration_minutes is not None:
+            chapter["lecture_target_duration_minutes"] = lecture_target_duration_minutes
+        if lecture_speech_rate_cpm is not None:
+            chapter["lecture_speech_rate_cpm"] = lecture_speech_rate_cpm
+        if lecture_pacing is not None:
+            chapter["lecture_pacing"] = lecture_pacing
         if learning_plan is not None:
             chapter["lecture_learning_plan"] = learning_plan
         if consistency_report is not None:
@@ -1152,6 +1167,9 @@ class ChapterStore:
             ppt_artifact=chapter.get("ppt_artifact"),
             ppt_source_node_ids=chapter.get("ppt_source_node_ids"),
             lecture_source_node_ids=chapter.get("lecture_source_node_ids"),
+            lecture_target_duration_minutes=chapter.get("lecture_target_duration_minutes"),
+            lecture_speech_rate_cpm=chapter.get("lecture_speech_rate_cpm"),
+            lecture_pacing=chapter.get("lecture_pacing"),
             sync_backend=False,
         )
         saved["lecture_content"] = lecture_content
@@ -1172,6 +1190,9 @@ class ChapterStore:
         saved["ppt_artifact"] = chapter.get("ppt_artifact", saved.get("ppt_artifact"))
         saved["ppt_source_node_ids"] = chapter.get("ppt_source_node_ids", saved.get("ppt_source_node_ids"))
         saved["lecture_source_node_ids"] = chapter.get("lecture_source_node_ids", saved.get("lecture_source_node_ids"))
+        saved["lecture_target_duration_minutes"] = chapter.get("lecture_target_duration_minutes", saved.get("lecture_target_duration_minutes"))
+        saved["lecture_speech_rate_cpm"] = chapter.get("lecture_speech_rate_cpm", saved.get("lecture_speech_rate_cpm"))
+        saved["lecture_pacing"] = chapter.get("lecture_pacing", saved.get("lecture_pacing"))
         chapters = self._load_chapters()
         aliases = self._chapter_alias_keys(chapters, chapter_id, saved.get("title"))
         self._store_chapter_record(chapters, saved["id"], saved, aliases)

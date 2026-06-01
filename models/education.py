@@ -45,6 +45,9 @@ class CoursewareProjectSaveRequest(BaseModel):
     tex_content: Optional[str] = Field(None, description="Serialized TeX source")
     ppt_artifact: Optional[Dict[str, Any]] = Field(None, description="Export artifact metadata")
     source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs associated with this project")
+    lecture_target_duration_minutes: Optional[float] = Field(None, ge=0.1, le=180, description="Persisted target duration for slide lectures")
+    lecture_speech_rate_cpm: Optional[int] = Field(None, ge=80, le=800, description="Persisted speech rate for slide lectures")
+    lecture_pacing: Optional[Dict[str, Any]] = Field(None, description="Persisted lecture pacing summary")
 
 
 class CoursewareExportPptxRequest(BaseModel):
@@ -152,6 +155,9 @@ class SaveChapterRequest(BaseModel):
     ppt_artifact: Optional[Dict[str, Any]] = Field(None, description="Generated PPT/TeX artifact metadata")
     ppt_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate PPT/TeX")
     lecture_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate slide lectures")
+    lecture_target_duration_minutes: Optional[float] = Field(None, ge=0.1, le=180, description="Persisted target duration for slide lectures")
+    lecture_speech_rate_cpm: Optional[int] = Field(None, ge=80, le=800, description="Persisted speech rate for slide lectures")
+    lecture_pacing: Optional[Dict[str, Any]] = Field(None, description="Persisted lecture pacing summary")
 
 
 class SaveLectureRequest(BaseModel):
@@ -171,6 +177,9 @@ class SaveLectureRequest(BaseModel):
     ppt_artifact: Optional[Dict[str, Any]] = Field(None, description="Generated PPT/TeX artifact metadata")
     ppt_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate PPT/TeX")
     lecture_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate slide lectures")
+    lecture_target_duration_minutes: Optional[float] = Field(None, ge=0.1, le=180, description="Persisted target duration for slide lectures")
+    lecture_speech_rate_cpm: Optional[int] = Field(None, ge=80, le=800, description="Persisted speech rate for slide lectures")
+    lecture_pacing: Optional[Dict[str, Any]] = Field(None, description="Persisted lecture pacing summary")
 
 
 class GenerateExercisesRequest(BaseModel):

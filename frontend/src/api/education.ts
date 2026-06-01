@@ -236,6 +236,9 @@ export const useSaveCoursewareProject = () => {
       tex_content?: string
       ppt_artifact?: unknown
       source_node_ids?: string[]
+      lecture_target_duration_minutes?: number
+      lecture_speech_rate_cpm?: number
+      lecture_pacing?: unknown
     }) =>
       educationClient
         .post<{ success: boolean; project_id: string; project: CoursewareProject; message?: string }>(

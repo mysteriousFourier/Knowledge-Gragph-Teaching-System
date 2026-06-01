@@ -740,6 +740,7 @@ def clean_generated_lecture_output(text: str) -> str:
     """Remove model-internal reasoning and legacy wrappers from lecture text."""
     cleaned = str(text or "")
     original = cleaned
+    had_internal_wrapper = bool(re.search(r"(?is)<(?:think|reasoning)\b[^>]*>", cleaned))
     cleaned = re.sub(r"(?is)<think\b[^>]*>.*?</think>", "", cleaned)
     cleaned = re.sub(r"(?is)<reasoning\b[^>]*>.*?</reasoning>", "", cleaned)
 
@@ -794,7 +795,49 @@ def clean_generated_lecture_output(text: str) -> str:
     )
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     cleaned = cleaned.strip()
-    return cleaned if cleaned else original.strip()
+    if cleaned:
+        if _looks_like_internal_reasoning_only(cleaned):
+            return ""
+        return cleaned
+    if had_internal_wrapper or _looks_like_internal_reasoning_only(original):
+        return ""
+    return original.strip()
+
+
+def _looks_like_internal_reasoning_only(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    final_marker = re.search(
+        r"(?im)^\s*(?:#+\s*)?(?:最终(?:答案|文案|输出|讲稿|授课文案)|正式(?:文案|讲稿)|"
+        r"Final(?:\s+(?:answer|output|lecture\s+script))?|Lecture\s+script|授课文案|正文)\s*[:：]",
+        value,
+    )
+    if final_marker:
+        return False
+    if re.match(
+        r"(?is)^\s*(?:#+\s*)?(?:思考过程|推理过程|分析过程|内部推理|我的思路|"
+        r"Reasoning|Analysis|Chain\s*of\s*thought|Scratchpad)\s*[:：]?",
+        value,
+    ):
+        return True
+    if re.match(
+        r"(?is)^\s*(?:okay|ok|alright|let'?s|first,?\s+i|i\s+need\s+to|we\s+need\s+to|"
+        r"the\s+user\s+(?:wants|asks|requested)|need\s+to|need\s+craft|need\s+generate)\b",
+        value,
+    ) and re.search(
+        r"(?is)\b(?:prompt|slide|lecture|script|generate|craft|output|reasoning|answer|final|"
+        r"evidence|graph|entities|user|requirements?)\b|讲稿|逐页|文案|课件|图谱|实体",
+        value[:1200],
+    ):
+        return True
+    return bool(
+        re.match(
+            r"(?is)^\s*(?:我需要|我会先|先分析|我们需要先)\s*"
+            r"(?:分析|规划|检查|根据|为|生成|确保|构思|整理)",
+            value,
+        )
+    )
 
 
 def check_generation_consistency(
