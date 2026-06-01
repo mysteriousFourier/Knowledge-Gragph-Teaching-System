@@ -58,6 +58,9 @@ export interface TtsSynthesizeRequest {
   split_sentence?: boolean
   language?: string
   speed_factor?: number
+  chapter_id?: string
+  segment_id?: string
+  content_hash?: string
 }
 
 export interface TtsSynthesizeResponse {

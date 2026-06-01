@@ -49,6 +49,16 @@ def test_normalize_tts_text_turns_prose_dashes_into_pauses() -> None:
     assert "-" not in normalized
 
 
+def test_normalize_tts_text_removes_parenthetical_asides() -> None:
+    normalized = normalize_tts_text("这里要朗读（这里不要读）正文继续。[备注也不要读]结束。", "zh").normalized_text
+
+    assert "这里要朗读" in normalized
+    assert "正文继续" in normalized
+    assert "结束" in normalized
+    assert "不要读" not in normalized
+    assert "备注" not in normalized
+
+
 def test_normalize_tts_text_speaks_unwrapped_formulas() -> None:
     normalized = normalize_tts_text(r"条件是 p_0 > 1/(2Ns)，所以 P_{\text{fix}} 增加。", "all_zh").normalized_text
 

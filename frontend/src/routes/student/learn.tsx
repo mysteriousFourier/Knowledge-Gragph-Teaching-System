@@ -36,6 +36,14 @@ function LearnPage() {
   const selectedProgress = selectedChapter ? progressData?.progress?.chapters?.[selectedChapter.id] : undefined
   const playback = useLecturePlayback({
     segmentCount: isCoursewareChapter ? selectedChapter?.ppt_slides?.length || 0 : selectedContent ? 1 : 0,
+    chapterId: selectedChapter?.id,
+    getSegmentId: (segment) => {
+      if (isCoursewareChapter) {
+        const slide = selectedChapter?.ppt_slides?.[segment]
+        return slide ? `slide-${slide.index}` : `slide-${segment + 1}`
+      }
+      return "lecture"
+    },
     getSegmentText: (segment) => {
       if (isCoursewareChapter) {
         const slide = selectedChapter?.ppt_slides?.[segment]

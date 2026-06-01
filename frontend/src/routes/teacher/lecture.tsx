@@ -43,6 +43,14 @@ function LecturePage() {
   const segmentCount = isCoursewareChapter ? coursewareSlides.length : markdownSlides.length
   const playback = useLecturePlayback({
     segmentCount,
+    chapterId: selectedChapter?.id,
+    getSegmentId: (segment) => {
+      if (isCoursewareChapter) {
+        const slide = coursewareSlides[segment]
+        return slide ? `slide-${slide.index}` : `slide-${segment + 1}`
+      }
+      return "lecture"
+    },
     getSegmentText: (segment) => {
       if (isCoursewareChapter) {
         const slide = coursewareSlides[segment]

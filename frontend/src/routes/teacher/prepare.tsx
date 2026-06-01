@@ -1141,6 +1141,11 @@ function TeacherPreparePage() {
   const lecturePlayback = useLecturePlayback({
     segmentCount: preview?.slides.length || 0,
     initialSegment: Math.max(selectedIndex - 1, 0),
+    chapterId: chapterId || preview?.chapter_title,
+    getSegmentId: (segment) => {
+      const slide = preview?.slides[segment]
+      return slide ? `slide-${slide.index}` : `slide-${segment + 1}`
+    },
     getSegmentText: (segment) => {
       const slide = preview?.slides[segment]
       if (!slide) return ""

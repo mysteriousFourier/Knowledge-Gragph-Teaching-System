@@ -6,6 +6,8 @@ interface UseLecturePlaybackOptions {
   segmentCount: number
   initialSegment?: number
   getSegmentText?: (segment: number) => string
+  chapterId?: string
+  getSegmentId?: (segment: number) => string
 }
 
 type PlaybackProvider = "loading" | "none" | "genie" | "genie_server" | string
@@ -73,7 +75,16 @@ function getProviderLabel(provider: PlaybackProvider) {
   return provider
 }
 
-export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmentText }: UseLecturePlaybackOptions) {
+function stableTextHash(text: string) {
+  let hash = 2166136261
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0")
+}
+
+export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmentText, chapterId, getSegmentId }: UseLecturePlaybackOptions) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isLoadingAudio, setIsLoadingAudio] = useState(false)
   const [currentSegment, setCurrentSegmentState] = useState(initialSegment)
@@ -142,17 +153,25 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     stopAudio()
   }, [stopAudio])
 
-  const synthesizeCached = useCallback((text: string) => {
+  const synthesizeCached = useCallback((text: string, segmentIndex?: number, chunkIndex?: number) => {
     const key = text.trim()
-    const existing = synthesizedRef.current.get(key)
+    const segmentId = typeof segmentIndex === "number" ? getSegmentId?.(segmentIndex) || `segment-${segmentIndex + 1}` : undefined
+    const scopedKey = chapterId ? `${chapterId}:${segmentId || "segment"}:${chunkIndex ?? 0}:${stableTextHash(key)}` : key
+    const existing = synthesizedRef.current.get(scopedKey)
     if (existing) return existing
-    const promise = synthesizeTts({ text: key, split_sentence: true }).catch((error) => {
-      synthesizedRef.current.delete(key)
+    const promise = synthesizeTts({
+      text: key,
+      split_sentence: true,
+      chapter_id: chapterId,
+      segment_id: segmentId ? `${segmentId}-chunk-${(chunkIndex ?? 0) + 1}` : undefined,
+      content_hash: stableTextHash(key),
+    }).catch((error) => {
+      synthesizedRef.current.delete(scopedKey)
       throw error
     })
-    synthesizedRef.current.set(key, promise)
+    synthesizedRef.current.set(scopedKey, promise)
     return promise
-  }, [])
+  }, [chapterId, getSegmentId])
 
   const play = useCallback(async (segmentOverride?: number) => {
     if (!hasSegments) return
@@ -234,7 +253,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
         prefetchedIndexes.add(index)
         pendingIndexes.add(index)
         syncProgress({ stage: "playing" })
-        void synthesizeCached(chunk.text)
+        void synthesizeCached(chunk.text, resolvedSegment, index)
           .then((result) => {
             if (requestIdRef.current !== requestId || !result.success || !result.audio_url) return
             markReady(index, result)
@@ -262,7 +281,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
           return
         }
         pendingIndexes.add(chunkIndex)
-        const currentPromise = synthesizeCached(chunk.text)
+        const currentPromise = synthesizeCached(chunk.text, resolvedSegment, chunkIndex)
 
         setIsLoadingAudio(true)
         syncProgress({ stage: "synthesizing" })

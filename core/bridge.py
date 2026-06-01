@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sqlite3
 import tempfile
 import uuid
@@ -23,6 +24,7 @@ LEGACY_CHAPTERS_FILE = BACKEND_DIR / "data" / "chapters.json"
 LEGACY_PROGRESS_FILE = BACKEND_DIR / "data" / "chapter_progress.json"
 CHAPTERS_FILE = RUNTIME_DIR / "chapters.json"
 PROGRESS_FILE = RUNTIME_DIR / "chapter_progress.json"
+TTS_COURSE_AUDIO_DIR = PROJECT_ROOT / ".runtime" / "tts" / "audio" / "course"
 
 from KGTS.core.cli_dispatch import dispatch_tool
 from KGTS.core.memory_runtime import MemoryService
@@ -37,6 +39,24 @@ except Exception:
 
 def _now() -> str:
     return datetime.now().isoformat()
+
+
+def _safe_tts_course_id(value: str | None) -> str:
+    text = (value or "").strip()[:120]
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", text).strip(".-")
+
+
+def _clear_tts_course_audio(chapter_id: str | None) -> None:
+    safe = _safe_tts_course_id(chapter_id)
+    if not safe:
+        return
+    target = (TTS_COURSE_AUDIO_DIR / safe).resolve()
+    base = TTS_COURSE_AUDIO_DIR.resolve()
+    try:
+        target.relative_to(base)
+    except ValueError:
+        return
+    shutil.rmtree(target, ignore_errors=True)
 
 
 def _timestamp_value(value: Any) -> float:
@@ -1045,6 +1065,7 @@ class ChapterStore:
             )
         )
         record = self._best_chapter_record(chapters, aliases)
+        previous_slide_lectures = record.get("slide_lectures")
         record.update(
             {
                 "id": resolved_id,
@@ -1076,6 +1097,8 @@ class ChapterStore:
                 "updated_at": _now(),
             }
         )
+        if slide_lectures is not None and slide_lectures != previous_slide_lectures:
+            _clear_tts_course_audio(resolved_id)
         self._store_chapter_record(chapters, resolved_id, record, aliases)
         self._save_chapters(chapters)
         if sync_backend:
@@ -1128,6 +1151,8 @@ class ChapterStore:
         if ppt_slides is not None:
             chapter["ppt_slides"] = ppt_slides
         if slide_lectures is not None:
+            if slide_lectures != chapter.get("slide_lectures"):
+                _clear_tts_course_audio(resolved_id)
             chapter["slide_lectures"] = slide_lectures
         if tex_content is not None:
             chapter["tex_content"] = tex_content
@@ -1213,6 +1238,8 @@ class ChapterStore:
                 removed.append(alias)
         markers = self._mark_chapter_deleted(chapter_id, chapter)
         self._save_chapters(chapters)
+        for alias in set(removed).union(markers).union({chapter_id}):
+            _clear_tts_course_audio(alias)
 
         for alias in set(removed).union(markers):
             try:

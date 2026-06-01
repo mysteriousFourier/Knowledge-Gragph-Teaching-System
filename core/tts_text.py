@@ -667,6 +667,22 @@ def clean_markdown_for_speech(text: str) -> str:
     return text
 
 
+def remove_parenthetical_asides_for_speech(text: str) -> str:
+    def remove_if_aside(match: re.Match[str]) -> str:
+        content = match.group(1)
+        if re.search(r"[\u3400-\u9fff]", content):
+            return " "
+        if re.search(r"\s", content) and re.search(r"[A-Za-z]", content):
+            return " "
+        return match.group(0)
+
+    text = re.sub(r"（([^（）]*)）", " ", text)
+    text = re.sub(r"【([^【】]*)】", " ", text)
+    text = re.sub(r"(?<!\[)\[([^\[\]]*)\](?!\])", remove_if_aside, text)
+    text = re.sub(r"\(([^()]*)\)", remove_if_aside, text)
+    return text
+
+
 def sanitize_gpt_sovits_text(text: str) -> str:
     text = _normalize_unicode_preserving_cjk_pauses(text)
     text = text.translate(_PUNCTUATION_NORMALIZATION)
@@ -711,7 +727,8 @@ def spell_latin_terms_for_chinese(text: str) -> str:
 
 
 def normalize_tts_text(text: str, default_language: str = "zh", language_override: str | None = None) -> NormalizedTtsText:
-    normalized = replace_formulas_for_speech(text)
+    normalized = remove_parenthetical_asides_for_speech(text)
+    normalized = replace_formulas_for_speech(normalized)
     normalized = clean_markdown_for_speech(normalized)
     normalized = sanitize_gpt_sovits_text(normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()

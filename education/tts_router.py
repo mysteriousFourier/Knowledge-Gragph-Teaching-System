@@ -27,6 +27,8 @@ from KGTS.core.tts_text import normalize_tts_text
 router = APIRouter(prefix="/api/tts", tags=["tts"])
 
 DEFAULT_SEGMENT_CHARS = 260
+COURSE_AUDIO_DIR = "course"
+SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def _tts_log(message: str) -> None:
@@ -62,6 +64,9 @@ class TtsSynthesizeRequest(BaseModel):
     temperature: float | None = None
     repetition_penalty: float | None = None
     text_split_method: str | None = None
+    chapter_id: str | None = None
+    segment_id: str | None = None
+    content_hash: str | None = None
 
 
 class TtsSegmentRequest(BaseModel):
@@ -120,13 +125,45 @@ def _long_text_error(length: int, limit: int) -> HTTPException:
 
 
 def _audio_url(path: Path) -> str:
-    return f"/api/tts/audio/{path.name}"
+    settings = get_tts_settings()
+    try:
+        relative = path.resolve().relative_to(settings.output_dir.resolve())
+        return "/api/tts/audio/" + "/".join(relative.parts)
+    except ValueError:
+        return f"/api/tts/audio/{path.name}"
+
+
+def _safe_id(value: str | None, fallback: str) -> str:
+    text = (value or "").strip()[:120]
+    safe = SAFE_ID_RE.sub("-", text).strip(".-")
+    return safe or fallback
+
+
+def _course_audio_path(payload: TtsSynthesizeRequest, text: str) -> Path | None:
+    if not payload.chapter_id:
+        return None
+    settings = get_tts_settings()
+    text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:24]
+    requested_hash = _safe_id(payload.content_hash, text_hash)
+    if requested_hash == "none":
+        requested_hash = text_hash
+    chapter = _safe_id(payload.chapter_id, "chapter")
+    segment = _safe_id(payload.segment_id, "segment")
+    return settings.output_dir / COURSE_AUDIO_DIR / chapter / f"{segment}-{requested_hash}.wav"
+
+
+def _copy_to_course_audio(audio_path: Path, persistent_path: Path) -> Path:
+    persistent_path.parent.mkdir(parents=True, exist_ok=True)
+    if audio_path.resolve() != persistent_path.resolve():
+        shutil.copyfile(audio_path, persistent_path)
+    return persistent_path
 
 
 def _resolve_audio_path(file_name: str) -> Path:
     settings = get_tts_settings()
-    requested = Path(file_name)
-    if requested.name != file_name or requested.suffix.lower() != ".wav":
+    normalized_name = file_name.replace("\\", "/").strip("/")
+    requested = Path(normalized_name)
+    if requested.is_absolute() or ".." in requested.parts or requested.suffix.lower() != ".wav":
         raise HTTPException(status_code=404, detail="Audio file not found.")
 
     search_dirs = [
@@ -135,7 +172,7 @@ def _resolve_audio_path(file_name: str) -> Path:
     ]
     for base_dir in search_dirs:
         base = base_dir.resolve()
-        candidate = (base / requested.name).resolve()
+        candidate = (base / requested).resolve()
         try:
             candidate.relative_to(base)
         except ValueError:
@@ -319,6 +356,18 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="Text is empty after cleaning.")
     if len(text) > settings.max_chars:
         raise _long_text_error(len(text), settings.max_chars)
+    persistent_path = _course_audio_path(payload, text)
+    if persistent_path and persistent_path.is_file():
+        return {
+            "success": True,
+            "provider": settings.provider,
+            "audio_url": _audio_url(persistent_path),
+            "cache_hit": True,
+            "cache_key": persistent_path.stem,
+            "normalized_text_length": len(text),
+            "text_length": len(text),
+            "text_lang": normalized.text_lang,
+        }
 
     started_at = time.perf_counter()
     request_id = hashlib.sha256(f"{time.time_ns()}:{text}".encode("utf-8")).hexdigest()[:8]
@@ -413,6 +462,8 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     elapsed = time.perf_counter() - started_at
+    if persistent_path:
+        audio_path = _copy_to_course_audio(audio_path, persistent_path)
     _tts_log(
         "synthesize:done "
         f"id={request_id} provider={settings.provider} cache=miss "
@@ -430,9 +481,9 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
     }
 
 
-@router.get("/audio/{file_name}", include_in_schema=False)
-async def audio_file(file_name: str) -> FileResponse:
-    path = _resolve_audio_path(file_name)
+@router.get("/audio/{file_path:path}", include_in_schema=False)
+async def audio_file(file_path: str) -> FileResponse:
+    path = _resolve_audio_path(file_path)
     return FileResponse(
         path,
         media_type="audio/wav",
