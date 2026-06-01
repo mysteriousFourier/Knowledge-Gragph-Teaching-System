@@ -113,6 +113,13 @@ def test_normalize_tts_text_falls_back_when_sre_unavailable(monkeypatch) -> None
     assert r"\frac" not in normalized
 
 
+def test_spell_latin_terms_for_chinese_reads_mixed_terms() -> None:
+    normalized = normalize_tts_text("今天讲 Hardy-Weinberg equilibrium。", "all_zh").normalized_text
+
+    assert "艾尺诶阿尔迪歪 减 达不溜伊艾恩比伊阿尔吉" in normalized
+    assert "伊丘优艾艾勒艾比阿尔艾优艾姆" in normalized
+
+
 def test_resolve_genie_tts_language_detects_mixed_chinese_english() -> None:
     lang = resolve_genie_tts_language("今天讲 Hardy-Weinberg equilibrium。", "zh")
 

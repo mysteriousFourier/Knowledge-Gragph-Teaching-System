@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import gc
+import importlib.util
 import threading
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,7 @@ from KGTS.core.tts_service import (
     get_tts_settings,
     get_tts_status,
 )
-from KGTS.core.tts_text import normalize_tts_text, resolve_genie_tts_language
+from KGTS.core.tts_text import normalize_tts_text, resolve_genie_tts_language, spell_latin_terms_for_chinese
 
 
 load_root_env()
@@ -181,15 +182,19 @@ def synthesize(payload: TtsRequest, background_tasks: BackgroundTasks) -> FileRe
     settings = get_tts_settings()
     normalized = normalize_tts_text(payload.text, settings.language, payload.language)
     effective_language = resolve_genie_tts_language(normalized.normalized_text, normalized.text_lang, settings.language)
+    text = normalized.normalized_text
+    if effective_language == "hybrid-zh-en" and importlib.util.find_spec("nltk") is None:
+        text = spell_latin_terms_for_chinese(text)
+        effective_language = "zh"
     if not normalized.normalized_text:
         raise HTTPException(status_code=400, detail="Text is empty after cleaning.")
-    if len(normalized.normalized_text) > settings.max_chars:
+    if len(text) > settings.max_chars:
         raise HTTPException(status_code=413, detail=f"Text is too long. Limit: {settings.max_chars} characters.")
 
     started_at = time.perf_counter()
     try:
         audio_path = genie_tts_service.synthesize(
-            text=normalized.normalized_text,
+            text=text,
             character_name=payload.character_name,
             split_sentence=payload.split_sentence,
             model_dir=payload.model_dir,
@@ -207,7 +212,7 @@ def synthesize(payload: TtsRequest, background_tasks: BackgroundTasks) -> FileRe
             background_tasks.add_task(_schedule_process_exit)
     elapsed = time.perf_counter() - started_at
     print(
-        f"[genie-proxy] synthesize done chars={len(normalized.normalized_text)} "
+        f"[genie-proxy] synthesize done chars={len(text)} "
         f"lang={effective_language} file={audio_path.name} elapsed={elapsed:.1f}s",
         flush=True,
     )
