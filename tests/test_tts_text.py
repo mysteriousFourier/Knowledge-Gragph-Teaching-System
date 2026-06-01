@@ -1,5 +1,5 @@
 from KGTS.core import tts_text
-from KGTS.core.tts_text import normalize_tts_text
+from KGTS.core.tts_text import normalize_tts_text, resolve_genie_tts_language
 
 
 def test_normalize_tts_text_replaces_gpt_sovits_unsafe_cjk() -> None:
@@ -111,3 +111,20 @@ def test_normalize_tts_text_falls_back_when_sre_unavailable(monkeypatch) -> None
 
     assert "诶 除以 比" in normalized
     assert r"\frac" not in normalized
+
+
+def test_resolve_genie_tts_language_detects_mixed_chinese_english() -> None:
+    lang = resolve_genie_tts_language("今天讲 Hardy-Weinberg equilibrium。", "zh")
+
+    assert lang == "hybrid-zh-en"
+
+
+def test_resolve_genie_tts_language_normalizes_explicit_hybrid_alias() -> None:
+    lang = resolve_genie_tts_language("今天讲 Hardy-Weinberg equilibrium。", "hybrid-chinese-english")
+
+    assert lang == "hybrid-zh-en"
+
+
+def test_resolve_genie_tts_language_preserves_pure_chinese_and_english() -> None:
+    assert resolve_genie_tts_language("今天讲遗传漂变。", "zh") == "zh"
+    assert resolve_genie_tts_language("Hardy-Weinberg equilibrium.", "en") == "en"

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .tts_text import FORMULA_POLICY_VERSION, NormalizedTtsText, normalize_tts_text
+from .tts_text import FORMULA_POLICY_VERSION, NormalizedTtsText, normalize_tts_text, resolve_genie_tts_language
 from .path_policy import outside_project_paths, project_local_only, project_path_error
 
 
@@ -1437,7 +1437,7 @@ class GenieTtsService:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._genie: Any | None = None
-        self._loaded_characters: set[str] = set()
+        self._loaded_characters: set[tuple[str, str]] = set()
         self._reference_cache_keys: set[tuple[str, str, str]] = set()
 
     def _import_genie(self, settings: TtsSettings) -> Any:
@@ -1451,6 +1451,12 @@ class GenieTtsService:
         self._genie = importlib.import_module("genie_tts")
         return self._genie
 
+    def _runtime_character_name(self, name: str, lang: str, settings: TtsSettings) -> str:
+        if settings.predefined_character:
+            return name
+        base_lang = resolve_genie_tts_language("", settings.language, settings.language)
+        return name if lang == base_lang else f"{name}-{lang}"
+
     def load_character(
         self,
         *,
@@ -1463,7 +1469,8 @@ class GenieTtsService:
         name = (character_name or settings.character_name or predefined_character or settings.predefined_character).strip()
         predefined = (predefined_character or settings.predefined_character).strip()
         model_path = (model_dir or settings.model_dir).strip()
-        lang = (language or settings.language).strip()
+        lang = resolve_genie_tts_language("", language, settings.language)
+        loaded_name = self._runtime_character_name(name, lang, settings) if name and not predefined else name
 
         with self._lock:
             genie = self._import_genie(settings)
@@ -1478,12 +1485,11 @@ class GenieTtsService:
                 if not lang:
                     raise RuntimeError("KGTS_TTS_LANGUAGE is required when no predefined character is configured.")
                 genie.load_character(
-                    character_name=name,
+                    character_name=loaded_name,
                     onnx_model_dir=str(_as_path(model_path) or model_path),
                     language=lang,
                 )
-                loaded_name = name
-            self._loaded_characters.add(loaded_name)
+            self._loaded_characters.add((loaded_name, lang))
             return loaded_name
 
     def set_reference_audio(
@@ -1537,12 +1543,16 @@ class GenieTtsService:
     ) -> str:
         settings = get_tts_settings()
         name = (character_name or settings.character_name or settings.predefined_character).strip()
-        if not name or name not in self._loaded_characters:
+        text_lang = resolve_genie_tts_language("", language, settings.language)
+        loaded_name = self._runtime_character_name(name, text_lang, settings) if name else name
+        if not name or (loaded_name, text_lang) not in self._loaded_characters:
             name = self.load_character(
                 character_name=character_name,
                 model_dir=model_dir,
-                language=language,
+                language=text_lang,
             )
+        else:
+            name = loaded_name
 
         if reference_audio_path or settings.reference_audio_path:
             self.set_reference_audio(
@@ -1571,11 +1581,12 @@ class GenieTtsService:
 
         settings.output_dir.mkdir(parents=True, exist_ok=True)
         output_path = settings.output_dir / f"tts-{uuid.uuid4().hex}.wav"
+        text_lang = resolve_genie_tts_language(text, language, settings.language)
         with self._lock:
             character = self._ensure_ready(
                 character_name=character_name,
                 model_dir=model_dir,
-                language=language,
+                language=text_lang,
                 reference_audio_path=reference_audio_path,
                 reference_text=reference_text,
                 reference_language=reference_language,
@@ -1613,7 +1624,9 @@ class GenieTtsService:
             if not callable(unload):
                 return False
             unload(character_name=character_name)
-            self._loaded_characters.discard(character_name)
+            self._loaded_characters = {
+                item for item in self._loaded_characters if item[0] != character_name
+            }
             return True
 
     def stop(self) -> bool:

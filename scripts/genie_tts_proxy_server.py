@@ -38,7 +38,7 @@ from KGTS.core.tts_service import (
     get_tts_settings,
     get_tts_status,
 )
-from KGTS.core.tts_text import normalize_tts_text
+from KGTS.core.tts_text import normalize_tts_text, resolve_genie_tts_language
 
 
 load_root_env()
@@ -180,6 +180,7 @@ def set_reference_audio(payload: ReferenceAudioRequest) -> dict[str, Any]:
 def synthesize(payload: TtsRequest, background_tasks: BackgroundTasks) -> FileResponse:
     settings = get_tts_settings()
     normalized = normalize_tts_text(payload.text, settings.language, payload.language)
+    effective_language = resolve_genie_tts_language(normalized.normalized_text, normalized.text_lang, settings.language)
     if not normalized.normalized_text:
         raise HTTPException(status_code=400, detail="Text is empty after cleaning.")
     if len(normalized.normalized_text) > settings.max_chars:
@@ -192,7 +193,7 @@ def synthesize(payload: TtsRequest, background_tasks: BackgroundTasks) -> FileRe
             character_name=payload.character_name,
             split_sentence=payload.split_sentence,
             model_dir=payload.model_dir,
-            language=normalized.text_lang,
+            language=effective_language,
             reference_audio_path=payload.reference_audio_path,
             reference_text=payload.reference_text,
             reference_language=payload.reference_language,
@@ -207,7 +208,7 @@ def synthesize(payload: TtsRequest, background_tasks: BackgroundTasks) -> FileRe
     elapsed = time.perf_counter() - started_at
     print(
         f"[genie-proxy] synthesize done chars={len(normalized.normalized_text)} "
-        f"file={audio_path.name} elapsed={elapsed:.1f}s",
+        f"lang={effective_language} file={audio_path.name} elapsed={elapsed:.1f}s",
         flush=True,
     )
     return FileResponse(audio_path, media_type="audio/wav", filename=audio_path.name)

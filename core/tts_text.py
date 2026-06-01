@@ -107,6 +107,26 @@ _LATIN_SYMBOL_SPEECH = {
     "-": "杠",
 }
 
+_CJK_TTS_LANGUAGE_ALIASES = {
+    "zh",
+    "zh-cn",
+    "zh-tw",
+    "zh-hans",
+    "zh-hant",
+    "chinese",
+    "all_zh",
+    "all_yue",
+    "yue",
+}
+
+_GENIE_HYBRID_ZH_EN_LANGUAGE = "hybrid-zh-en"
+_GENIE_HYBRID_LANGUAGE_ALIASES = {
+    "hybrid",
+    "hybrid-zh-en",
+    "hybrid-en-zh",
+    "hybrid-chinese-english",
+}
+
 _GPT_SOVITS_UNSAFE_CJK_SPEECH = {
     "兙": "克",
     "兡": "百克",
@@ -705,6 +725,23 @@ def detect_tts_language(text: str, default_language: str = "zh") -> str:
     if cjk_count == 0 and meaningful >= 40 and ascii_letters / max(meaningful, 1) > 0.75:
         return "en"
     return default_language or "zh"
+
+
+def has_mixed_cjk_latin_text(text: str) -> bool:
+    return bool(re.search(r"[\u3400-\u9fff]", text) and re.search(r"[A-Za-z]", text))
+
+
+def resolve_genie_tts_language(text: str, language: str | None, default_language: str = "zh") -> str:
+    lang = (language or default_language or "zh").strip().lower()
+    if not lang:
+        lang = "zh"
+    if lang in _GENIE_HYBRID_LANGUAGE_ALIASES:
+        return _GENIE_HYBRID_ZH_EN_LANGUAGE
+    if lang in _CJK_TTS_LANGUAGE_ALIASES and has_mixed_cjk_latin_text(text):
+        return _GENIE_HYBRID_ZH_EN_LANGUAGE
+    if lang in {"all_zh", "all_yue"}:
+        return "zh"
+    return lang
 
 
 def spell_latin_terms_for_chinese(text: str) -> str:

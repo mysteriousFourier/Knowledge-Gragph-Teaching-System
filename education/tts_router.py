@@ -22,6 +22,7 @@ from KGTS.core.tts_service import (
     tts_audio_cache,
 )
 from KGTS.core.tts_text import normalize_tts_text
+from KGTS.core.tts_text import resolve_genie_tts_language
 
 
 router = APIRouter(prefix="/api/tts", tags=["tts"])
@@ -139,14 +140,24 @@ def _safe_id(value: str | None, fallback: str) -> str:
     return safe or fallback
 
 
+def _effective_tts_language(provider: str, text: str, normalized_language: str, default_language: str) -> str:
+    if provider in {"genie", "genie_server"}:
+        return resolve_genie_tts_language(text, normalized_language, default_language)
+    return normalized_language
+
+
 def _course_audio_path(payload: TtsSynthesizeRequest, text: str) -> Path | None:
     if not payload.chapter_id:
         return None
     settings = get_tts_settings()
-    text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:24]
+    normalized = normalize_tts_text(text, settings.language, payload.language)
+    effective_language = _effective_tts_language(settings.provider, normalized.normalized_text, normalized.text_lang, settings.language)
+    text_hash = hashlib.sha256(f"{effective_language}\n{text}".encode("utf-8")).hexdigest()[:24]
     requested_hash = _safe_id(payload.content_hash, text_hash)
     if requested_hash == "none":
         requested_hash = text_hash
+    else:
+        requested_hash = _safe_id(f"{effective_language}-{requested_hash}", text_hash)
     chapter = _safe_id(payload.chapter_id, "chapter")
     segment = _safe_id(payload.segment_id, "segment")
     return settings.output_dir / COURSE_AUDIO_DIR / chapter / f"{segment}-{requested_hash}.wav"
@@ -199,13 +210,14 @@ async def _synthesize_via_server(payload: TtsSynthesizeRequest) -> Path:
     settings = get_tts_settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     normalized = normalize_tts_text(payload.text, settings.language, payload.language)
+    effective_language = _effective_tts_language(settings.provider, normalized.normalized_text, normalized.text_lang, settings.language)
     body: dict[str, Any] = {
         "text": normalized.normalized_text,
         "character_name": payload.character_name or settings.character_name or settings.predefined_character,
         "split_sentence": payload.split_sentence,
     }
-    if normalized.text_lang:
-        body["language"] = normalized.text_lang
+    if effective_language:
+        body["language"] = effective_language
 
     async with httpx.AsyncClient(timeout=None) as client:
         response = await client.post(f"{settings.server_url}/tts", json=body)
@@ -299,19 +311,20 @@ async def clear_audio_cache() -> dict[str, Any]:
 async def split_segments(payload: TtsSegmentRequest) -> dict[str, Any]:
     settings = get_tts_settings()
     normalized = normalize_tts_text(payload.text, settings.language, payload.language)
+    effective_language = _effective_tts_language(settings.provider, normalized.normalized_text, normalized.text_lang, settings.language)
     max_chars = payload.max_chars or min(settings.max_chars, DEFAULT_SEGMENT_CHARS)
     segments = _split_tts_text(normalized.normalized_text, max_chars=max_chars)
     _tts_log(
         "segments "
         f"provider={settings.provider} chars={len(normalized.normalized_text)} "
-        f"segments={len(segments)} max_chars={max_chars} lang={normalized.text_lang}"
+        f"segments={len(segments)} max_chars={max_chars} lang={effective_language}"
     )
     return {
         "success": True,
         "segments": [{"index": index, "text": text, "length": len(text)} for index, text in enumerate(segments)],
         "segment_count": len(segments),
         "normalized_text_length": len(normalized.normalized_text),
-        "text_lang": normalized.text_lang,
+        "text_lang": effective_language,
         "max_chars": max_chars,
     }
 
@@ -352,6 +365,7 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
     _ensure_tts_enabled()
     normalized = normalize_tts_text(payload.text, settings.language, payload.language)
     text = normalized.normalized_text
+    effective_language = _effective_tts_language(settings.provider, text, normalized.text_lang, settings.language)
     if not text:
         raise HTTPException(status_code=400, detail="Text is empty after cleaning.")
     if len(text) > settings.max_chars:
@@ -366,7 +380,7 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
             "cache_key": persistent_path.stem,
             "normalized_text_length": len(text),
             "text_length": len(text),
-            "text_lang": normalized.text_lang,
+            "text_lang": effective_language,
         }
 
     started_at = time.perf_counter()
@@ -374,7 +388,7 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
     _tts_log(
         "synthesize:start "
         f"id={request_id} provider={settings.provider} chars={len(text)} "
-        f"lang={normalized.text_lang}"
+        f"lang={effective_language}"
     )
 
     try:
@@ -421,7 +435,7 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
                 character_name=payload.character_name,
                 split_sentence=payload.split_sentence,
                 model_dir=payload.model_dir,
-                language=normalized.text_lang,
+                language=effective_language,
                 reference_audio_path=payload.reference_audio_path,
                 reference_text=payload.reference_text,
                 reference_language=payload.reference_language,
@@ -477,7 +491,7 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
         "cache_key": None,
         "normalized_text_length": len(text),
         "text_length": len(text),
-        "text_lang": normalized.text_lang,
+        "text_lang": effective_language,
     }
 
 
