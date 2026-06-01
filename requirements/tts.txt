@@ -3,3 +3,6 @@
 # Clone https://github.com/High-Logic/Genie-TTS.git to third_party/Genie-TTS first.
 -r third_party/Genie-TTS/requirements.txt
 -e third_party/Genie-TTS
+
+# Genie hybrid Chinese-English inference imports nltk for English G2P.
+nltk

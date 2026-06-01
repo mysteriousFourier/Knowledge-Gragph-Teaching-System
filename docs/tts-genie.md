@@ -106,6 +106,43 @@ KGTS_TTS_PROXY_EXIT_AFTER_SYNTH=1 \
 python scripts/genie_tts_proxy_server.py
 ```
 
+中英混合朗读必须让 Genie 的 `hybrid-zh-en` 路径可用，而不是把英文术语按中文拼读。确认 TTS 虚拟环境安装了 `nltk`，并且 `models/tts/GenieData/G2P/EnglishG2P/` 下至少包含：
+
+```text
+checkpoint20.npz
+engdict_cache.pickle
+namedict_cache.pickle
+taggers/averaged_perceptron_tagger_eng/
+wordsegment/
+cmudict.rep
+cmudict-fast.rep
+engdict-hot.rep
+```
+
+如果缺少前三个文件，可以从 Genie 官方模型仓库补齐：
+
+```bash
+. .venv/bin/activate
+python - <<'PY'
+from huggingface_hub import hf_hub_download
+from pathlib import Path
+
+target = Path("models/tts/GenieData/G2P/EnglishG2P")
+target.mkdir(parents=True, exist_ok=True)
+for name in ["checkpoint20.npz", "engdict_cache.pickle", "namedict_cache.pickle"]:
+    path = hf_hub_download(
+        repo_id="High-Logic/Genie",
+        repo_type="model",
+        filename=f"GenieData/G2P/EnglishG2P/{name}",
+        local_dir=".runtime/tts/downloads/genie-english-g2p",
+    )
+    (target / name).write_bytes(Path(path).read_bytes())
+PY
+sudo systemctl restart kgts-tts
+```
+
+验证时日志应出现 `lang=hybrid-zh-en`，而不是 `lang=zh`。
+
 `core/genie_low_memory.py` 会在代理进程里给 Genie-TTS 打运行时补丁：把 FP16 外部权重分块转换成可复用的 FP32 外部权重缓存，让 ONNX Runtime 从磁盘文件加载，避免一次性把完整 FP16、FP32 和序列化 ONNX 都放进 Python 内存。这个补丁降低的是加载峰值，不会改变模型本身需要的常驻内存。
 
 实际 1 GB VM 上仍要把它视为实验配置：`shu` 模型的 T2S 两个 decoder 各引用约 293 MB FP32 权重，VITS 约 154 MB，CN-HuBERT 约 360 MB；即使磁盘模型只有约 581 MB，ONNX Runtime 加载后也可能超过免费 VM 可用内存。代理进程的价值是保护主站，TTS OOM 时只重启代理，不拖垮页面和其它 API。

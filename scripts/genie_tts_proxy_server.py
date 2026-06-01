@@ -4,7 +4,6 @@ import os
 import sys
 import time
 import gc
-import importlib.util
 import threading
 from pathlib import Path
 from typing import Any
@@ -39,7 +38,7 @@ from KGTS.core.tts_service import (
     get_tts_settings,
     get_tts_status,
 )
-from KGTS.core.tts_text import normalize_tts_text, resolve_genie_tts_language, spell_latin_terms_for_chinese
+from KGTS.core.tts_text import normalize_tts_text, resolve_genie_tts_language
 
 
 load_root_env()
@@ -183,9 +182,6 @@ def synthesize(payload: TtsRequest, background_tasks: BackgroundTasks) -> FileRe
     normalized = normalize_tts_text(payload.text, settings.language, payload.language)
     effective_language = resolve_genie_tts_language(normalized.normalized_text, normalized.text_lang, settings.language)
     text = normalized.normalized_text
-    if effective_language == "hybrid-zh-en" and importlib.util.find_spec("nltk") is None:
-        text = spell_latin_terms_for_chinese(text)
-        effective_language = "zh"
     if not normalized.normalized_text:
         raise HTTPException(status_code=400, detail="Text is empty after cleaning.")
     if len(text) > settings.max_chars:

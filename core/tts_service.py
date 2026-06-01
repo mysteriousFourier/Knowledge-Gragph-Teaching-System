@@ -23,7 +23,6 @@ from .tts_text import (
     NormalizedTtsText,
     normalize_tts_text,
     resolve_genie_tts_language,
-    spell_latin_terms_for_chinese,
 )
 from .path_policy import outside_project_paths, project_local_only, project_path_error
 
@@ -1463,13 +1462,6 @@ class GenieTtsService:
         base_lang = resolve_genie_tts_language("", settings.language, settings.language)
         return name if lang == base_lang else f"{name}-{lang}"
 
-    def _prepare_text_for_runtime_language(self, text: str, text_lang: str) -> tuple[str, str]:
-        if text_lang == "hybrid-zh-en" and importlib.util.find_spec("nltk") is None:
-            text = spell_latin_terms_for_chinese(text)
-            text = re.sub(r"\s+", " ", text).strip()
-            return text, "zh"
-        return text, text_lang
-
     def load_character(
         self,
         *,
@@ -1595,7 +1587,6 @@ class GenieTtsService:
         settings.output_dir.mkdir(parents=True, exist_ok=True)
         output_path = settings.output_dir / f"tts-{uuid.uuid4().hex}.wav"
         text_lang = resolve_genie_tts_language(text, language, settings.language)
-        text, text_lang = self._prepare_text_for_runtime_language(text, text_lang)
         with self._lock:
             character = self._ensure_ready(
                 character_name=character_name,
