@@ -173,7 +173,7 @@ class GraphHybridRetrievalTest(unittest.TestCase):
         self.assertEqual(stats["mode"], "sparse_hybrid")
         self.assertEqual(stats["provider"], "standard-library-sparse")
 
-    def test_hybrid_search_reports_vector_error_without_text_semantic_fallback(self):
+    def test_hybrid_search_reports_vector_error_and_falls_back_to_sparse_search(self):
         with patch.dict(os.environ, {"KGTS_RETRIEVAL_MODE": "hybrid", "KGTS_ALLOW_EXTERNAL_PATHS": "1"}):
             service = _service(self.tmp_path)
         _seed_graph(service)
@@ -182,7 +182,10 @@ class GraphHybridRetrievalTest(unittest.TestCase):
         results = service.semantic_search("matrix", top_k=3)
         stats = service.get_graph_statistics()["vector_stats"]
 
-        self.assertEqual(results, [])
+        self.assertTrue(results)
+        self.assertEqual(results[0]["node_id"], "matrix")
+        self.assertEqual(results[0]["retrieval_source"], "hybrid_fallback_sparse")
+        self.assertIn("boom", results[0]["vector_error"])
         self.assertIn("boom", stats["last_error"])
 
     def test_rebuild_vector_index_uses_current_graph_nodes(self):

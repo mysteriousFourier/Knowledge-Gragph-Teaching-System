@@ -671,7 +671,23 @@ class GraphService:
                 _LAST_VECTOR_ERROR = str(exc)
                 if self.vector_index is not None:
                     self.vector_index.last_error = str(exc)
-                return []
+                fallback = self._sparse_hybrid_search(
+                    query,
+                    node_type=node_type,
+                    top_k=top_k,
+                    allowed_node_ids=allowed_ids,
+                )
+                if fallback:
+                    for result in fallback:
+                        result["retrieval_source"] = "hybrid_fallback_sparse"
+                        result["vector_error"] = str(exc)
+                    return fallback
+                return self._text_semantic_search(
+                    query,
+                    node_type=node_type,
+                    top_k=top_k,
+                    allowed_node_ids=allowed_ids,
+                )
         if self.retrieval_mode == "sparse_hybrid":
             return self._sparse_hybrid_search(query, node_type=node_type, top_k=top_k, allowed_node_ids=allowed_ids)
         return self._text_semantic_search(query, node_type=node_type, top_k=top_k, allowed_node_ids=allowed_ids)

@@ -258,6 +258,24 @@ class CoursewareStyleTest(unittest.TestCase):
 
         self.assertEqual(clean_generated_lecture_output(raw), raw)
 
+    def test_clean_lecture_output_removes_think_and_reasoning_prefix(self):
+        raw = """<think>
+我需要先分析图谱并规划讲稿。
+</think>
+最终文案:
+## 导入
+这是一段可直接授课的讲解。"""
+
+        self.assertEqual(
+            clean_generated_lecture_output(raw),
+            "## 导入\n这是一段可直接授课的讲解。",
+        )
+
+    def test_clean_lecture_output_keeps_plain_final_marker_without_reasoning(self):
+        raw = "最终文案: 这是一段有效讲解。"
+
+        self.assertEqual(clean_generated_lecture_output(raw), "这是一段有效讲解。")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -737,8 +737,41 @@ def build_lecture_gc_dpg_requirements(style: str, *, slide_level: bool = False) 
 
 
 def clean_generated_lecture_output(text: str) -> str:
-    """Remove legacy entity/provenance wrappers from generated lecture text."""
+    """Remove model-internal reasoning and legacy wrappers from lecture text."""
     cleaned = str(text or "")
+    original = cleaned
+    cleaned = re.sub(r"(?is)<think\b[^>]*>.*?</think>", "", cleaned)
+    cleaned = re.sub(r"(?is)<reasoning\b[^>]*>.*?</reasoning>", "", cleaned)
+
+    final_marker = re.search(
+        r"(?im)^\s*(?:#+\s*)?(?:最终(?:答案|文案|输出|讲稿|授课文案)|正式(?:文案|讲稿)|"
+        r"Final(?:\s+(?:answer|output|lecture\s+script))?|Lecture\s+script|授课文案|正文)\s*[:：]\s*",
+        cleaned,
+    )
+    if final_marker:
+        prefix = cleaned[: final_marker.start()]
+        if re.search(
+            r"(?i)<think|reasoning|chain\s*of\s*thought|scratchpad|analysis|"
+            r"思考过程|推理过程|分析过程|内部推理|我的思路|我需要|我会先",
+            prefix,
+        ):
+            cleaned = cleaned[final_marker.end() :]
+
+    cleaned = re.sub(
+        r"(?ims)^\s*(?:#+\s*)?(?:思考过程|推理过程|分析过程|内部推理|我的思路|"
+        r"Reasoning|Analysis|Chain\s*of\s*thought|Scratchpad)\s*[:：]?\s*\n.*?"
+        r"(?=^\s*(?:#+\s*)?(?:最终(?:答案|文案|输出|讲稿|授课文案)|正式(?:文案|讲稿)|"
+        r"Final(?:\s+(?:answer|output|lecture\s+script))?|Lecture\s+script|授课文案|正文)\s*[:：]?\s*$|\Z)",
+        "",
+        cleaned,
+    )
+    cleaned = re.sub(
+        r"(?im)^\s*(?:#+\s*)?(?:最终(?:答案|文案|输出|讲稿|授课文案)|正式(?:文案|讲稿)|"
+        r"Final(?:\s+(?:answer|output|lecture\s+script))?|Lecture\s+script|授课文案|正文)\s*[:：]\s*",
+        "",
+        cleaned,
+        count=1,
+    )
     cleaned = re.sub(r"</?span\b[^>]*>", "", cleaned, flags=re.I)
     label_pattern = (
         r"(?:图谱实体|知识图谱实体|提取实体|抽取实体|实体清单|关键实体|AI补充|AI\s*补充|"
@@ -761,7 +794,7 @@ def clean_generated_lecture_output(text: str) -> str:
     )
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     cleaned = cleaned.strip()
-    return cleaned if cleaned else str(text or "").strip()
+    return cleaned if cleaned else original.strip()
 
 
 def check_generation_consistency(
