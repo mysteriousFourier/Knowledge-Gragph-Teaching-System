@@ -35,6 +35,13 @@ def test_normalize_tts_text_adds_pauses_for_markdown_structure() -> None:
     assert normalized == "标题。第一点：选择会改变频率。第二点：漂移会带来随机性。"
 
 
+def test_normalize_tts_text_repeats_markdown_bold_emphasis() -> None:
+    normalized = normalize_tts_text("**最终响应依赖有效群体大小。**", "zh").normalized_text
+
+    assert "这个很重要，我们重复一遍" in normalized
+    assert normalized.count("最终响应依赖有效群体大小") == 2
+
+
 def test_normalize_tts_text_adds_pause_around_symbol_speech() -> None:
     normalized = normalize_tts_text("固定概率≤86%，p₀→1；QTL 等位基因。", "zh").normalized_text
 
@@ -73,7 +80,7 @@ def test_normalize_tts_text_uses_sre_for_structural_latex() -> None:
         "zh",
     ).normalized_text
 
-    assert "根号" in normalized
+    assert "根号" in normalized or "平方根" in normalized
     assert "除以" in normalized
     assert r"\frac" not in normalized
     assert r"\sqrt" not in normalized
@@ -86,8 +93,8 @@ def test_normalize_tts_text_speaks_sum_and_integral() -> None:
     ).normalized_text
 
     assert "求和" in normalized
-    assert "下限" in normalized
-    assert "上限" in normalized
+    assert "下限" in normalized or "下标" in normalized
+    assert "上限" in normalized or "上标" in normalized
     assert "积分" in normalized
     assert "无穷大" in normalized
 

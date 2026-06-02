@@ -92,7 +92,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SLIDE_LECTURE_DURATION_MINUTES = 10.0
 DEFAULT_SLIDE_LECTURE_SPEECH_RATE_CPM = 250
-DEFAULT_SLIDE_LECTURE_MAX_OUTPUT_TOKENS = 6000
+DEFAULT_SLIDE_LECTURE_MAX_OUTPUT_TOKENS = 12000
 SLIDE_LECTURE_JOBS: Dict[str, Dict[str, Any]] = {}
 SLIDE_LECTURE_JOB_TTL_SECONDS = 60 * 60 * 4
 
@@ -740,6 +740,7 @@ async def _generate_slide_lectures_sync(
             selected_graph_context=graph_context_content,
             source_node_ids=source_node_ids,
             teacher_guidance=str(request.teacher_guidance or "").strip(),
+            slide_feedback=request.slide_feedback or {},
             style_reference_guidance=style_reference_guidance,
             target_slide_indices=target_slide_indices,
             pacing_by_index=pacing["slides"],
@@ -1135,6 +1136,80 @@ def _build_slide_transition_context(slides: List[Dict[str, Any]], slide_index: A
         next_slide = ordered[position + 1]
         lines.append(f"Next slide: {_truncate_for_prompt(_compact_slide_for_lecture(next_slide, max_chars=360), 360)}")
     return "\n\n".join(lines)
+
+
+def _slide_feedback_for_index(slide_feedback: Optional[Dict[int, str]], slide_index: Any) -> str:
+    if not slide_feedback:
+        return ""
+    keys = [slide_index]
+    try:
+        keys.append(int(slide_index))
+    except (TypeError, ValueError):
+        pass
+    keys.append(str(slide_index))
+    for key in keys:
+        value = slide_feedback.get(key)  # type: ignore[arg-type]
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _format_slide_visible_elements_for_prompt(slide: Dict[str, Any]) -> str:
+    lines: List[str] = []
+    title = str(slide.get("title") or "").strip()
+    if title:
+        lines.append(f"- title: {title}")
+    body_texts = [str(item).strip() for item in (slide.get("body_texts") or []) if str(item).strip()]
+    if body_texts:
+        for index, text in enumerate(body_texts[:8], start=1):
+            lines.append(f"- visible text {index}: {_truncate_for_prompt(text, 220)}")
+    images = _slide_visible_images(slide)
+    for index, image in enumerate(images[:6], start=1):
+        label = str(image.get("label") or image.get("figure_id") or image.get("source_path") or image.get("tex_ref") or image.get("name") or f"image {index}").strip()
+        detail_parts = []
+        for key in ("caption", "alt", "source_path", "tex_ref"):
+            value = str(image.get(key) or "").strip()
+            if value and value not in detail_parts:
+                detail_parts.append(value)
+        detail = "; ".join(detail_parts)
+        lines.append(f"- visible image {index}: {label}{f' ({_truncate_for_prompt(detail, 180)})' if detail else ''}")
+    for table_index, table_data in enumerate((slide.get("tables") or [])[:2], start=1):
+        if not isinstance(table_data, dict):
+            continue
+        rows = table_data.get("rows") or []
+        row_texts = [
+            " | ".join(str(cell) for cell in row)
+            for row in rows[:4]
+            if isinstance(row, list)
+        ]
+        if row_texts:
+            lines.append(f"- visible table {table_index}: {_truncate_for_prompt('; '.join(row_texts), 260)}")
+    return "\n".join(lines)
+
+
+def _slide_visible_images(slide: Dict[str, Any]) -> List[Dict[str, Any]]:
+    images: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(image: Any) -> None:
+        if not isinstance(image, dict):
+            return
+        key = str(image.get("source_path") or image.get("tex_ref") or image.get("data_uri") or image.get("name") or image.get("figure_id") or "")
+        if key and key in seen:
+            return
+        if key:
+            seen.add(key)
+        images.append(image)
+
+    for image in slide.get("images") or []:
+        add(image)
+    layout = slide.get("layout") if isinstance(slide.get("layout"), dict) else {}
+    for column in layout.get("columns") or []:
+        if isinstance(column, dict):
+            for image in column.get("images") or []:
+                add(image)
+    return images
 
 
 def _compact_source_for_response(item: Any, content_chars: int = 180) -> Dict[str, Any]:
@@ -2257,6 +2332,7 @@ async def upload_ppt(
             selected_graph_context=graph_context_content,
             source_node_ids=normalized_source_node_ids or None,
             teacher_guidance=str(teacher_guidance or "").strip(),
+            slide_feedback={},
             pacing_by_index=pacing["slides"],
             speech_rate_cpm=pacing["speech_rate_cpm"],
         )
@@ -2363,6 +2439,7 @@ async def _generate_per_slide_lectures(
     selected_graph_context: str = "",
     source_node_ids: Optional[List[str]] = None,
     teacher_guidance: str = "",
+    slide_feedback: Optional[Dict[int, str]] = None,
     style_reference_guidance: str = "",
     target_slide_indices: Optional[List[int]] = None,
     pacing_by_index: Optional[Dict[int, Dict[str, Any]]] = None,
@@ -2482,20 +2559,24 @@ async def _generate_per_slide_lectures(
         graph_paths = graph_paths_for_evidence(slide_graph_data, prompt_evidence, limit=4)[:4]
         formula_context = ((slide_graphrag_context or {}).get("formula_context") or formula_context_for_text(slide_text, limit=4))[:4]
         transition_context = _build_slide_transition_context(slide_details, slide.get("index"))
+        visible_elements = _format_slide_visible_elements_for_prompt(slide)
+        page_feedback = _slide_feedback_for_index(slide_feedback, slide.get("index"))
         sources = prompt_evidence
 
         requirements = [
             *build_lecture_gc_dpg_requirements(style, slide_level=True),
-            "The current slide text is the main anchor. Use only graph/RAG evidence that directly matches this slide's title, wording, formulas, examples, or immediate transition need.",
-            "Do not mention graph entities that are not relevant to the current slide.",
+            "Use only content visible on this slide as the primary teaching object: its title, bullet text, formulas, tables, and images/figure labels. Do not teach figures, examples, or graph entities that are not visible on the current slide.",
+            "If you mention a figure such as Figure 26.5, it must appear in the current slide text or current slide image metadata. Otherwise do not mention it.",
+            "Start with a concise overview of this slide's topic. When helpful, add one sentence explaining how the previous slide leads into this slide.",
+            "When the slide is a bullet list, first restate the visible bullet points in your own classroom wording, then explain each point. Do not skip bullet restatement.",
             "Explain this slide in accessible classroom language.",
-            "Add only the background needed to make the slide teachable; keep unsupported extensions bounded.",
+            "Expand important biological and mathematical concepts enough to make the bullet points clear, using the expansion as a brief review of prior knowledge, but keep the expansion anchored to this slide.",
             "Use the graph relation paths as the main teaching order when they are relevant.",
             "If formulas appear, explain the meaning of the main symbols.",
             "When the same symbol can mean different things elsewhere, explain only the meaning in this slide/chapter scope.",
             "If a formula is derived from earlier formulas, mention the immediate derivation dependency in teacher-friendly language.",
             "Use the neighboring-slide context only to add one natural transition sentence when helpful; do not teach the previous or next slide here.",
-            "Include 1-2 natural classroom questions when useful.",
+            "If you ask a classroom question, answer it immediately after asking. Keep the question supportive rather than requiring students to solve a new open-ended problem alone.",
             "Output directly usable Markdown prose for this slide. Do not output analysis, reasoning, planning notes, entity selection notes, or comments about the prompt.",
         ]
         if pacing:
@@ -2510,6 +2591,11 @@ async def _generate_per_slide_lectures(
             requirements.append(
                 "Teacher guidance for emphasis, selection, and pacing. Treat it as generation guidance only; it must not override source/graph facts:\n"
                 + _truncate_for_prompt(teacher_guidance, 700)
+            )
+        if page_feedback:
+            requirements.append(
+                "Specific feedback for regenerating this slide. Follow it for this slide only, while preserving the visible-slide evidence boundary:\n"
+                + _truncate_for_prompt(page_feedback, 900)
             )
         if style_reference_guidance:
             requirements.append(
@@ -2533,6 +2619,9 @@ Current slide: {slide['index']}
 
 Slide content:
 {slide_text}
+
+Visible slide-only elements:
+{visible_elements or "No extra visible element metadata."}
 
 Neighboring-slide context for continuity:
 {transition_context or "No neighboring-slide context."}
@@ -2699,7 +2788,7 @@ async def _try_generate_slide_lecture_item(
                 prompt + retry_note,
                 max_tokens=min(
                     _slide_lecture_max_output_tokens(),
-                    max(1200, int(pacing.get("target_chars") or 700) * 3),
+                    max(1800, int(pacing.get("target_chars") or 700) * 5),
                 ),
                 system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
                 read_timeout_seconds=_slide_lecture_read_timeout(phase),
@@ -2811,6 +2900,8 @@ def _slide_lecture_needs_flash_completion(
     lecture: str,
     pacing: Optional[Dict[str, Any]],
 ) -> bool:
+    if _slide_lecture_has_abrupt_trailing_text(lecture):
+        return True
     if not pacing:
         return False
     target_chars = int(pacing.get("target_chars") or 0)
@@ -2820,6 +2911,36 @@ def _slide_lecture_needs_flash_completion(
     if target_chars < 160:
         return estimated_chars < max(45, int(target_chars * 0.55))
     return estimated_chars < max(100, int(target_chars * 0.72))
+
+
+def _slide_lecture_has_abrupt_trailing_text(lecture: str) -> bool:
+    text = re.sub(r"\s+", " ", str(lecture or "")).strip()
+    if not text:
+        return True
+    tail = text[-80:].strip()
+    if tail.endswith(("，", "、", "：", ":", ";", "；", ",", "、", "(", "（")):
+        return True
+    abrupt_markers = (
+        "例如",
+        "比如",
+        "包括",
+        "如下",
+        "首先",
+        "然后",
+        "接下来",
+        "也就是说",
+        "这说明",
+        "这里要注意",
+        "我们可以看到",
+        "可以看到",
+        "如果",
+        "当",
+        "因为",
+        "因此",
+        "所以",
+        "分别是",
+    )
+    return tail.endswith(abrupt_markers)
 
 
 async def _complete_short_slide_lecture_with_flash(
@@ -2833,10 +2954,13 @@ async def _complete_short_slide_lecture_with_flash(
     target_chars = int(pacing.get("target_chars") or 0)
     current_chars = _count_speech_chars(str(result.get("lecture") or ""))
     gap = max(80, target_chars - current_chars)
-    prompt = f"""请补全一页 PPT 的讲课文案，使其更接近目标字数。
+    prompt = f"""请补全一页 PPT 的讲课文案，使其更接近目标字数，并修复可能被截断的结尾。
 
 页面内容：
 {item.get("slide_text") or ""}
+
+当前页可见元素：
+{_format_slide_visible_elements_for_prompt(item.get("slide") or {}) or "无额外可见元素元数据。"}
 
 当前讲稿：
 {result.get("lecture") or ""}
@@ -2844,7 +2968,7 @@ async def _complete_short_slide_lecture_with_flash(
 目标：补充约 {gap} 个中文字符。补充内容必须自然衔接、可直接朗读，并围绕本页内容展开。
 限制：
 1. 不要重复当前讲稿已有句子。
-2. 不要引入没有依据的新事实。
+2. 只围绕当前页可见标题、正文、公式、表格和图片展开；不要引入当前页没有出现的图、例子或新事实。
 3. 只输出要追加的补全文案，不要输出标题、说明或 JSON。"""
     try:
         addition = expand_formula_references(

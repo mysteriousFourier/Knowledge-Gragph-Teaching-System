@@ -664,6 +664,7 @@ def clean_markdown_for_speech(text: str) -> str:
     text = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", text)
     text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
     text = re.sub(r"https?://\S+|www\.\S+", " ", text)
+    text = _expand_markdown_emphasis_for_speech(text)
 
     processed_lines: list[str] = []
     for raw_line in text.splitlines():
@@ -685,6 +686,16 @@ def clean_markdown_for_speech(text: str) -> str:
     text = text.replace("&nbsp;", " ")
     text = _line_breaks_to_pauses(text)
     return text
+
+
+def _expand_markdown_emphasis_for_speech(text: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        emphasized = re.sub(r"\s+", " ", match.group(1)).strip(" ，。；：、")
+        if not emphasized:
+            return " "
+        return f"这个很重要，我们重复一遍，{emphasized}。{emphasized}。"
+
+    return re.sub(r"\*\*([^*\n][\s\S]*?[^*\n])\*\*", replace, text)
 
 
 def remove_parenthetical_asides_for_speech(text: str) -> str:

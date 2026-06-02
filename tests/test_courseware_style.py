@@ -19,11 +19,14 @@ from KGTS.education.router import (
     _build_slide_lecture_pacing,
     _build_slide_transition_context,
     _compact_slide_for_lecture,
+    _format_slide_visible_elements_for_prompt,
+    _slide_lecture_has_abrupt_trailing_text,
     _looks_like_reasoning_contaminated_lecture,
     _merge_existing_slide_lectures,
     _nonempty_slide_lecture_count,
     _normalize_target_slide_indices,
     _select_slide_evidence_for_prompt,
+    _slide_feedback_for_index,
     _slide_lecture_max_output_tokens,
     _slide_lecture_read_timeout,
     _slide_lecture_concurrency,
@@ -381,6 +384,32 @@ class CoursewareStyleTest(unittest.TestCase):
         self.assertIn("Intro", context)
         self.assertIn("Next slide", context)
         self.assertIn("Example", context)
+
+    def test_slide_feedback_is_scoped_by_slide_index(self):
+        feedback = {5: "先复述图 26.5，再回答问题", "6": "不要讲图 26.5"}
+
+        self.assertEqual(_slide_feedback_for_index(feedback, 5), "先复述图 26.5，再回答问题")
+        self.assertEqual(_slide_feedback_for_index(feedback, 6), "不要讲图 26.5")
+        self.assertEqual(_slide_feedback_for_index(feedback, 7), "")
+
+    def test_visible_elements_prompt_includes_current_slide_images_only(self):
+        slide = {
+            "title": "Saved number",
+            "body_texts": ["保存个体数影响响应"],
+            "images": [{"figure_id": "26.5", "source_path": "figures/fig_0265.png", "caption": "Response versus saved number"}],
+            "layout": {"columns": [{"images": [{"figure_id": "26.5", "source_path": "figures/fig_0265.png"}]}]},
+        }
+
+        visible = _format_slide_visible_elements_for_prompt(slide)
+
+        self.assertIn("visible image 1", visible)
+        self.assertIn("26.5", visible)
+        self.assertEqual(visible.count("fig_0265"), 1)
+
+    def test_slide_lecture_detects_abrupt_trailing_text(self):
+        self.assertTrue(_slide_lecture_has_abrupt_trailing_text("这一页最后要强调三个方面，包括"))
+        self.assertTrue(_slide_lecture_has_abrupt_trailing_text("这一页最后要强调三个方面："))
+        self.assertFalse(_slide_lecture_has_abrupt_trailing_text("这一页最后要强调三个方面。"))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ import {
   ImagePlus,
   Minus,
   LayoutPanelTop,
+  MessageSquareText,
   Move,
   Network,
   Pause,
@@ -1071,6 +1072,7 @@ function TeacherPreparePage() {
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set(["toc::root"]))
   const [treeSearch, setTreeSearch] = useState("")
   const [teacherGuidance, setTeacherGuidance] = useState("")
+  const [slideFeedbackDrafts, setSlideFeedbackDrafts] = useState<Record<number, string>>({})
   const [styleReference, setStyleReference] = useState<CoursewareStyleReference | null>(null)
   const [pptSourceScope, setPptSourceScope] = useState<GraphSourceScope | null>(null)
   const [lectureSourceScope, setLectureSourceScope] = useState<GraphSourceScope | null>(null)
@@ -1116,6 +1118,7 @@ function TeacherPreparePage() {
 
   const selectedSlide = preview?.slides.find((slide) => slide.index === selectedIndex)
   const selectedLecture = slideLectures.find((lecture) => lecture.index === selectedIndex)
+  const selectedSlideFeedback = selectedSlide ? slideFeedbackDrafts[selectedSlide.index] || "" : ""
   const nodes = useMemo(() => scopeTreeData?.nodes || [], [scopeTreeData?.nodes])
   const relationships = useMemo(() => scopeTreeData?.relationships || [], [scopeTreeData?.relationships])
   const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
@@ -1525,10 +1528,20 @@ function TeacherPreparePage() {
     }
   }
 
+  const handleSelectedSlideFeedbackChange = (value: string) => {
+    if (!selectedSlide) return
+    setSlideFeedbackDrafts((drafts) => ({
+      ...drafts,
+      [selectedSlide.index]: value,
+    }))
+  }
+
   const handleRegenerateCurrentLecture = async () => {
     if (!preview?.slides.length || !selectedSlide) return
     setStatus("")
     const sourceNodeIds = lectureNodeIds.length ? lectureNodeIds : pptNodeIds
+    const slideIndex = selectedSlide.index
+    const pageFeedback = selectedSlideFeedback.trim()
     try {
       const result = await generateSlideLectures.mutateAsync({
         chapter_title: preview.chapter_title || chapterTitle,
@@ -1540,8 +1553,9 @@ function TeacherPreparePage() {
         source_node_ids: sourceNodeIds,
         graph_scope: "subtree",
         teacher_guidance: teacherGuidance,
+        slide_feedback: pageFeedback ? { [slideIndex]: pageFeedback } : undefined,
         style_reference: styleReference,
-        target_slide_indices: [selectedSlide.index],
+        target_slide_indices: [slideIndex],
         existing_slide_lectures: slideLectures,
         ppt_source_node_ids: pptNodeIds,
         ppt_source_scope: pptSourceScope,
@@ -1552,12 +1566,12 @@ function TeacherPreparePage() {
         },
       })
       if (!result.success) {
-        throw new Error(result.message || result.error || `第 ${selectedSlide.index} 页讲解生成失败`)
+        throw new Error(result.message || result.error || `第 ${slideIndex} 页讲解生成失败`)
       }
       setSlideLectures(mergeSlideLectures(slideLectures, result.slide_lectures || []))
       setLectureSourceScope(result.source_scope || null)
       setDriftReport(result.drift_report || null)
-      setStatus(result.warning || `已重生成第 ${selectedSlide.index} 页讲解`)
+      setStatus(result.warning || `已重生成第 ${slideIndex} 页讲解`)
     } catch (error) {
       setStatus(`当前页讲解生成失败：${errorMessage(error)}`)
     }
@@ -2387,6 +2401,21 @@ function TeacherPreparePage() {
           </div>
           <PlaybackProgress progress={lecturePlayback.progress} statusText={lecturePlayback.statusText} />
           <div className="p-4">
+            {selectedSlide ? (
+              <div className="mb-4 rounded-lg border bg-muted/30 p-3">
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium">
+                  <MessageSquareText size={15} />
+                  当前页修改意见
+                </div>
+                <textarea
+                  value={selectedSlideFeedback}
+                  onChange={(event) => handleSelectedSlideFeedbackChange(event.target.value)}
+                  placeholder="例如：只讲本页图 26.5；先复述三条要点，再解释每条背后的生物学和数学含义；提出问题后直接给答案。"
+                  className="min-h-[76px] w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <div className="mt-2 text-xs text-muted-foreground">点击“重生成当前页”时仅作用于当前页，不影响其他页面文案。</div>
+              </div>
+            ) : null}
             {hasUsableSlideLecture(selectedLecture) ? (
               <div className="space-y-4">
                 <DriftTrace driftReport={driftReport} />

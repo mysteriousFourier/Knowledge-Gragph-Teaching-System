@@ -67,6 +67,7 @@ class GenerateSlideLecturesRequest(BaseModel):
     source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used as lecture sources")
     graph_scope: Optional[str] = Field("subtree", description="Graph source scope, currently subtree")
     teacher_guidance: Optional[str] = Field(None, description="Optional teacher guidance for emphasis, selection, and pacing")
+    slide_feedback: Optional[Dict[int, str]] = Field(None, description="Optional per-slide regeneration feedback keyed by slide index")
     style_reference: Optional[Dict[str, Any]] = Field(None, description="Compact courseware style reference profile/guidance")
     target_slide_indices: Optional[List[int]] = Field(None, description="Slide indices to regenerate; empty means all slides")
     existing_slide_lectures: Optional[List[Dict[str, Any]]] = Field(None, description="Existing slide lectures to preserve when regenerating selected slides")
