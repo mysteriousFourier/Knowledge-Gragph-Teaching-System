@@ -409,12 +409,13 @@ def _editable_slide_from_detail(slide: Dict[str, Any], asset_map: Dict[str, Dict
     for ordinal, image in enumerate(_collect_slide_images(slide), start=1):
         asset_id = _asset_id_for_image(image, asset_map)
         kind = "image" if asset_id and asset_map.get(asset_id, {}).get("data_uri") else "placeholder"
+        image_bbox = _bbox_from_canvas(canvas_items, "image", image=image, ordinal=ordinal) or _default_image_bbox(slide, ordinal - 1, cursor_y)
         objects.append(
             _object_payload(
                 slide_index=index,
                 kind=kind,
                 ordinal=ordinal,
-                bbox=_bbox_from_canvas(canvas_items, "image", image=image, ordinal=ordinal) or _default_image_bbox(slide, ordinal - 1, cursor_y),
+                bbox=image_bbox,
                 z=z,
                 asset_id=asset_id,
                 source_path=image.get("source_path") or image.get("tex_ref") or "",
@@ -567,6 +568,21 @@ def _collect_slide_images(slide: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     for image in slide.get("images") or []:
         add(image)
+    for ref in slide.get("missing_image_refs") or []:
+        clean_ref = str(ref or "").strip().replace("\\", "/")
+        if clean_ref:
+            add(
+                {
+                    "data_uri": None,
+                    "width_emu": 0,
+                    "height_emu": 0,
+                    "left_emu": 0,
+                    "top_emu": 0,
+                    "source_path": clean_ref,
+                    "tex_ref": clean_ref,
+                    "missing": True,
+                }
+            )
     layout = slide.get("layout") if isinstance(slide.get("layout"), dict) else {}
     for column in layout.get("columns") or []:
         if isinstance(column, dict):
@@ -628,6 +644,20 @@ def _default_image_bbox(slide: Dict[str, Any], ordinal: int, cursor_y: float) ->
     content = str(slide.get("content") or "").strip()
     has_body = bool(_remove_display_equations(content).strip())
     layout = slide.get("layout") if isinstance(slide.get("layout"), dict) else {}
+    if str(layout.get("mode") or "") == "title":
+        images = _collect_slide_images(slide)
+        image = images[ordinal] if 0 <= ordinal < len(images) else {}
+        source_path = str(image.get("source_path") or image.get("tex_ref") or "")
+        options = str(image.get("tex_options") or "")
+        if r"\paperwidth" in options or "图片3" in source_path or "picture3" in source_path.lower():
+            return {"x": 0.0, "y": CANVAS_HEIGHT - 62.0, "width": CANVAS_WIDTH, "height": 62.0}
+        logo_width = 92.0
+        logo_height = 38.0
+        gap = 8.0
+        x = CANVAS_WIDTH - 16.0 - (image_count - 1 - ordinal) * (logo_width + gap) - logo_width
+        if image_count >= 3 and ordinal <= 1:
+            x = CANVAS_WIDTH - 16.0 - (1 - ordinal) * (logo_width + gap) - logo_width
+        return {"x": max(16.0, x), "y": 3.0, "width": logo_width, "height": logo_height}
     image_first = _layout_prefers_image_first(slide)
     width = 420 if image_count > 1 else 460
     height = 126 if image_count > 1 else 240

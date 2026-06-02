@@ -180,6 +180,16 @@ function estimateSlideDurationMinutes(slide: PptSlideDetail, allSlides: PptSlide
   return Math.min(180, Math.max(0.1, Math.round(estimated * 10) / 10))
 }
 
+function safeDownloadFilename(value: string) {
+  return (
+    value
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, " ")
+      .slice(0, 80) || "课件文案"
+  )
+}
+
 function compactSlideForLectureRequest(slide: PptSlideDetail): PptSlideDetail {
   return {
     index: slide.index,
@@ -188,6 +198,8 @@ function compactSlideForLectureRequest(slide: PptSlideDetail): PptSlideDetail {
     notes: slide.notes,
     raw_text: slide.raw_text,
     tables: slide.tables?.slice(0, 2).map((table) => ({ rows: table.rows.slice(0, 8) })),
+    layout: slide.layout,
+    image_count: slide.image_count,
   }
 }
 
@@ -527,9 +539,13 @@ function findAssetForImage(image: SlideImage, assetMap: Record<string, Coursewar
 
 function findAssetForObject(object: EditableSlideObject | undefined, assetMap: Record<string, CoursewareAsset>) {
   if (!object) return undefined
-  if (object.asset_id && assetMap[object.asset_id]) return assetMap[object.asset_id]
+  if (object.asset_id && assetMap[object.asset_id]?.data_uri) return assetMap[object.asset_id]
   const keys = new Set([object.source_path, object.tex_ref, object.label, ...imageSourcePathKeys(object.source_path), ...imageSourcePathKeys(object.tex_ref)].filter(Boolean))
-  return Object.values(assetMap).find((asset) => assetSourceKeys(asset).some((key) => keys.has(key)))
+  return (
+    Object.values(assetMap).find((asset) => asset.data_uri && assetSourceKeys(asset).some((key) => keys.has(key))) ||
+    (object.asset_id ? assetMap[object.asset_id] : undefined) ||
+    Object.values(assetMap).find((asset) => assetSourceKeys(asset).some((key) => keys.has(key)))
+  )
 }
 
 function editableCanvasItemsFromModel(model: EditableSlideModel | null, slideIndex: number): CanvasItem[] {
@@ -1426,6 +1442,7 @@ function TeacherPreparePage() {
     const result = await previewPpt.mutateAsync(selectedFile)
     applyPreviewResult(result, selectedFile.name.replace(/\.[^.]+$/, ""))
     setLectureNodeIds(pptNodeIds)
+    setStatus(result.warning || "")
   }
 
   const handleGenerateLectures = async () => {
@@ -1455,6 +1472,7 @@ function TeacherPreparePage() {
         asset_map: result.asset_map,
         layout: result.layout,
         source_tex: result.source_tex,
+        missing_image_refs: result.missing_image_refs,
         warning: result.warning,
         error: result.error,
       })
@@ -1948,6 +1966,23 @@ function TeacherPreparePage() {
     setStatus("已复制当前页文案")
   }
 
+  const handleExportLectureMarkdown = () => {
+    if (!hasGeneratedSlideLectures || !mergedLecture.trim()) return
+    const title = chapterTitle || preview?.chapter_title || "课件文案"
+    const generatedAt = new Date().toLocaleString("zh-CN", { hour12: false })
+    const content = [`# ${title}`, "", `导出时间：${generatedAt}`, `页面数：${preview?.slides.length || slideLectures.length}`, "", mergedLecture].join("\n")
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = `${safeDownloadFilename(title)}-逐页文案.md`
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+    setStatus("已导出全部逐页文案")
+  }
+
   const artifactUrl = (url?: string) => {
     if (!url) return ""
     return url.startsWith("http") ? url : `${getRuntimeConfig().educationApiBaseUrl}${url}`
@@ -2003,6 +2038,14 @@ function TeacherPreparePage() {
             保存为课程
           </button>
           <button
+            onClick={handleExportLectureMarkdown}
+            disabled={!hasGeneratedSlideLectures}
+            className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50"
+          >
+            <Download size={16} />
+            导出文案
+          </button>
+          <button
             onClick={handleNormalizeEditableLayout}
             disabled={!editableModel}
             className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50"
@@ -2031,12 +2074,14 @@ function TeacherPreparePage() {
 
       {status && (
         <div className="flex items-center gap-2 rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
-          {driftReport?.changed ? <AlertTriangle size={16} className="text-amber-600" /> : <CheckCircle2 size={16} className="text-primary" />}
+          {driftReport?.changed || status.includes("图片引用") ? <AlertTriangle size={16} className="text-amber-600" /> : <CheckCircle2 size={16} className="text-primary" />}
           {status}
         </div>
       )}
 
       <div className="space-y-6">
+        <CoursewareImageWarning preview={preview} />
+
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
           <div className="space-y-4">
             <GraphTreePanel
@@ -2440,6 +2485,21 @@ function DriftTrace({ driftReport }: { driftReport: SourceDriftReport | null }) 
         讲解范围与课件生成范围不同
       </div>
       <div>{driftReport.warning}</div>
+    </section>
+  )
+}
+
+function CoursewareImageWarning({ preview }: { preview: PptPreviewResponse | null }) {
+  const refs = preview?.missing_image_refs || []
+  if (!refs.length && !preview?.warning?.includes("图片引用")) return null
+  return (
+    <section className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+      <div className="mb-1 flex items-center gap-1.5 font-medium">
+        <AlertTriangle size={14} />
+        课件图片未完整加载
+      </div>
+      <div>{preview?.warning || "检测到未匹配的图片引用，请上传包含 TeX 和图片目录的 ZIP，或用图片包补充资源。"}</div>
+      {refs.length ? <div className="mt-1 truncate">缺失路径：{refs.slice(0, 8).join("、")}{refs.length > 8 ? ` 等 ${refs.length} 个` : ""}</div> : null}
     </section>
   )
 }

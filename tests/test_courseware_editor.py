@@ -85,6 +85,68 @@ class CoursewareEditorTest(unittest.TestCase):
         self.assertIn("Figure-26.2", asset["aliases"])
         self.assertTrue(asset["data_uri"].startswith("data:image/png;base64,"))
 
+    def test_missing_tex_image_ref_becomes_placeholder_object(self):
+        tex = r"""
+\documentclass{beamer}
+\begin{document}
+\begin{frame}{Missing Figure}
+  \includegraphics[width=0.5\textwidth]{fig/chart}
+\end{frame}
+\end{document}
+"""
+        parsed = parse_courseware(tex.encode("utf-8"), "edited.tex")
+        prompt = build_ppt_lecture_prompt_data(parsed)
+        model = editor.build_editable_model(parsed, prompt)
+        image_object = next(item for item in model["slides"][0]["objects"] if item["type"] == "placeholder")
+        asset = model["assets"][image_object["asset_id"]]
+
+        self.assertEqual(parsed["missing_image_refs"], ["fig/chart"])
+        self.assertIsNone(asset["data_uri"])
+        self.assertEqual(image_object["source_path"], "fig/chart")
+        self.assertEqual(image_object["tex_ref"], "fig/chart")
+
+    def test_title_slide_images_use_cover_layout(self):
+        tex = r"""
+\documentclass{ctexbeamer}
+\usepackage{graphicx}
+\usepackage{tikz}
+\title[]{ Evolutionary Theory on\\ Polygenic Trait}
+\subtitle{XII - Long-term Response}
+\author{Qi WU}
+\date{2026-5-26}
+\setbeamertemplate{title page}{%
+  \includegraphics[height=39pt, keepaspectratio]{fig/logo-a.png}
+  \includegraphics[height=39pt, keepaspectratio]{fig/logo-b.png}
+}
+\begin{document}
+{
+\setbeamertemplate{footline}{%
+  \makebox[\paperwidth][l]{\includegraphics[width=\paperwidth]{fig/footer.png}}%
+}
+\begin{frame}
+  \titlepage
+\end{frame}
+}
+\end{document}
+"""
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as archive:
+            archive.writestr("main.tex", tex)
+            archive.writestr("fig/logo-a.png", TINY_PNG)
+            archive.writestr("fig/logo-b.png", TINY_PNG)
+            archive.writestr("fig/footer.png", TINY_PNG)
+
+        parsed = parse_courseware(payload.getvalue(), "lecture.zip")
+        prompt = build_ppt_lecture_prompt_data(parsed)
+        model = editor.build_editable_model(parsed, prompt)
+        images = [item for item in model["slides"][0]["objects"] if item["type"] == "image"]
+
+        self.assertEqual(len(images), 3)
+        self.assertLess(images[0]["bbox"]["y"], 10)
+        self.assertLess(images[1]["bbox"]["y"], 10)
+        self.assertGreater(images[2]["bbox"]["y"], 490)
+        self.assertEqual(images[2]["bbox"]["width"], 1000.0)
+
     def test_serialize_model_to_tex_round_trips_layout_metadata(self):
         tex = r"""
 \documentclass{beamer}

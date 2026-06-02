@@ -75,7 +75,8 @@ class CoursewareParserTest(unittest.TestCase):
         self.assertEqual(parsed["tex_source_file"], "main.tex")
         self.assertEqual(prompt_data["chapter_title"], "Evolutionary Theory on Polygenic Trait")
         self.assertEqual(len(slides), 3)
-        self.assertEqual(slides[0]["image_count"], 0)
+        self.assertEqual(slides[0]["image_count"], 1)
+        self.assertEqual(slides[0]["images"][0]["source_path"], "fig/logo.png")
         self.assertEqual(slides[0]["layout"]["mode"], "title")
         self.assertIn("XI - Long-term Response", slides[0]["content"])
 
@@ -152,6 +153,25 @@ class CoursewareParserTest(unittest.TestCase):
         self.assertEqual(slide["layout"]["columns"][0]["width_ratio"], 0.85)
         self.assertEqual(slide["layout"]["columns"][0]["image_count"], 0)
         self.assertIn("Caption below the image", slide["layout"]["outside_content"])
+        self.assertEqual(parsed["missing_image_refs"], ["fig/chart"])
+        self.assertEqual(slide["missing_image_refs"], ["fig/chart"])
+
+    def test_tex_image_ref_resolves_project_structured_figure_by_filename(self):
+        tex = r"""
+\documentclass{beamer}
+\begin{document}
+\begin{frame}{Figure 26.5}
+  \includegraphics[width=0.65\textwidth]{fig/fig_0128.png}
+\end{frame}
+\end{document}
+"""
+        parsed = parse_courseware(tex.encode("utf-8"), "edited.tex")
+        slide = build_ppt_lecture_prompt_data(parsed)["slide_details"][0]
+
+        self.assertEqual(parsed["missing_image_refs"], [])
+        self.assertEqual(slide["image_count"], 1)
+        self.assertEqual(slide["images"][0]["source_path"], "figures/fig_0128.png")
+        self.assertTrue(str(slide["images"][0]["data_uri"]).startswith("data:image/png;base64,"))
 
     def test_tex_custom_safecontentimage_is_treated_as_image(self):
         tex = r"""

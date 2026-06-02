@@ -335,8 +335,8 @@ export const useGenerateSlideLectures = () => {
             message?: string
             elapsed_seconds?: number
           }>(
-            `/api/education/generate-slide-lectures/jobs/${encodeURIComponent(started.job_id)}`,
-            { timeout: 120000 },
+          `/api/education/generate-slide-lectures/jobs/${encodeURIComponent(started.job_id)}`,
+            { timeout: 0 },
           )
           .then((r) => r.data)
         onProgress?.(job)

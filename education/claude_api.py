@@ -131,8 +131,14 @@ def _extract_deepseek_response_text(result: Dict[str, Any]) -> str:
     choice = choices[0]
     if not isinstance(choice, dict):
         raise Exception("DeepSeek API 返回格式不正确：choices[0] 不是对象")
-
+    finish_reason = str(choice.get("finish_reason") or "").strip()
     message = choice.get("message")
+    if finish_reason == "length":
+        reasoning_note = ""
+        if isinstance(message, dict) and _message_content_to_text(message.get("reasoning_content")).strip():
+            reasoning_note = "；返回中只有 reasoning_content，已拒绝作为正文使用"
+        raise Exception(f"DeepSeek API 输出达到 max_tokens 限制，结果可能被截断，请提高输出长度或减少单次生成内容{reasoning_note}。")
+
     if isinstance(message, dict):
         content = _message_content_to_text(message.get("content")).strip()
         if content:
@@ -147,7 +153,7 @@ def _extract_deepseek_response_text(result: Dict[str, Any]) -> str:
         if content:
             return content
 
-    finish_reason = str(choice.get("finish_reason") or "").strip() or "unknown"
+    finish_reason = finish_reason or "unknown"
     message_keys = ",".join(sorted(message.keys())) if isinstance(message, dict) else "none"
     reasoning_note = ""
     if isinstance(message, dict) and _message_content_to_text(message.get("reasoning_content")).strip():

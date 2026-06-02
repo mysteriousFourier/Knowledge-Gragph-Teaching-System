@@ -18,11 +18,13 @@ from KGTS.education.router import (
     _apply_model_slide_lecture_allocations,
     _build_slide_lecture_pacing,
     _build_slide_transition_context,
+    _compact_slide_for_lecture,
     _looks_like_reasoning_contaminated_lecture,
     _merge_existing_slide_lectures,
     _nonempty_slide_lecture_count,
     _normalize_target_slide_indices,
     _select_slide_evidence_for_prompt,
+    _slide_lecture_max_output_tokens,
     _slide_lecture_read_timeout,
     _slide_lecture_concurrency,
     _slide_lecture_error_summary,
@@ -150,6 +152,21 @@ class CoursewareStyleTest(unittest.TestCase):
             else:
                 os.environ["KGTS_SLIDE_LECTURE_READ_TIMEOUT_SECONDS"] = old_value
 
+    def test_slide_lecture_output_token_limit_is_configurable_and_bounded(self):
+        old_value = os.environ.get("KGTS_SLIDE_LECTURE_MAX_OUTPUT_TOKENS")
+        try:
+            os.environ["KGTS_SLIDE_LECTURE_MAX_OUTPUT_TOKENS"] = "9000"
+            self.assertEqual(_slide_lecture_max_output_tokens(), 9000)
+            os.environ["KGTS_SLIDE_LECTURE_MAX_OUTPUT_TOKENS"] = "20000"
+            self.assertEqual(_slide_lecture_max_output_tokens(), 12000)
+            os.environ["KGTS_SLIDE_LECTURE_MAX_OUTPUT_TOKENS"] = "10"
+            self.assertEqual(_slide_lecture_max_output_tokens(), 1200)
+        finally:
+            if old_value is None:
+                os.environ.pop("KGTS_SLIDE_LECTURE_MAX_OUTPUT_TOKENS", None)
+            else:
+                os.environ["KGTS_SLIDE_LECTURE_MAX_OUTPUT_TOKENS"] = old_value
+
     def test_slide_lecture_pacing_allocates_total_character_budget(self):
         slides = [
             {"index": 1, "title": "Title"},
@@ -167,6 +184,19 @@ class CoursewareStyleTest(unittest.TestCase):
         self.assertEqual(sum(item["target_chars"] for item in pacing["slides"].values()), 2500)
         self.assertLess(pacing["slides"][3]["target_chars"], pacing["slides"][2]["target_chars"])
         self.assertIn("target_duration_seconds", pacing["slides"][2])
+
+    def test_title_slide_is_not_used_as_lecture_content(self):
+        slide = {
+            "index": 1,
+            "title": "Evolutionary Theory on Polygenic Trait",
+            "content": "XII - Long-term Response\nQi WU\n2026-5-26",
+            "raw_text": "## Evolutionary Theory on Polygenic Trait\nXII - Long-term Response\nQi WU\n2026-5-26",
+            "layout": {"mode": "title"},
+        }
+
+        self.assertEqual(_compact_slide_for_lecture(slide), "")
+        pacing = _build_slide_lecture_pacing([slide, {"index": 2, "title": "Dense", "content": "正文" * 50}], target_duration_minutes=2)
+        self.assertLess(pacing["slides"][1]["target_chars"], pacing["slides"][2]["target_chars"])
 
     def test_model_slide_lecture_allocations_keep_total_budget(self):
         base = _build_slide_lecture_pacing(
@@ -260,6 +290,19 @@ class CoursewareStyleTest(unittest.TestCase):
                                 "content": "",
                                 "reasoning_content": "我需要先分析课件结构，然后生成逐页讲稿。",
                             },
+                        }
+                    ]
+                }
+            )
+
+    def test_deepseek_length_finish_reason_is_not_silently_accepted(self):
+        with self.assertRaisesRegex(Exception, "max_tokens"):
+            _extract_deepseek_response_text(
+                {
+                    "choices": [
+                        {
+                            "finish_reason": "length",
+                            "message": {"content": "这是一段被截断的讲稿"},
                         }
                     ]
                 }

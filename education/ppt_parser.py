@@ -39,6 +39,7 @@ SUPPORTED_COURSEWARE_EXTENSIONS = (
 SUPPORTED_COURSEWARE_FORMATS_TEXT = ", ".join(sorted(SUPPORTED_COURSEWARE_EXTENSIONS))
 _STRUCTURED_FIGURE_INDEX: Dict[str, Dict[str, Any]] | None = None
 _STRUCTURED_FIGURE_ASSET_CACHE: Dict[str, Dict[str, Any]] = {}
+_STRUCTURED_IMAGE_ASSET_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def parse_ppt(file_bytes: bytes) -> Dict[str, Any]:
@@ -98,12 +99,14 @@ def parse_text_courseware(file_bytes: bytes, filename: str = "") -> Dict[str, An
     if lower_name.endswith(".tex"):
         text = _normalize_text_newlines(text)
     slides = _slides_from_text(text, filename)
+    missing_image_refs = _collect_missing_image_refs(slides)
     return {
         "success": True,
         "slide_count": len(slides),
         "slides": slides,
         "full_text": "\n\n---\n\n".join(str(slide.get("raw_text") or "") for slide in slides),
         "tex_content": text if lower_name.endswith(".tex") else "",
+        "missing_image_refs": missing_image_refs,
     }
 
 
@@ -131,6 +134,7 @@ def parse_zip_courseware(file_bytes: bytes, filename: str = "") -> Dict[str, Any
             image_assets=asset_map,
             tex_base_dir=posixpath.dirname(tex_name),
         )
+        missing_image_refs = _collect_missing_image_refs(slides)
         return {
             "success": True,
             "slide_count": len(slides),
@@ -138,6 +142,7 @@ def parse_zip_courseware(file_bytes: bytes, filename: str = "") -> Dict[str, Any
             "full_text": "\n\n---\n\n".join(str(slide.get("raw_text") or "") for slide in slides),
             "tex_content": tex_text,
             "tex_source_file": tex_name,
+            "missing_image_refs": missing_image_refs,
         }
     finally:
         archive.close()
@@ -359,6 +364,7 @@ def _slides_from_text(
         title, body = _title_and_body_from_chunk(chunk, index)
         body_texts = _body_texts_from_text(body)
         images = _images_from_text_chunk(chunk, image_assets or {}, tex_base_dir)
+        missing_image_refs = _missing_image_refs_from_text_chunk(chunk, image_assets or {}, tex_base_dir)
         raw_text = _build_raw_text(title, body_texts or [body], [], "")
         slides.append(
             {
@@ -369,6 +375,7 @@ def _slides_from_text(
                 "notes": "",
                 "image_count": len(images),
                 "images": images,
+                "missing_image_refs": missing_image_refs,
                 "raw_text": raw_text,
                 "source_file": filename,
             }
@@ -399,7 +406,7 @@ def _slides_from_latex(
         if is_titlepage:
             title = title or metadata.get("title") or f"第 {index} 页"
             body = _latex_titlepage_body(metadata)
-            image_chunk = raw_body
+            image_chunk = "\n".join(part for part in [template_text, raw_body] if part)
         else:
             inline_title, raw_body = _extract_frametitle(raw_body)
             title = title or inline_title or f"第 {index} 页"
@@ -409,6 +416,7 @@ def _slides_from_latex(
         body = body.strip()
         body_texts = [body] if body else []
         images = _images_from_text_chunk(image_chunk, image_assets, tex_base_dir)
+        missing_image_refs = _missing_image_refs_from_text_chunk(image_chunk, image_assets, tex_base_dir)
         layout = _infer_latex_frame_layout(
             raw_body,
             images,
@@ -430,6 +438,7 @@ def _slides_from_latex(
                 "notes": "",
                 "image_count": len(images),
                 "images": images,
+                "missing_image_refs": missing_image_refs,
                 "raw_text": raw_text,
                 "source_file": filename,
                 "source_tex": source_tex,
@@ -440,6 +449,16 @@ def _slides_from_latex(
             }
         )
     return slides
+
+
+def _collect_missing_image_refs(slides: List[Dict[str, Any]]) -> List[str]:
+    missing: List[str] = []
+    for slide in slides:
+        for ref in slide.get("missing_image_refs") or []:
+            value = str(ref or "").strip()
+            if value and value not in missing:
+                missing.append(value)
+    return missing
 
 
 def _extract_kgts_canvas_layout(source: str) -> Dict[str, Any]:
@@ -493,6 +512,18 @@ def _images_from_text_chunk(chunk: str, image_assets: Dict[str, Dict[str, Any]],
     return images
 
 
+def _missing_image_refs_from_text_chunk(chunk: str, image_assets: Dict[str, Dict[str, Any]], tex_base_dir: str) -> List[str]:
+    missing: List[str] = []
+    for _options, ref in _latex_image_refs(chunk):
+        clean_ref = ref.strip().strip("\"'").replace("\\", "/")
+        if not clean_ref:
+            continue
+        asset = _resolve_image_asset(image_assets, clean_ref, tex_base_dir) or _resolve_structured_figure_asset(clean_ref)
+        if not asset and clean_ref not in missing:
+            missing.append(clean_ref)
+    return missing
+
+
 def _latex_image_refs(chunk: str) -> List[tuple[str, str]]:
     refs = re.findall(r"\\includegraphics(?:\[([^\]]*)\])?\{([^}]+)\}", chunk or "")
     for command, default_options in LATEX_IMAGE_COMMAND_DEFAULT_OPTIONS.items():
@@ -526,32 +557,68 @@ def _resolve_image_asset(image_assets: Dict[str, Dict[str, Any]], ref: str, tex_
 
 def _resolve_structured_figure_asset(ref: str) -> Dict[str, Any] | None:
     index = _load_structured_figure_index()
-    if not index:
+    if index:
+        for figure_id in _structured_figure_id_candidates(ref):
+            entry = index.get(figure_id)
+            if not entry:
+                continue
+            if figure_id in _STRUCTURED_FIGURE_ASSET_CACHE:
+                return _STRUCTURED_FIGURE_ASSET_CACHE[figure_id]
+            asset_path = str(entry.get("asset_path") or "").replace("\\", "/").lstrip("/")
+            asset = _read_structured_image_asset(asset_path, tex_ref=asset_path, cache_key=f"figure:{figure_id}")
+            if asset:
+                asset["figure_id"] = figure_id
+                _STRUCTURED_FIGURE_ASSET_CACHE[figure_id] = asset
+                return asset
+    return _resolve_structured_image_file_asset(ref)
+
+
+def _resolve_structured_image_file_asset(ref: str) -> Dict[str, Any] | None:
+    clean_ref = str(ref or "").strip().strip("\"'").replace("\\", "/").lstrip("/")
+    if not clean_ref:
         return None
-    for figure_id in _structured_figure_id_candidates(ref):
-        entry = index.get(figure_id)
-        if not entry:
-            continue
-        if figure_id in _STRUCTURED_FIGURE_ASSET_CACHE:
-            return _STRUCTURED_FIGURE_ASSET_CACHE[figure_id]
-        asset_path = str(entry.get("asset_path") or "").replace("\\", "/").lstrip("/")
-        if not asset_path:
-            continue
-        absolute_path = _structured_root_dir() / asset_path
-        try:
-            image_bytes = absolute_path.read_bytes()
-        except OSError:
-            continue
-        asset = {
-            "name": asset_path,
-            "bytes": image_bytes,
-            "mime_type": mimetypes.guess_type(asset_path)[0] or "application/octet-stream",
-            "tex_ref": asset_path,
-            "figure_id": figure_id,
-        }
-        _STRUCTURED_FIGURE_ASSET_CACHE[figure_id] = asset
-        return asset
+    candidates = [clean_ref]
+    basename = posixpath.basename(clean_ref)
+    if basename and basename != clean_ref:
+        candidates.append(basename)
+    for prefix in ("figures", "textbook/figures"):
+        if basename:
+            candidates.append(f"{prefix}/{basename}")
+    extension = posixpath.splitext(clean_ref)[1]
+    if not extension:
+        for value in list(candidates):
+            candidates.extend(f"{value}{image_extension}" for image_extension in IMAGE_EXTENSIONS)
+    for candidate in candidates:
+        asset = _read_structured_image_asset(candidate, tex_ref=clean_ref, cache_key=f"file:{candidate}")
+        if asset:
+            return asset
     return None
+
+
+def _read_structured_image_asset(asset_path: str, *, tex_ref: str, cache_key: str) -> Dict[str, Any] | None:
+    clean_path = _normalize_archive_path(asset_path)
+    if not clean_path or posixpath.splitext(clean_path)[1].lower() not in IMAGE_EXTENSIONS:
+        return None
+    if cache_key in _STRUCTURED_IMAGE_ASSET_CACHE:
+        return _STRUCTURED_IMAGE_ASSET_CACHE[cache_key]
+    root_dir = _structured_root_dir().resolve()
+    absolute_path = (root_dir / clean_path).resolve()
+    try:
+        absolute_path.relative_to(root_dir)
+    except ValueError:
+        return None
+    try:
+        image_bytes = absolute_path.read_bytes()
+    except OSError:
+        return None
+    asset = {
+        "name": clean_path,
+        "bytes": image_bytes,
+        "mime_type": mimetypes.guess_type(clean_path)[0] or "application/octet-stream",
+        "tex_ref": tex_ref,
+    }
+    _STRUCTURED_IMAGE_ASSET_CACHE[cache_key] = asset
+    return asset
 
 
 def _load_structured_figure_index() -> Dict[str, Dict[str, Any]]:
@@ -1366,6 +1433,7 @@ def build_ppt_lecture_prompt_data(parse_result: Dict[str, Any]) -> Dict[str, Any
                 "has_images": slide.get("image_count", 0) > 0,
                 "image_count": slide.get("image_count", 0),
                 "images": slide.get("images", []),
+                "missing_image_refs": slide.get("missing_image_refs", []),
                 "tables": slide.get("tables", []),
                 "body_texts": slide.get("body_texts", []),
                 "raw_text": slide.get("raw_text", ""),

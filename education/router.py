@@ -92,8 +92,21 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SLIDE_LECTURE_DURATION_MINUTES = 10.0
 DEFAULT_SLIDE_LECTURE_SPEECH_RATE_CPM = 250
+DEFAULT_SLIDE_LECTURE_MAX_OUTPUT_TOKENS = 6000
 SLIDE_LECTURE_JOBS: Dict[str, Dict[str, Any]] = {}
 SLIDE_LECTURE_JOB_TTL_SECONDS = 60 * 60 * 4
+
+
+def _courseware_image_warning(parse_result: Dict[str, Any]) -> str:
+    missing_refs = [str(ref).strip() for ref in (parse_result.get("missing_image_refs") or []) if str(ref).strip()]
+    if not missing_refs:
+        return ""
+    shown = "、".join(missing_refs[:6])
+    suffix = f" 等 {len(missing_refs)} 个" if len(missing_refs) > 6 else ""
+    tex_source = str(parse_result.get("tex_source_file") or "").strip()
+    if tex_source:
+        return f"检测到未匹配的图片引用：{shown}{suffix}。请确认 ZIP 中包含与 {tex_source} 相对路径一致的图片文件。"
+    return f"检测到未匹配的图片引用：{shown}{suffix}。单独上传 .tex 不包含 fig 等相对路径图片；请上传包含 .tex 和图片目录的 ZIP，或用“图片包”补充资源。"
 
 
 @router.get("/")
@@ -588,18 +601,10 @@ async def create_slide_lecture_job(request: GenerateSlideLecturesRequest):
         job["updated_at"] = datetime.now().isoformat()
         update_stage("starting", "正在准备逐页讲解任务")
         try:
-            timeout_seconds = _slide_lecture_job_timeout()
-            result = await asyncio.wait_for(
-                asyncio.to_thread(lambda: asyncio.run(_generate_slide_lectures_sync(request, progress=update_stage))),
-                timeout=timeout_seconds,
-            )
+            result = await asyncio.to_thread(lambda: asyncio.run(_generate_slide_lectures_sync(request, progress=update_stage)))
             job["result"] = _compact_slide_lecture_response(result) if isinstance(result, dict) else result
             job["status"] = "completed"
             update_stage("completed", "逐页讲解生成完成")
-        except asyncio.TimeoutError:
-            job["status"] = "failed"
-            job["error"] = f"逐页讲解生成超时（超过 {int(_slide_lecture_job_timeout())} 秒），请减少页数或稍后重试"
-            update_stage("failed", job["error"])
         except Exception as exc:
             job["status"] = "failed"
             job["error"] = str(exc).strip() or exc.__class__.__name__
@@ -651,10 +656,6 @@ def _prune_slide_lecture_jobs() -> None:
             expired.append(job_id)
     for job_id in expired:
         SLIDE_LECTURE_JOBS.pop(job_id, None)
-
-
-def _slide_lecture_job_timeout() -> float:
-    return _optional_timeout_env("KGTS_SLIDE_LECTURE_JOB_TIMEOUT_SECONDS", 12 * 60.0) or 12 * 60.0
 
 
 def _slide_lecture_job_elapsed_seconds(job: Dict[str, Any]) -> int:
@@ -999,6 +1000,9 @@ def _truncate_for_prompt(value: Any, max_chars: int) -> str:
 
 
 def _compact_slide_for_lecture(slide: Dict[str, Any], max_chars: int = 1200) -> str:
+    layout = slide.get("layout") if isinstance(slide.get("layout"), dict) else {}
+    if str(layout.get("mode") or "") == "title":
+        return ""
     parts: List[str] = []
     title = str(slide.get("title") or "").strip()
     if title:
@@ -1277,17 +1281,25 @@ def _optional_timeout_env(name: str, default: float | None) -> float | None:
 
 
 def _slide_lecture_pacing_timeout() -> float | None:
-    return _optional_timeout_env("KGTS_SLIDE_LECTURE_PACING_TIMEOUT_SECONDS", 90.0)
+    return _optional_timeout_env("KGTS_SLIDE_LECTURE_PACING_TIMEOUT_SECONDS", None)
 
 
 def _slide_lecture_read_timeout(phase: str) -> float | None:
     if phase == "flash_fallback":
-        return _optional_timeout_env("KGTS_SLIDE_LECTURE_FLASH_READ_TIMEOUT_SECONDS", 60.0)
-    return _optional_timeout_env("KGTS_SLIDE_LECTURE_READ_TIMEOUT_SECONDS", 90.0)
+        return _optional_timeout_env("KGTS_SLIDE_LECTURE_FLASH_READ_TIMEOUT_SECONDS", None)
+    return _optional_timeout_env("KGTS_SLIDE_LECTURE_READ_TIMEOUT_SECONDS", None)
 
 
 def _slide_lecture_completion_timeout() -> float | None:
-    return _optional_timeout_env("KGTS_SLIDE_LECTURE_COMPLETION_TIMEOUT_SECONDS", 60.0)
+    return _optional_timeout_env("KGTS_SLIDE_LECTURE_COMPLETION_TIMEOUT_SECONDS", None)
+
+
+def _slide_lecture_max_output_tokens() -> int:
+    try:
+        value = int(os.getenv("KGTS_SLIDE_LECTURE_MAX_OUTPUT_TOKENS", str(DEFAULT_SLIDE_LECTURE_MAX_OUTPUT_TOKENS)))
+    except (TypeError, ValueError):
+        value = DEFAULT_SLIDE_LECTURE_MAX_OUTPUT_TOKENS
+    return max(1200, min(value, 12000))
 
 
 def _count_speech_chars(text: str) -> int:
@@ -1295,6 +1307,9 @@ def _count_speech_chars(text: str) -> int:
 
 
 def _slide_budget_source_text(slide: Dict[str, Any]) -> str:
+    layout = slide.get("layout") if isinstance(slide.get("layout"), dict) else {}
+    if str(layout.get("mode") or "") == "title":
+        return ""
     parts: List[str] = []
     for key in ("title", "content", "notes", "raw_text"):
         value = str(slide.get(key) or "").strip()
@@ -2140,6 +2155,7 @@ async def upload_ppt(
 
         prompt_data = build_ppt_lecture_prompt_data(parse_result)
         editable_model = build_editable_model(parse_result, prompt_data)
+        image_warning = _courseware_image_warning(parse_result)
 
         chapter_title = prompt_data["chapter_title"]
         chapter_content = prompt_data["chapter_content"]
@@ -2190,10 +2206,11 @@ async def upload_ppt(
                 "asset_map": editable_model.get("assets") or {},
                 "layout": editable_model.get("layout") or {},
                 "source_tex": parse_result.get("tex_content") or "",
+                "missing_image_refs": parse_result.get("missing_image_refs") or [],
                 "lecture_content": "",
                 "slide_lectures": slide_lectures,
                 "lecture_pacing": _summarize_slide_lecture_pacing(slide_lectures, pacing),
-                "warning": "课件中未提取到有效文本内容，可能是纯图片或扫描件",
+                "warning": image_warning or "课件中未提取到有效文本内容，可能是纯图片或扫描件",
             }
             if normalized_source_node_ids:
                 payload.update(
@@ -2259,6 +2276,7 @@ async def upload_ppt(
                 "asset_map": editable_model.get("assets") or {},
                 "layout": editable_model.get("layout") or {},
                 "source_tex": parse_result.get("tex_content") or "",
+                "missing_image_refs": parse_result.get("missing_image_refs") or [],
                 "lecture_content": "",
                 "slide_lectures": slide_lectures,
                 "source_node_id": normalized_source_node_ids[0] if normalized_source_node_ids else None,
@@ -2304,6 +2322,7 @@ async def upload_ppt(
             "asset_map": editable_model.get("assets") or {},
             "layout": editable_model.get("layout") or {},
             "source_tex": parse_result.get("tex_content") or "",
+            "missing_image_refs": parse_result.get("missing_image_refs") or [],
             "lecture_content": lecture_content,
             "slide_lectures": slide_lectures,
             "lecture_pacing": _summarize_slide_lecture_pacing(slide_lectures, pacing),
@@ -2317,6 +2336,7 @@ async def upload_ppt(
             "style": style,
             "model": claude_client.model,
             "generated_at": datetime.now().isoformat(),
+            **({"warning": image_warning} if image_warning else {}),
         })
 
     except HTTPException:
@@ -2677,7 +2697,10 @@ async def _try_generate_slide_lecture_item(
         lecture = expand_formula_references(
             await client._call_deepseek(
                 prompt + retry_note,
-                max_tokens=min(2600, max(800, int(pacing.get("target_chars") or 700) * 2)),
+                max_tokens=min(
+                    _slide_lecture_max_output_tokens(),
+                    max(1200, int(pacing.get("target_chars") or 700) * 3),
+                ),
                 system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
                 read_timeout_seconds=_slide_lecture_read_timeout(phase),
             ),
@@ -2827,7 +2850,7 @@ async def _complete_short_slide_lecture_with_flash(
         addition = expand_formula_references(
             await flash_client._call_deepseek(
                 prompt,
-                max_tokens=min(1400, max(300, gap * 2)),
+                max_tokens=min(3000, max(600, gap * 3)),
                 system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
                 read_timeout_seconds=_slide_lecture_completion_timeout(),
             ),
@@ -2973,6 +2996,7 @@ async def upload_ppt_preview(file: UploadFile = File(...)):
 
         prompt_data = build_ppt_lecture_prompt_data(parse_result)
         editable_model = build_editable_model(parse_result, prompt_data)
+        image_warning = _courseware_image_warning(parse_result)
 
         return {
             "success": True,
@@ -2986,6 +3010,8 @@ async def upload_ppt_preview(file: UploadFile = File(...)):
             "asset_map": editable_model.get("assets") or {},
             "layout": editable_model.get("layout") or {},
             "source_tex": parse_result.get("tex_content") or "",
+            "missing_image_refs": parse_result.get("missing_image_refs") or [],
+            **({"warning": image_warning} if image_warning else {}),
         }
 
     except HTTPException:
@@ -3009,6 +3035,7 @@ async def preview_tex(request: PreviewTexRequest):
 
         prompt_data = build_ppt_lecture_prompt_data(parse_result)
         editable_model = build_editable_model(parse_result, prompt_data)
+        image_warning = _courseware_image_warning(parse_result)
         return {
             "success": True,
             "chapter_title": prompt_data["chapter_title"],
@@ -3020,6 +3047,8 @@ async def preview_tex(request: PreviewTexRequest):
             "asset_map": editable_model.get("assets") or {},
             "layout": editable_model.get("layout") or {},
             "source_tex": tex_content,
+            "missing_image_refs": parse_result.get("missing_image_refs") or [],
+            **({"warning": image_warning} if image_warning else {}),
         }
     except HTTPException:
         raise

@@ -251,6 +251,7 @@ export interface PptImageInfo {
   width_ratio?: number
   height_ratio?: number
   oversized?: boolean
+  missing?: boolean
 }
 
 export interface CoursewareAsset {
@@ -366,6 +367,7 @@ export interface PptSlideDetail {
   source_body_tex?: string
   source_start?: number | null
   source_end?: number | null
+  missing_image_refs?: string[]
   layout?: {
     mode?: "text" | "title" | "columns" | "image_only" | "image_text" | "text_image" | string
     has_columns?: boolean
@@ -519,6 +521,7 @@ export interface PptPreviewResponse {
   layout?: EditableSlideModel["layout"]
   source_tex?: string
   warning?: string
+  missing_image_refs?: string[]
   error?: string
 }
 
