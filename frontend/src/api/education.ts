@@ -40,6 +40,9 @@ export const useSaveConfig = () => {
       deepseek_api_base?: string
       deepseek_flash_model?: string
       deepseek_pro_model?: string
+      gpt_api_key?: string
+      gpt_api_base?: string
+      gpt_model?: string
     }) =>
       educationClient
         .post<SaveConfigResponse>("/api/config", data)

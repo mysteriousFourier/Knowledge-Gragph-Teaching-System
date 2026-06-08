@@ -29,6 +29,13 @@
   var toolbarSelectionHoldUntil = 0;
   var latexSyncTimer = null;
   var currentCustomRequirements = "";
+  var generatedOutline = null;
+  var activeOutlineSectionIndex = 0;
+  var pageChecklistText = "";
+  var pageChecklistTimer = null;
+  var GPT_CONFIG_STORAGE_KEY = "beamer_generator_gpt_config_v1";
+  var OUTLINE_STORAGE_KEY = "beamer_generator_saved_outline_v1";
+  var activeGptConfig = null;
   var historyTimer = null;
   var undoStack = [];
   var redoStack = [];
@@ -106,8 +113,13 @@
   var latexManualSyncSeq = 0;
   var suppressNextLatexManualSync = false;
   var latexGenerateProgress = 0;
+  var outlineGenerateProgress = 0;
+  var outlineProgressTimer = null;
   var queuedStatusMessage = null;
   var importedPackageImages = [];
+  var importedPreviewImages = [];
+  var importPreviewPanelOpen = false;
+  var importPreviewTitle = "导入内容预览";
   var packageImagePanelOpen = false;
   var editedImageGeometry = { placeholders: {}, images: {} };
   var rawMarkdownContent = "";
@@ -120,6 +132,7 @@
   var activeMarkdownPreviewIndex = null;
   var importedEquationCatalog = [];
   var extraEquationCatalog = [];
+  var missingEquationCatalog = [];
   var supplementChapterCatalog = [];
   var latexPptSplitRatio = parseFloat(localStorage.getItem("bg_latex_ppt_split_ratio") || "0.5");
   if (Number.isNaN(latexPptSplitRatio)) latexPptSplitRatio = 0.5;
@@ -444,7 +457,20 @@
         });
       });
     }
+    String(fullLatex || "").replace(/\\(?:includegraphics|safecontentimage|safeverticalimage)(?:\[[^\]]*\])?\{([^{}]+\.(?:png|jpe?g|pdf|webp))\}/gi, function (_match, rawPath) {
+      var target = String(rawPath || "").trim().replace(/\\/g, "/");
+      if (!target || payload[target]) return _match;
+      var url = /^(?:https?:\/\/|data:|\/beamer-generator\/uploads\/|\/uploads\/)/i.test(target)
+        ? target
+        : resolvePackageAssetUrl(target);
+      if (url) payload[target] = url;
+      return _match;
+    });
     return payload;
+  }
+
+  function latexHasExternalGraphicRefs(tex) {
+    return /\\(?:includegraphics|safecontentimage|safeverticalimage)(?:\[[^\]]*\])?\{(?!data:)([^{}]+\.(?:png|jpe?g|pdf|webp))\}/i.test(String(tex || ""));
   }
 
   function appendTextNode($target, text) {
@@ -731,6 +757,58 @@
     return "formula:" + latexMathDisplaySource(eq.formula || "").replace(/\s+/g, "");
   }
 
+  function collectCurrentMissingEquations() {
+    var items = [];
+    var seen = {};
+
+    function add(keyValue, labelValue, context) {
+      var key = String(keyValue || "").trim();
+      var label = String(labelValue || key || "").trim();
+      var raw = label || key;
+      if (!raw) return;
+      var numberMatch = raw.match(/\d+(?:\.\d+)+|\d+/) || key.match(/\d+(?:\.\d+)+|\d+/);
+      var number = numberMatch ? numberMatch[0] : "";
+      var dedupeKey = number ? "num:" + number : "label:" + raw.replace(/\s+/g, "");
+      if (seen[dedupeKey]) return;
+      seen[dedupeKey] = true;
+      items.push({
+        key: key || raw,
+        label: label || key || raw,
+        number: number,
+        chapterHint: number && number.indexOf(".") > -1 ? ("建议导入第 " + number.split(".")[0] + " 章相关公式章节") : "",
+        context: context || "",
+      });
+    }
+
+    if (slidesData && Array.isArray(slidesData.missing_equations)) {
+      slidesData.missing_equations.forEach(function (eq) {
+        add((eq && eq.key) || "", (eq && eq.label) || "", "全局缺失公式");
+      });
+    }
+    if (slidesData && Array.isArray(slidesData.slides)) {
+      slidesData.slides.forEach(function (slide, idx) {
+        (slide.missing_equations || []).forEach(function (eq) {
+          var title = slide && slide.title ? String(slide.title) : ("第 " + (idx + 1) + " 页");
+          add((eq && eq.key) || "", (eq && eq.label) || "", title);
+        });
+      });
+    }
+    var source = "";
+    if (editor && editor.getValue) source = editor.getValue();
+    else source = fullLatex || "";
+    var markerPattern = /\\kgmissingequation\{([^{}]+)\}\{([^{}]*)\}/g;
+    var match;
+    while ((match = markerPattern.exec(source || "")) !== null) {
+      add(match[1], match[2] || match[1], "LaTeX 标记");
+    }
+    return items;
+  }
+
+  function refreshMissingEquationCatalog() {
+    missingEquationCatalog = collectCurrentMissingEquations();
+    return missingEquationCatalog;
+  }
+
   function currentMissingEquationKeys() {
     var keys = {};
 
@@ -743,27 +821,11 @@
       keys["label:" + raw] = true;
     }
 
-    if (slidesData && Array.isArray(slidesData.missing_equations)) {
-      slidesData.missing_equations.forEach(function (eq) {
-        add((eq && (eq.key || eq.label)) || "");
-      });
-    }
-    if (slidesData && Array.isArray(slidesData.slides)) {
-      slidesData.slides.forEach(function (slide) {
-        (slide.missing_equations || []).forEach(function (eq) {
-          add((eq && (eq.key || eq.label)) || "");
-        });
-      });
-    }
-    var source = "";
-    if (editor && editor.getValue) source = editor.getValue();
-    else source = fullLatex || "";
-    var markerPattern = /\\kgmissingequation\{([^{}]+)\}\{([^{}]*)\}/g;
-    var match;
-    while ((match = markerPattern.exec(source || "")) !== null) {
-      add(match[1]);
-      add(match[2]);
-    }
+    refreshMissingEquationCatalog().forEach(function (eq) {
+      add(eq.key);
+      add(eq.label);
+      if (eq.number) add(eq.number);
+    });
     return keys;
   }
 
@@ -1607,6 +1669,65 @@
     $("body").removeClass("modal-open");
   }
 
+  function renderedPagesToPreviewImages(renderedPages, prefix) {
+    return (Array.isArray(renderedPages) ? renderedPages : []).map(function (page, idx) {
+      return {
+        url: page.image || "",
+        name: (prefix || "页面") + " " + (idx + 1),
+      };
+    }).filter(function (item) {
+      return !!item.url;
+    });
+  }
+
+  function figureAssetsToPreviewImages(figureAssets) {
+    return (Array.isArray(figureAssets) ? figureAssets : []).map(function (item, idx) {
+      return {
+        url: item.url || "",
+        name: (item.label || ("Figure " + (idx + 1))) + (item.path ? " · " + item.path : ""),
+      };
+    }).filter(function (item) {
+      return !!item.url;
+    });
+  }
+
+  function setImportedPreviewImages(items, title) {
+    importedPreviewImages = (Array.isArray(items) ? items : []).filter(function (item) {
+      return item && item.url;
+    });
+    importPreviewTitle = title || "导入内容预览";
+    if (!importedPreviewImages.length) {
+      importPreviewPanelOpen = false;
+    }
+    renderImportPreviewPanel();
+  }
+
+  function renderImportPreviewPanel() {
+    var $panel = $("#importPreviewPanel");
+    var $grid = $("#importPreviewGrid").empty();
+    $("#importPreviewTitle").text(importPreviewTitle + (importedPreviewImages.length ? "（" + importedPreviewImages.length + "）" : ""));
+    $("#btnToggleImportPreview")
+      .prop("disabled", !importedPreviewImages.length)
+      .text(importPreviewPanelOpen ? "收起预览" : "预览导入内容");
+
+    if (!importedPreviewImages.length) {
+      $panel.hide();
+      return;
+    }
+
+    importedPreviewImages.forEach(function (img, index) {
+      $grid.append(
+        '<button type="button" class="import-preview-item" data-import-preview-index="' + index + '">' +
+          '<span class="import-preview-number">' + (index + 1) + '</span>' +
+          '<img class="import-preview-thumb" src="' + escAttr(img.url) + '" alt="' + escAttr(img.name || "") + '" loading="lazy" />' +
+          '<span class="import-preview-caption">' + escHtml(img.name || ("预览 " + (index + 1))) + '</span>' +
+        '</button>'
+      );
+    });
+
+    $panel.toggle(importPreviewPanelOpen);
+  }
+
   function positionFigureHoverPreview($ref) {
     var $panel = $("#figureHoverPreview");
     if (!$panel.is(":visible") || !$ref || !$ref.length) return;
@@ -1803,7 +1924,7 @@
   function applyLectureSource(title, content) {
     $("#content").val(content || "");
     updateContentPreview();
-    if (title) {
+    if (title && !$("#customRequirements").val().trim()) {
       $("#customRequirements").val("Title: " + title);
     }
   }
@@ -1824,7 +1945,7 @@
     }];
     refreshMergedMarkdownContent();
     renderMarkdownImportList();
-    if (title) {
+    if (title && !$("#customRequirements").val().trim()) {
       $("#customRequirements").val("Title: " + title.replace(/\.(zip|md|markdown|txt)$/i, ""));
     }
     setStatus("Imported " + files.length + " file(s), " + (data.char_count || content.length) + " chars", "success");
@@ -1854,15 +1975,43 @@
 
   function renderEquationSourcePanel() {
     var $panel = $("#equationSourcePanel");
+    var $missingList = $("#equationMissingList");
     var $list = $("#equationSourceList");
     var $extraList = $("#equationSourceExtraList");
+    refreshMissingEquationCatalog();
+    $missingList.empty();
     $list.empty();
     $extraList.empty();
+
+    if (!missingEquationCatalog.length) {
+      $missingList.append('<div class="equation-source-empty">当前未识别到缺失公式。若页面中有“缺失公式”提示，请先解析或同步 LaTeX。</div>');
+    } else {
+      missingEquationCatalog.forEach(function (eq) {
+        var number = eq.number ? ("(" + eq.number + ")") : (eq.label || eq.key || "缺失公式");
+        var hint = eq.chapterHint ? '<div class="equation-source-section">' + escHtml(eq.chapterHint) + '</div>' : "";
+        var context = eq.context ? '<div class="equation-source-section">来源：' + escHtml(eq.context) + '</div>' : "";
+        $missingList.append(
+          '<div class="equation-source-item equation-source-missing-item">' +
+            '<div class="equation-source-main">' +
+              '<div class="equation-source-meta">' +
+                '<span class="equation-source-number">' + escHtml(number) + '</span>' +
+              '</div>' +
+              '<div class="equation-source-preview">' + escHtml(eq.label || eq.key || number) + '</div>' +
+              hint +
+              context +
+            '</div>' +
+          '</div>'
+        );
+      });
+    }
+
     if (!importedEquationCatalog.length) {
-      $("#equationSourceSummary").text("未识别到可引用公式");
+      $("#equationSourceSummary").text(
+        "当前缺失 " + missingEquationCatalog.length + " 个公式；请选择包含对应编号的公式章节文件。"
+      );
       $list.append('<div class="equation-source-empty">未在文件中识别到编号公式。</div>');
     } else {
-      $("#equationSourceSummary").text("识别到 " + (importedEquationCatalog.length + extraEquationCatalog.length) + " 个公式；当前章节可引用 " + importedEquationCatalog.length + " 个，非本章缺失 " + extraEquationCatalog.length + " 个");
+      $("#equationSourceSummary").text("当前缺失 " + missingEquationCatalog.length + " 个公式；识别到 " + (importedEquationCatalog.length + extraEquationCatalog.length) + " 个公式；当前章节可引用 " + importedEquationCatalog.length + " 个，非本章缺失 " + extraEquationCatalog.length + " 个");
       importedEquationCatalog.forEach(function (eq, idx) {
         var $row = $(
           '<label class="equation-source-item">' +
@@ -2908,6 +3057,42 @@
     setStatus(msg, "info", { generation: true });
   }
 
+  function setOutlineProgress(value, message, state) {
+    outlineGenerateProgress = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+    $("#outlineProgressPanel")
+      .removeClass("success error")
+      .addClass(state === "success" ? "success" : (state === "error" ? "error" : ""))
+      .show();
+    $("#outlineProgressMessage").text(message || "正在生成纪要...");
+    $("#outlineProgressPercent").text(outlineGenerateProgress + "%");
+    $("#outlineProgressFill").css("width", outlineGenerateProgress + "%");
+  }
+
+  function startOutlineProgress(message) {
+    if (outlineProgressTimer) clearInterval(outlineProgressTimer);
+    setOutlineProgress(4, message || "正在准备纪要生成请求...");
+    outlineProgressTimer = setInterval(function () {
+      var next = outlineGenerateProgress;
+      if (next < 25) next += 3;
+      else if (next < 65) next += 2;
+      else if (next < 90) next += 1;
+      else next = 90;
+      setOutlineProgress(next, "GPT 正在生成大节与每页 frame 纪要...");
+      if (next >= 90 && outlineProgressTimer) {
+        clearInterval(outlineProgressTimer);
+        outlineProgressTimer = null;
+      }
+    }, 900);
+  }
+
+  function finishOutlineProgress(message, state) {
+    if (outlineProgressTimer) {
+      clearInterval(outlineProgressTimer);
+      outlineProgressTimer = null;
+    }
+    setOutlineProgress(state === "error" ? Math.max(outlineGenerateProgress, 1) : 100, message, state);
+  }
+
   function updateDownloadPptxButton() {
     $("#btnDownloadPptx").prop("disabled", !slidesData || !slidesData.slides || !slidesData.slides.length);
   }
@@ -2966,12 +3151,14 @@
   function applyLatexImportMode() {
     if (!isLatexImportMode) return;
     $(".panel-input").find(".form-row, #customRequirements, #customRequirements + small, .form-group").hide();
-    $("#btnGenerate").hide();
+    $("#btnGenerate, #btnGenerateOutline, #outlinePanel, #viewOutline, .api-config-panel, .generate-actions").hide();
     $("#latexImportPanel").addClass("latex-import-panel-inline").insertAfter(".tab-bar").show();
-    $("#btnConvertPpt").text("渲染为高保真 PPT").prop("disabled", true);
+    $("#btnConvertPpt").hide().prop("disabled", true);
+    $("#btnDownloadPptx").hide().prop("disabled", true);
     $("#tabPpt").prop("disabled", true);
+    $("#tabOutline").prop("disabled", true);
     $(".tab-btn[data-tab='latex']").text("LaTeX 代码");
-    $("#slideCanvas").html('<div class="slide-placeholder">导入 .tex / PDF / ZIP 文件或在左侧粘贴 LaTeX，然后点击“渲染为高保真 PPT”。</div>');
+    $("#slideCanvas").html('<div class="slide-placeholder">导入 PPTX 后，左侧显示转换后的 LaTeX 代码。</div>');
     inputCollapsed = true;
     localStorage.setItem("bg_input_panel_collapsed", "1");
     updateLatexImportMeta();
@@ -2981,12 +3168,19 @@
     isGenerating = state;
     if (state) latexGenerateProgress = 0;
     $("#btnGenerate").prop("disabled", state)
-      .text(state ? "生成中..." : "生成演示文稿");
+      .text(state ? "生成中..." : "生成 LaTeX");
+    $("#btnGenerateOutline").prop("disabled", state)
+      .text(state ? "生成中..." : "生成纪要");
     if (!state) {
       var has = !!fullLatex;
       $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt").prop("disabled", !has);
       updateDownloadPptxButton();
       updateHistoryButtons();
+      if (queuedStatusMessage) {
+        var queued = queuedStatusMessage;
+        queuedStatusMessage = null;
+        setStatus(queued.msg, queued.type);
+      }
     } else {
       $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt, #btnDownloadPptx").prop("disabled", true);
       $("#btnUndoPpt, #btnRedoPpt").prop("disabled", true);
@@ -3132,21 +3326,24 @@
   });
 
   function setLatexImportLoading(state) {
-    $("#btnImportLatexFile").prop("disabled", state).text(state ? "导入中..." : "导入 .tex / PDF / ZIP 文件");
-    $("#btnImportLatexProject").prop("disabled", state).text(state ? "导入中..." : "导入 LaTeX 项目目录");
-    $("#btnImportOverleafResult").prop("disabled", state).text(state ? "导入中..." : "导入 Overleaf 结果");
+    $("#btnImportPptInLatexPanel").prop("disabled", state).text(state ? "导入中..." : "导入 PPTX 转 LaTeX");
   }
 
-  $("#btnImportLatexFile, #btnImportOverleafResult").on("click", function () {
-    $("#latexImporter").val("").trigger("click");
-  });
-
-  $("#btnImportLatexProject").on("click", function () {
-    $("#latexProjectImporter").val("").trigger("click");
-  });
-
   $("#btnImportEquationSource").on("click", function () {
+    renderEquationSourcePanel();
+    setStatus("已列出当前缺失公式目录，请按编号选择并导入对应公式章节。", missingEquationCatalog.length ? "success" : "error");
+  });
+
+  $("#btnChooseEquationSourceFile").on("click", function () {
     $("#equationSourceImporter").val("").trigger("click");
+  });
+
+  $("#btnImportPptLatex").on("click", function () {
+    $("#pptLatexImporter").val("").trigger("click");
+  });
+
+  $("#btnImportPptInLatexPanel").on("click", function () {
+    $("#pptLatexImporter").val("").trigger("click");
   });
 
   $("#btnCloseEquationSourcePanel").on("click", function () {
@@ -3197,18 +3394,28 @@
     }
   }
 
-  $("#btnParseImportedLatex").on("click", function () {
-    var tex = editor && editor.getValue ? editor.getValue() : fullLatex;
-    loadLatexIntoEditablePpt(tex, {
-      updateEditor: false,
-      chapterTitle: titleFromLatexFileName(importedLatexFileName),
-    });
-  });
-
   $("#btnTogglePackageImages").on("click", function () {
     if (!importedPackageImages.length) return;
     packageImagePanelOpen = !packageImagePanelOpen;
     renderPackageImages();
+  });
+
+  $("#btnToggleImportPreview").on("click", function () {
+    if (!importedPreviewImages.length) return;
+    importPreviewPanelOpen = !importPreviewPanelOpen;
+    renderImportPreviewPanel();
+  });
+
+  $("#importPreviewPanel").on("click", "[data-action='close-import-preview']", function (e) {
+    e.preventDefault();
+    importPreviewPanelOpen = false;
+    renderImportPreviewPanel();
+  });
+
+  $("#importPreviewGrid").on("click", ".import-preview-item", function () {
+    var index = parseInt($(this).data("import-preview-index"), 10);
+    if (Number.isNaN(index) || !importedPreviewImages[index]) return;
+    openPackageImageViewer(importedPreviewImages[index], index);
   });
 
   $("#packageImagePanel").on("click", "[data-action='close-package-image-panel']", function (e) {
@@ -3317,7 +3524,7 @@
         var titleBase = imported.length === 1
           ? imported[0].name
           : (imported[0] ? imported[0].name + " 等 " + imported.length + " 个知识图谱" : "知识图谱");
-        if (imported.length) {
+        if (imported.length && !$("#customRequirements").val().trim()) {
           $("#customRequirements").val("Title: " + titleBase.replace(/\.(md|markdown|zip|txt)$/i, ""));
         }
         var allImported = validImportedMarkdownItems();
@@ -3503,8 +3710,18 @@
       });
       return;
     }
+    if (/\.(pptx|ppt)$/i.test(file.name || "") || /presentation|powerpoint/i.test(file.type || "")) {
+      setLatexImportLoading(true);
+      loadPptIntoLatexFromFile(file, {
+        chapterTitle: titleFromLatexFileName(file.name || ""),
+      }).always(function () {
+        setLatexImportLoading(false);
+        $("#latexImporter").val("");
+      });
+      return;
+    }
     if (!/\.(tex|latex|txt)$/i.test(file.name || "") && !/tex|plain|text/i.test(file.type || "")) {
-      setStatus("请选择 .tex / .pdf / .zip 文件", "error");
+      setStatus("请选择 .tex / .pdf / .zip / .pptx / .ppt 文件", "error");
       $(this).val("");
       return;
     }
@@ -3576,7 +3793,12 @@
   document.addEventListener("wheel", containNestedWheelScroll, { passive: false, capture: true });
 
   editor.on("cursorActivity", scheduleLatexSelectionSync);
-  editor.on("change", scheduleLatexManualSync);
+  editor.on("change", function () {
+    scheduleLatexManualSync();
+    if (!latexProgrammaticUpdate && !syncSelectionLock) {
+      schedulePageChecklistUpdate(null, 260);
+    }
+  });
   editor.on("mousedown", clearLatexSyncSelectionOnEditorInput);
   editor.on("touchstart", clearLatexSyncSelectionOnEditorInput);
   var slideCanvasNode = document.getElementById("slideCanvas");
@@ -3590,7 +3812,9 @@
   }
 
   function downloadFile(content, filename, mime) {
-    var blob = (typeof content === "string")
+    var blob = content instanceof Blob
+      ? content
+      : (typeof content === "string")
       ? new Blob([content], { type: mime + ";charset=utf-8" })
       : new Blob([content], { type: mime });
     var url = URL.createObjectURL(blob);
@@ -3602,6 +3826,17 @@
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
+
+  $("#btnTogglePageChecklist").on("click", function () {
+    var currentLatex = editor && editor.getValue ? editor.getValue() : fullLatex;
+    updatePageChecklist(currentLatex || "");
+    $("#pageChecklistPanel").toggle();
+  });
+
+  $("#btnDownloadPageChecklist").on("click", function () {
+    if (!pageChecklistText) return;
+    downloadFile(pageChecklistText, "page_checklist_" + today() + ".txt", "text/plain");
+  });
 
   function escHtml(s) {
     return $("<span>").text(s || "").html();
@@ -4566,7 +4801,6 @@
       "\\setbeamertemplate{footline}{}",
       "\\setbeamertemplate{navigation symbols}{}",
       "\\newcommand{\\kgimageplaceholder}[2][]{\\begin{center}\\fbox{\\parbox[c][0.28\\textheight][c]{0.34\\textwidth}{\\centering #2}}\\end{center}}",
-      "\\providecommand{\\kgmissingequation}[2]{\\textcolor{red}{\\textbf{缺失公式：#2。请导入包含该公式的章节后自动补全。}}}",
       "\\title{" + escapeLatexText(meta.title || "Presentation") + "}",
       "\\subtitle{" + escapeLatexText(meta.subtitle || "") + "}",
       "\\author{" + escapeLatexText(meta.author || "") + "}",
@@ -4585,12 +4819,7 @@
   }
 
   function ensureMissingEquationMacro(preamble, slides) {
-    var needsMacro = false;
-    $.each(slides || [], function (_i, slide) {
-      if (slide && slide.missing_equations && slide.missing_equations.length) needsMacro = true;
-    });
-    if (!needsMacro || preamble.indexOf("\\kgmissingequation") !== -1) return preamble;
-    return preamble + "\n\\providecommand{\\kgmissingequation}[2]{\\textcolor{red}{\\textbf{缺失公式：#2。请导入包含该公式的章节后自动补全。}}}\n";
+    return preamble;
   }
 
   function syncTitleMetaFromSlides() {
@@ -4805,11 +5034,11 @@
       out.push("\\begin{frame}{" + richHtmlToLatex("", figureFrameTitle(slide, img, "图片")) + "}");
       out.push("  \\begin{columns}[T]");
       out.push("    \\begin{column}{0.45\\textwidth}");
-      out.push("      \\centering");
-      out.push("      " + imageLatexForFrame(img, "\\textwidth"));
+      out.push("      \\scriptsize " + richHtmlToLatex("", caption));
       out.push("    \\end{column}");
       out.push("    \\begin{column}{0.45\\textwidth}");
-      out.push("      \\scriptsize " + richHtmlToLatex("", caption));
+      out.push("      \\centering");
+      out.push("      " + imageLatexForFrame(img, "\\textwidth"));
       out.push("    \\end{column}");
       out.push("  \\end{columns}");
       out.push("\\end{frame}");
@@ -4968,9 +5197,9 @@
     out.push("      \\begin{itemize}");
     out.push("        \\setlength{\\itemsep}{0.3\\baselineskip}");
     for (var i = 0; i < items.length; i++) {
+      var itemText = String(items[i] || "").replace(/\s*\[\d+\.\]\s*$/, "");
       out.push(
-        "        \\item[\\textcolor{black}{\\textbf{" + (i + 1) + ".}}] " +
-        "\\textcolor{black}{" + escapeLatexTextPreservingMath(items[i] || "") + "}"
+        "        \\item \\textcolor{black}{" + escapeLatexTextPreservingMath(itemText) + "}"
       );
     }
     out.push("      \\end{itemize}");
@@ -5014,8 +5243,9 @@
     addLine("      \\begin{itemize}");
     addLine("        \\setlength{\\itemsep}{0.3\\baselineskip}");
     for (var i = 0; i < items.length; i++) {
-      var prefix = "        \\item[\\textcolor{black}{\\textbf{" + (i + 1) + ".}}] \\textcolor{black}{";
-      addTrackedLine(prefix, items[i] || "", "}", syncKey(slideIdx, "item", i));
+      var prefix = "        \\item \\textcolor{black}{";
+      var itemText = String(items[i] || "").replace(/\s*\[\d+\.\]\s*$/, "");
+      addTrackedLine(prefix, itemText, "}", syncKey(slideIdx, "item", i));
     }
     addLine("      \\end{itemize}");
     addLine("    \\end{minipage}");
@@ -5116,17 +5346,6 @@
         out.push("  \\begin{center}");
         out.push("    \\[" + formula + "\\]");
         out.push("  \\end{center}");
-      }
-    }
-
-    if (slide.missing_equations && slide.missing_equations.length) {
-      for (var q = 0; q < slide.missing_equations.length; q++) {
-        var missingEq = slide.missing_equations[q] || {};
-        var missingKey = escapeLatexText(String(missingEq.key || missingEq.label || ("missing-" + (q + 1))));
-        var missingLabel = escapeLatexText(String(missingEq.label || missingEq.key || missingKey));
-        out.push("  \\begin{alertblock}{缺失公式}");
-        out.push("    \\kgmissingequation{" + missingKey + "}{" + missingLabel + "}");
-        out.push("  \\end{alertblock}");
       }
     }
 
@@ -5354,17 +5573,6 @@
       }
     }
 
-    if (slide.missing_equations && slide.missing_equations.length) {
-      for (var q = 0; q < slide.missing_equations.length; q++) {
-        var missingEq = slide.missing_equations[q] || {};
-        var missingKey = escapeLatexText(String(missingEq.key || missingEq.label || ("missing-" + (q + 1))));
-        var missingLabel = escapeLatexText(String(missingEq.label || missingEq.key || missingKey));
-        addLine("  \\begin{alertblock}{缺失公式}");
-        addTrackedLine("    \\kgmissingequation{", missingKey + "}{" + missingLabel, "}", syncKey(slideIdx, "missingEquation", q));
-        addLine("  \\end{alertblock}");
-      }
-    }
-
     if (slide.notes) {
       var noteLines = String(slide.notes || "").split(/\r?\n/);
       for (var n = 0; n < noteLines.length; n++) {
@@ -5518,6 +5726,7 @@
       suppressNextLatexManualSync = false;
     }, 120);
     editor.scrollTo(scrollInfo.left, scrollInfo.top);
+    schedulePageChecklistUpdate(tex || "", 160);
   }
 
   function rebuildRenderedPageLocationMap(data, tex) {
@@ -5689,6 +5898,11 @@
       data: JSON.stringify({ latex: fullLatex }),
       success: function (data) {
         if (seq !== latexManualSyncSeq || !data || data.error || !data.slides) return;
+        if (data.latex && data.latex !== fullLatex) {
+          fullLatex = data.latex;
+          sourceLatex = fullLatex;
+          updateLatexEditor(fullLatex);
+        }
         var previousSlidesData = slidesData ? deepClone(slidesData) : null;
         for (var i = 0; i < data.slides.length; i++) {
           if (!data.slides[i].images) data.slides[i].images = [];
@@ -5782,6 +5996,7 @@
 
   function applyInputCollapsedState() {
     $(".container").toggleClass("input-collapsed", inputCollapsed);
+    if (!inputCollapsed) $(".container").removeClass("outline-only");
     $(".panel-input").prop("hidden", inputCollapsed);
     $("#btnToggleInputPanel")
       .text(inputCollapsed ? ">>" : "<<")
@@ -5790,11 +6005,7 @@
     $("#innerResizeHandle").toggle(inputCollapsed);
 
     if (inputCollapsed) {
-      $("#viewLatex, #viewPpt").addClass("active").show();
-      $(".latex-actions, .ppt-actions").show();
-      if (collapsedPaneResize) {
-        collapsedPaneResize.applySplit(latexPptSplitRatio);
-      }
+      setActiveTab(activeTab || "latex");
     } else {
       $(".panel-output").css("grid-template-columns", "");
       setActiveTab(activeTab || "latex");
@@ -5804,24 +6015,46 @@
   }
 
   function setActiveTab(tab) {
-    if (tab !== "latex" && tab !== "ppt") tab = "latex";
+    if (tab !== "latex" && tab !== "outline" && tab !== "ppt") tab = "latex";
     activeTab = tab;
     $(".tab-btn").removeClass("active");
     $('.tab-btn[data-tab="' + tab + '"]').addClass("active");
     if (inputCollapsed) {
-      $("#viewLatex, #viewPpt").addClass("active").show();
-      $(".latex-actions, .ppt-actions").show();
+      if (tab === "outline") {
+        $(".container").addClass("outline-only");
+        $(".panel-output").css("grid-template-columns", "1fr");
+        $("#viewOutline").addClass("active").show();
+        $("#viewLatex, #viewPpt").removeClass("active").hide();
+        $("#innerResizeHandle").hide();
+        $(".latex-actions, .ppt-actions").hide();
+      } else {
+        $(".container").removeClass("outline-only");
+        $("#viewLatex, #viewPpt").addClass("active").show();
+        $("#viewOutline").removeClass("active").hide();
+        $("#innerResizeHandle").show();
+        $(".latex-actions, .ppt-actions").show();
+        if (collapsedPaneResize) {
+          collapsedPaneResize.applySplit(latexPptSplitRatio);
+        }
+      }
       refreshEditorSize();
       return;
     }
     if (tab === "latex") {
       $("#viewLatex").addClass("active").show();
+      $("#viewOutline").removeClass("active").hide();
       $("#viewPpt").removeClass("active").hide();
       $(".latex-actions").show();
       $(".ppt-actions").hide();
+    } else if (tab === "outline") {
+      $("#viewOutline").addClass("active").show();
+      $("#viewLatex").removeClass("active").hide();
+      $("#viewPpt").removeClass("active").hide();
+      $(".latex-actions, .ppt-actions").hide();
     } else {
       $("#viewPpt").addClass("active").show();
       $("#viewLatex").removeClass("active").hide();
+      $("#viewOutline").removeClass("active").hide();
       $(".latex-actions").hide();
       $(".ppt-actions").show();
     }
@@ -5842,6 +6075,740 @@
     setActiveTab(tab);
   });
 
+  function htmlEscape(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function uniqueList(items) {
+    var seen = {};
+    var result = [];
+    (items || []).forEach(function (item) {
+      var text = String(item || "").trim();
+      if (!text || seen[text]) return;
+      seen[text] = true;
+      result.push(text);
+    });
+    return result;
+  }
+
+  function extractLatexFramesForChecklist(latex) {
+    var frames = [];
+    var re = /\\begin\{frame\}(?:\[[^\]]*\])?(?:\{([^}]*)\})?([\s\S]*?)\\end\{frame\}/g;
+    var match;
+    while ((match = re.exec(latex || "")) !== null) {
+      var body = match[2] || "";
+      var title = String(match[1] || "").trim();
+      if (!title) {
+        var titleMatch = /\\frametitle\{([^}]*)\}/.exec(body);
+        title = titleMatch ? titleMatch[1].trim() : "";
+      }
+      frames.push({ title: title || ("Frame " + (frames.length + 1)), body: body });
+    }
+    return frames;
+  }
+
+  function outlineSectionIdsByPage(outline) {
+    var ids = [];
+    ((outline && outline.sections) || []).forEach(function (section) {
+      var count = ((section.frames || []).length) || section.slide_count || 0;
+      for (var i = 0; i < count; i++) ids.push(section.id || "");
+    });
+    return ids;
+  }
+
+  function extractFormulaLabelsForChecklist(text) {
+    var items = [];
+    var patterns = [
+      /Equation\s*\(?(\d+(?:\.\d+)+)\)?/gi,
+      /Eq\.?\s*\(?(\d+(?:\.\d+)+)\)?/gi,
+      /\\tag\{([^}]+)\}/g,
+      /\\label\{([^}]*(?:eq|equation)[^}]*)\}/gi,
+      /\\eqref\{([^}]+)\}/g,
+      /\\kgmissingequation\{num:([^}]+)\}/g,
+      /\\kgmissingequation\{label:([^}]+)\}/g,
+    ];
+    patterns.forEach(function (pattern) {
+      var match;
+      while ((match = pattern.exec(text || "")) !== null) {
+        items.push(match[1]);
+      }
+    });
+    return uniqueList(items);
+  }
+
+  function extractImageNumbersForChecklist(text) {
+    var items = [];
+    var patterns = [
+      /Figure\s*(\d+(?:\.\d+)+)/gi,
+      /Fig\.?\s*(\d+(?:\.\d+)+)/gi,
+      /图\s*(\d+(?:[._]\d+)+)/g,
+      /fig\/(?:图)?(\d+(?:[._]\d+)+)[^}\s]*/gi,
+      /figures\/(?:图)?(\d+(?:[._]\d+)+)[^}\s]*/gi,
+    ];
+    patterns.forEach(function (pattern) {
+      var match;
+      while ((match = pattern.exec(text || "")) !== null) {
+        items.push(String(match[1] || "").replace(/_/g, "."));
+      }
+    });
+    return uniqueList(items.map(function (item) {
+      return item.indexOf("Figure ") === 0 ? item : "Figure " + item;
+    }));
+  }
+
+  function buildPageChecklistText(latex, outline) {
+    var frames = extractLatexFramesForChecklist(latex);
+    var sectionIds = outlineSectionIdsByPage(outline);
+    if (!frames.length) return "";
+    return frames.map(function (frame, index) {
+      var formulas = extractFormulaLabelsForChecklist(frame.body);
+      var images = extractImageNumbersForChecklist(frame.title + "\n" + frame.body);
+      return [
+        "Page " + (index + 1) + ": " + frame.title,
+        "大节标号: " + (sectionIds[index] || "未识别"),
+        "公式标号: " + (formulas.length ? formulas.join(", ") : "无"),
+        "图片编号: " + (images.length ? images.join(", ") : "无"),
+      ].join("\n");
+    }).join("\n\n");
+  }
+
+  function updatePageChecklist(latex) {
+    var source = latex || "";
+    pageChecklistText = buildPageChecklistText(source, generatedOutline);
+    $("#pageChecklistText").text(pageChecklistText || "暂无逐页清单。");
+    var hasLatex = !!String(source || fullLatex || "").trim();
+    $("#btnTogglePageChecklist")
+      .prop("disabled", !hasLatex)
+      .text(pageChecklistText ? "逐页清单" : "逐页清单");
+    $("#btnDownloadPageChecklist").prop("disabled", !pageChecklistText);
+  }
+
+  function schedulePageChecklistUpdate(latex, delayMs) {
+    var source = typeof latex === "string"
+      ? latex
+      : (editor && editor.getValue ? editor.getValue() : fullLatex);
+    if (pageChecklistTimer) clearTimeout(pageChecklistTimer);
+    pageChecklistTimer = setTimeout(function () {
+      pageChecklistTimer = null;
+      updatePageChecklist(source || "");
+    }, typeof delayMs === "number" ? delayMs : 160);
+  }
+
+  function readGptConfig() {
+    var apiKey = String($("#gptApiKey").val() || "").trim();
+    var apiBase = String($("#gptApiBase").val() || "").trim();
+    var model = String($("#gptModel").val() || "").trim();
+    if (!apiKey) {
+      setStatus("请输入本次生成使用的 GPT API Key", "error");
+      $("#gptApiKey").focus();
+      return null;
+    }
+    if (!apiBase) {
+      setStatus("请输入 GPT API Base URL", "error");
+      $("#gptApiBase").focus();
+      return null;
+    }
+    if (!model) {
+      setStatus("请输入 GPT 模型名称", "error");
+      $("#gptModel").focus();
+      return null;
+    }
+    activeGptConfig = { api_key: apiKey, base_url: apiBase, model: model };
+    return activeGptConfig;
+  }
+
+  function saveGptConfigToBrowser(config) {
+    localStorage.setItem(GPT_CONFIG_STORAGE_KEY, JSON.stringify({
+      api_key: config.api_key,
+      base_url: config.base_url,
+      model: config.model,
+    }));
+  }
+
+  function restoreGptConfigFromBrowser() {
+    try {
+      var raw = localStorage.getItem(GPT_CONFIG_STORAGE_KEY);
+      if (!raw) return;
+      var config = JSON.parse(raw);
+      if (config.api_key) $("#gptApiKey").val(config.api_key);
+      if (config.base_url) $("#gptApiBase").val(config.base_url);
+      if (config.model) $("#gptModel").val(config.model);
+      activeGptConfig = {
+        api_key: String(config.api_key || "").trim(),
+        base_url: String(config.base_url || "").trim(),
+        model: String(config.model || "").trim(),
+      };
+    } catch (err) {
+      localStorage.removeItem(GPT_CONFIG_STORAGE_KEY);
+    }
+  }
+
+  function outlineStorageTitle(outline) {
+    outline = outline || generatedOutline || {};
+    var base = String(outline.title || $("#customRequirements").val() || "saved_outline").trim();
+    base = base.replace(/^Title:\s*/i, "").replace(/[\\/:*?"<>|]+/g, "_").replace(/\s+/g, "_");
+    return base || "saved_outline";
+  }
+
+  function saveOutlineToBrowser(outline) {
+    localStorage.setItem(OUTLINE_STORAGE_KEY, JSON.stringify({
+      saved_at: new Date().toISOString(),
+      outline: outline,
+    }));
+  }
+
+  function loadOutlineFromBrowser() {
+    var raw = localStorage.getItem(OUTLINE_STORAGE_KEY);
+    if (!raw) return null;
+    var data = JSON.parse(raw);
+    return data && data.outline ? data.outline : null;
+  }
+
+  function selectedSectionsPayload() {
+    return getSelectedMarkdownSections().map(function (section) {
+      return {
+        file: section.fileTitle,
+        title: section.title,
+        id: section.id,
+      };
+    });
+  }
+
+  function applySelectedSectionsRequirement(requirements, selectedSections) {
+    var result = String(requirements || "").trim();
+    if (!selectedSections.length) return result;
+    var selectionRequirement = "本次只根据已引用的 Markdown 小节生成 PPT，不要使用未引用小节。已引用小节：" +
+      selectedSections.map(function (section) {
+        return section.file + " / " + section.title;
+      }).join("；");
+    return result ? result + "\n" + selectionRequirement : selectionRequirement;
+  }
+
+  function normalizeNumericText(value) {
+    return String(value || "").replace(/[０-９]/g, function (char) {
+      return String(char.charCodeAt(0) - 0xff10);
+    });
+  }
+
+  function readClampedInt(selector, fallback, minValue, maxValue) {
+    var raw = normalizeNumericText($(selector).val());
+    var match = raw.match(/\d+/);
+    var value = match ? parseInt(match[0], 10) : fallback;
+    if (Number.isNaN(value)) value = fallback;
+    value = Math.max(minValue, Math.min(maxValue, value));
+    $(selector).val(String(value));
+    return value;
+  }
+
+  function readSectionSlideRange() {
+    var minSlides = readClampedInt("#sectionSlideMin", 1, 1, 80);
+    var maxSlides = readClampedInt("#sectionSlideMax", 8, 1, 80);
+    if (maxSlides < minSlides) {
+      maxSlides = minSlides;
+      $("#sectionSlideMax").val(String(maxSlides));
+    }
+    return { min: minSlides, max: maxSlides };
+  }
+
+  $("#sectionSlideMin, #sectionSlideMax").on("input", function () {
+    var cleaned = normalizeNumericText($(this).val()).replace(/[^\d]/g, "");
+    if ($(this).val() !== cleaned) $(this).val(cleaned);
+  }).on("blur", function () {
+    readSectionSlideRange();
+  });
+
+  function buildBaseGenerationPayload(content) {
+    var config = readGptConfig();
+    if (!config) return null;
+    var selectedSections = selectedSectionsPayload();
+    var sectionSlideRange = readSectionSlideRange();
+    currentCustomRequirements = applySelectedSectionsRequirement(
+      $("#customRequirements").val().trim(),
+      selectedSections
+    );
+    return {
+      provider: "gpt",
+      content: content,
+      api_key: config.api_key,
+      base_url: config.base_url,
+      style: $("#style").val(),
+      custom_requirements: currentCustomRequirements,
+      slide_count: Math.max(1, Math.min(80, parseInt($("#slideCount").val(), 10) || 7)),
+      section_slide_min: sectionSlideRange.min,
+      section_slide_max: sectionSlideRange.max,
+      language: $("#language").val(),
+      model: config.model,
+      figure_assets: buildFigureAssetPayload(),
+      selected_sections: selectedSections,
+    };
+  }
+
+  $("#btnApplyGptConfig").on("click", function () {
+    var config = readGptConfig();
+    if (!config) return;
+    setStatus("GPT API 配置已提交，本次生成将使用该配置。", "success");
+  });
+
+  $("#btnSaveGptConfig").on("click", function () {
+    var config = readGptConfig();
+    if (!config) return;
+    saveGptConfigToBrowser(config);
+    setStatus("GPT API 配置已保存到本机浏览器。", "success");
+  });
+
+  function updateOutlineSummary() {
+    if (!generatedOutline || !generatedOutline.sections) {
+      $("#outlineSummary").text("");
+      return;
+    }
+    var sectionCount = generatedOutline.sections.length;
+    var frameCount = generatedOutline.sections.reduce(function (sum, section) {
+      return sum + ((section.frames && section.frames.length) || 0);
+    }, 0);
+    $("#outlineSummary").text(sectionCount + " 个大节，" + frameCount + " 个 frame");
+  }
+
+  function normalizeOutlineFrameCounts(outline) {
+    outline = outline || { title: "Presentation", target_slide_count: 0, sections: [] };
+    outline.sections = Array.isArray(outline.sections) ? outline.sections : [];
+    outline.target_slide_count = 0;
+    outline.sections.forEach(function (section) {
+      section.frames = Array.isArray(section.frames) ? section.frames : [];
+      section.slide_count = section.frames.length;
+      outline.target_slide_count += section.frames.length;
+    });
+    return outline;
+  }
+
+  function requireRenderableOutline(outline) {
+    var normalized = normalizeOutlineFrameCounts(outline);
+    if (!normalized.sections.length) {
+      throw new Error("后端返回的纪要为空，没有可展示的大节");
+    }
+    var frameCount = normalized.sections.reduce(function (sum, section) {
+      return sum + ((section.frames && section.frames.length) || 0);
+    }, 0);
+    if (!frameCount) {
+      throw new Error("后端返回的纪要没有 frame 页面");
+    }
+    return normalized;
+  }
+
+  function refreshOutlineMathPreviews($scope) {
+    var $root = $scope && $scope.length ? $scope : $("#outlineEditor");
+    $root.find(".outline-section").each(function () {
+      var $section = $(this);
+      renderMathText(
+        $section.find(".outline-section-summary-preview").first(),
+        $section.find(".outline-section-summary").val() || "",
+        { emptyText: "暂无大节概要预览。" }
+      );
+    });
+    $root.find(".outline-frame").each(function () {
+      var $frame = $(this);
+      renderMathText(
+        $frame.find(".outline-frame-points-preview").first(),
+        $frame.find(".outline-frame-points").val() || "",
+        { emptyText: "暂无要点预览。" }
+      );
+    });
+  }
+
+  function renderOutlineEditor(outline) {
+    generatedOutline = normalizeOutlineFrameCounts(outline);
+    var sections = generatedOutline.sections || [];
+    if (!sections.length) {
+      $("#outlineEditor").html("");
+      $("#outlinePanel").hide();
+      $("#outlinePlaceholder").show();
+      updateOutlineSummary();
+      schedulePageChecklistUpdate(fullLatex, 0);
+      return;
+    }
+    activeOutlineSectionIndex = Math.max(0, Math.min(activeOutlineSectionIndex, sections.length - 1));
+    var activeSection = sections[activeOutlineSectionIndex] || {};
+    var html = "";
+    html += '<div class="outline-workspace">';
+    html += '<div class="outline-section-nav" aria-label="纪要大节目录">';
+    var pageOffset = 0;
+    sections.forEach(function (section, sectionIndex) {
+      var frameCount = (section.frames || []).length;
+      html += '<div class="outline-section-nav-item' + (sectionIndex === activeOutlineSectionIndex ? " active" : "") + '" data-section="' + sectionIndex + '" role="button" tabindex="0">';
+      html += '<span class="outline-section-nav-id">' + htmlEscape(section.id || String(sectionIndex + 1).padStart(3, "0")) + '</span>';
+      html += '<span class="outline-section-nav-title">' + htmlEscape(section.title || ("大节 " + (sectionIndex + 1))) + '</span>';
+      html += '<span class="outline-section-nav-count">' + frameCount + ' 页</span>';
+      html += '<div class="outline-page-index-popover" aria-label="本大节页面索引">';
+      html += '<div class="outline-page-index-title">页面索引</div>';
+      if (!frameCount) {
+        html += '<div class="outline-page-index-empty">暂无页面</div>';
+      }
+      (section.frames || []).forEach(function (frame, frameIndex) {
+        var pageNumber = pageOffset + frameIndex + 1;
+        html += '<button type="button" class="outline-page-index-item" data-section="' + sectionIndex + '" data-frame="' + frameIndex + '">';
+        html += '<span class="outline-page-index-number">P' + pageNumber + '</span>';
+        html += '<span class="outline-page-index-text">' + htmlEscape(frame.title || ("Frame " + (frameIndex + 1))) + '</span>';
+        html += '</button>';
+      });
+      html += '</div>';
+      html += '</div>';
+      pageOffset += frameCount;
+    });
+    html += '</div>';
+    html += '<div class="outline-section-detail">';
+    html += '<div class="outline-section" data-section="' + activeOutlineSectionIndex + '">';
+    html += '<div class="outline-section-head">';
+    html += '<input class="outline-section-id" value="' + htmlEscape(activeSection.id || "") + '" placeholder="001" />';
+    html += '<input class="outline-section-title" value="' + htmlEscape(activeSection.title || "") + '" placeholder="大节标题" />';
+    html += '<input class="outline-section-count" type="number" min="1" value="' + ((activeSection.frames || []).length) + '" title="大节页数" />';
+    html += '<button type="button" class="btn-secondary outline-refresh-section">刷新本节</button>';
+    html += '<button type="button" class="btn-secondary outline-add-frame">新增 frame</button>';
+    html += '<button type="button" class="btn-secondary outline-save-section">保存本节</button>';
+    html += '</div>';
+    html += '<textarea class="outline-section-summary" placeholder="大节内容概要">' + htmlEscape(activeSection.summary || "") + '</textarea>';
+    html += '<div class="outline-math-preview-label">大节概要公式预览</div>';
+    html += '<div class="outline-math-preview outline-section-summary-preview"></div>';
+    html += '<div class="outline-frames">';
+    (activeSection.frames || []).forEach(function (frame, frameIndex) {
+      html += '<div class="outline-frame" data-frame="' + frameIndex + '" id="outline-frame-' + activeOutlineSectionIndex + '-' + frameIndex + '">';
+      html += '<div class="outline-frame-head">';
+      html += '<input class="outline-frame-title" value="' + htmlEscape(frame.title || "") + '" placeholder="frame 主题" />';
+      html += '<button type="button" class="btn-secondary outline-remove-frame">删除</button>';
+      html += '</div>';
+      html += '<textarea class="outline-frame-summary" placeholder="本页内容概要">' + htmlEscape(frame.summary || "") + '</textarea>';
+      html += '<textarea class="outline-frame-points" placeholder="每行一个要点">' + htmlEscape((frame.key_points || []).join("\n")) + '</textarea>';
+      html += '<div class="outline-math-preview-label">本页要点公式预览</div>';
+      html += '<div class="outline-math-preview outline-frame-points-preview"></div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<div class="outline-section-tools">';
+    html += '<button type="button" class="btn-secondary outline-add-frame">新增 frame</button>';
+    html += '<button type="button" class="btn-secondary outline-remove-section">删除大节</button>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+    $("#outlineEditor").html(html);
+    $("#outlinePanel").show();
+    $("#outlinePlaceholder").hide();
+    $("#tabOutline").prop("disabled", false);
+    setActiveTab("outline");
+    updateOutlineSummary();
+    refreshOutlineMathPreviews($("#outlineEditor"));
+    schedulePageChecklistUpdate(fullLatex, 0);
+  }
+
+  function collectOutlineFromEditor() {
+    var outline = {
+      title: (generatedOutline && generatedOutline.title) || "Presentation",
+      target_slide_count: 0,
+      sections: (generatedOutline && generatedOutline.sections ? generatedOutline.sections : []).map(function (section) {
+        return {
+          id: section.id || "",
+          title: section.title || "",
+          summary: section.summary || "",
+          slide_count: section.slide_count || ((section.frames || []).length),
+          frames: (section.frames || []).map(function (frame) {
+            return {
+              title: frame.title || "",
+              summary: frame.summary || "",
+              key_points: (frame.key_points || []).slice(),
+            };
+          }),
+        };
+      }),
+    };
+    $("#outlineEditor .outline-section").each(function () {
+      var $section = $(this);
+      var sectionIndex = parseInt($section.data("section"), 10);
+      var frames = [];
+      $section.find(".outline-frame").each(function () {
+        var $frame = $(this);
+        var points = String($frame.find(".outline-frame-points").val() || "")
+          .split(/\r?\n/)
+          .map(function (line) { return line.trim(); })
+          .filter(Boolean);
+        frames.push({
+          title: String($frame.find(".outline-frame-title").val() || "").trim(),
+          summary: String($frame.find(".outline-frame-summary").val() || "").trim(),
+          key_points: points,
+        });
+      });
+      if (Number.isNaN(sectionIndex)) sectionIndex = outline.sections.length;
+      outline.sections[sectionIndex] = {
+        id: String($section.find(".outline-section-id").val() || "").trim(),
+        title: String($section.find(".outline-section-title").val() || "").trim(),
+        summary: String($section.find(".outline-section-summary").val() || "").trim(),
+        slide_count: frames.length,
+        frames: frames,
+      };
+    });
+    outline.sections.forEach(function (section) {
+      outline.target_slide_count += ((section.frames && section.frames.length) || 0);
+    });
+    return outline;
+  }
+
+  $("#btnAddOutlineSection").on("click", function () {
+    var outline = collectOutlineFromEditor();
+    var nextIndex = outline.sections.length + 1;
+    outline.sections.push({
+      id: String(nextIndex).padStart(3, "0"),
+      title: "New Section",
+      summary: "",
+      slide_count: 1,
+      frames: [{ title: "New Frame", summary: "", key_points: [] }],
+    });
+    activeOutlineSectionIndex = outline.sections.length - 1;
+    renderOutlineEditor(outline);
+  });
+
+  $("#btnSaveOutline").on("click", function () {
+    if (!generatedOutline || !generatedOutline.sections || !generatedOutline.sections.length) {
+      setStatus("当前没有可保存的纪要。", "error");
+      return;
+    }
+    var outline = collectOutlineFromEditor();
+    saveOutlineToBrowser(outline);
+    generatedOutline = outline;
+    updateOutlineSummary();
+    setStatus("纪要已保存到本机浏览器。", "success");
+  });
+
+  $("#btnLoadSavedOutline").on("click", function () {
+    loadSavedOutlineIntoEditor();
+  });
+
+  $("#btnLoadSavedOutlineInput").on("click", function () {
+    loadSavedOutlineIntoEditor();
+  });
+
+  function loadSavedOutlineIntoEditor() {
+    try {
+      var outline = loadOutlineFromBrowser();
+      if (!outline) {
+        setStatus("本机浏览器中没有已保存纪要。", "error");
+        return;
+      }
+      activeOutlineSectionIndex = 0;
+      renderOutlineEditor(requireRenderableOutline(outline));
+      setStatus("已调用保存的纪要，可继续编辑或生成 LaTeX。", "success");
+    } catch (err) {
+      setStatus("调用纪要失败: " + err.message, "error");
+    }
+  }
+
+  $("#btnDownloadOutline").on("click", function () {
+    if (!generatedOutline || !generatedOutline.sections || !generatedOutline.sections.length) {
+      setStatus("当前没有可下载的纪要。", "error");
+      return;
+    }
+    var outline = collectOutlineFromEditor();
+    generatedOutline = outline;
+    var text = JSON.stringify(outline, null, 2);
+    downloadFile(text, outlineStorageTitle(outline) + "_" + today() + "_outline.json", "application/json");
+    setStatus("纪要 JSON 已下载。", "success");
+  });
+
+  $("#outlineEditor").on("click", ".outline-section-nav-item", function () {
+    generatedOutline = collectOutlineFromEditor();
+    activeOutlineSectionIndex = parseInt($(this).data("section"), 10) || 0;
+    renderOutlineEditor(generatedOutline);
+  });
+
+  $("#outlineEditor").on("keydown", ".outline-section-nav-item", function (event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    $(this).trigger("click");
+  });
+
+  $("#outlineEditor").on("click", ".outline-page-index-item", function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    var sectionIndex = parseInt($(this).data("section"), 10);
+    var frameIndex = parseInt($(this).data("frame"), 10);
+    if (Number.isNaN(sectionIndex) || Number.isNaN(frameIndex)) return;
+    generatedOutline = collectOutlineFromEditor();
+    activeOutlineSectionIndex = sectionIndex;
+    renderOutlineEditor(generatedOutline);
+    setTimeout(function () {
+      var $detail = $("#outlineEditor .outline-section-detail");
+      var $frame = $("#outline-frame-" + sectionIndex + "-" + frameIndex);
+      if (!$detail.length || !$frame.length) return;
+      var nextTop = $detail.scrollTop() + $frame.position().top - 10;
+      $detail.animate({ scrollTop: Math.max(0, nextTop) }, 160);
+      $frame.addClass("outline-frame-jump-highlight");
+      setTimeout(function () {
+        $frame.removeClass("outline-frame-jump-highlight");
+      }, 900);
+    }, 0);
+  });
+
+  $("#outlineEditor").on("click", ".outline-add-frame", function () {
+    var outline = collectOutlineFromEditor();
+    var sectionIndex = parseInt($(this).closest(".outline-section").data("section"), 10);
+    if (outline.sections[sectionIndex]) {
+      var nextFrame = outline.sections[sectionIndex].frames.length + 1;
+      outline.sections[sectionIndex].frames.push({
+        title: "User Added Frame " + nextFrame,
+        summary: "用户新增 frame：请根据本大节 Markdown 内容生成这一页。",
+        key_points: ["保留该新增 frame", "结合本大节知识点展开"],
+      });
+    }
+    renderOutlineEditor(outline);
+  });
+
+  $("#outlineEditor").on("click", ".outline-remove-frame", function () {
+    var outline = collectOutlineFromEditor();
+    var $section = $(this).closest(".outline-section");
+    var sectionIndex = parseInt($section.data("section"), 10);
+    var frameIndex = parseInt($(this).closest(".outline-frame").data("frame"), 10);
+    if (outline.sections[sectionIndex]) {
+      outline.sections[sectionIndex].frames.splice(frameIndex, 1);
+      if (!outline.sections[sectionIndex].frames.length) {
+        outline.sections[sectionIndex].frames.push({ title: "New Frame", summary: "", key_points: [] });
+      }
+    }
+    renderOutlineEditor(outline);
+  });
+
+  $("#outlineEditor").on("click", ".outline-remove-section", function () {
+    var outline = collectOutlineFromEditor();
+    var sectionIndex = parseInt($(this).closest(".outline-section").data("section"), 10);
+    outline.sections.splice(sectionIndex, 1);
+    activeOutlineSectionIndex = Math.max(0, Math.min(sectionIndex, outline.sections.length - 1));
+    renderOutlineEditor(outline);
+  });
+
+  $("#outlineEditor").on("click", ".outline-save-section", function () {
+    generatedOutline = collectOutlineFromEditor();
+    renderOutlineEditor(generatedOutline);
+    setStatus("本节纪要已保存。", "success");
+  });
+
+  $("#outlineEditor").on("change", ".outline-section-count", function (event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    var sectionIndex = parseInt($(this).closest(".outline-section").data("section"), 10);
+    var nextCount = Math.max(1, Math.min(80, parseInt($(this).val(), 10) || 1));
+    var outline = collectOutlineFromEditor();
+    var section = outline.sections[sectionIndex];
+    if (!section) return;
+    section.frames = section.frames || [];
+    while (section.frames.length < nextCount) {
+      section.frames.push({
+        title: "New Frame " + (section.frames.length + 1),
+        summary: "",
+        key_points: [],
+      });
+    }
+    if (section.frames.length > nextCount) {
+      section.frames = section.frames.slice(0, nextCount);
+    }
+    section.slide_count = section.frames.length;
+    activeOutlineSectionIndex = sectionIndex;
+    renderOutlineEditor(outline);
+    setStatus("本节页数已调整为 " + nextCount + " 页。", "success");
+  });
+
+  $("#outlineEditor").on("click", ".outline-refresh-section", function () {
+    if (isGenerating) return;
+    var $button = $(this);
+    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+    var outline = collectOutlineFromEditor();
+    var section = outline.sections[sectionIndex];
+    if (!section) return;
+    var content = $("#content").val().trim();
+    if (!content) {
+      setStatus("请先导入 .md/.markdown 知识图谱文件", "error");
+      return;
+    }
+    var payload = buildBaseGenerationPayload(content);
+    if (!payload) return;
+    payload.section_id = section.id;
+    payload.slide_count = Math.max(1, Math.min(80, (section.frames && section.frames.length) || section.slide_count || 1));
+    setGenerating(true);
+    $button.prop("disabled", true).text("刷新中...");
+    setStatus("正在刷新大节 " + (section.id || sectionIndex + 1) + " 的纪要...", "info");
+    fetch("/beamer-generator/api/regenerate-outline-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(function (resp) {
+        return resp.json().then(function (data) {
+          if (!resp.ok || data.error || data.detail) throw new Error(data.detail || data.error || resp.statusText);
+          return data;
+        });
+      })
+      .then(function (data) {
+        outline.sections[sectionIndex] = data.section;
+        renderOutlineEditor(normalizeOutlineFrameCounts(outline));
+        setStatus("大节纪要已刷新。", "success");
+      })
+      .catch(function (err) {
+        setStatus("大节纪要刷新失败: " + err.message, "error");
+      })
+      .finally(function () {
+        setGenerating(false);
+      });
+  });
+
+  $("#outlineEditor").on("input change", "input, textarea", function () {
+    generatedOutline = collectOutlineFromEditor();
+    updateOutlineSummary();
+    refreshOutlineMathPreviews($(this).closest(".outline-section"));
+    schedulePageChecklistUpdate(fullLatex, 260);
+  });
+
+  $("#btnGenerateOutline").on("click", function () {
+    if (isGenerating) return;
+    var content = $("#content").val().trim();
+    if (!content) {
+      setStatus("请先导入 .md/.markdown 知识图谱文件", "error");
+      return;
+    }
+    var payload = buildBaseGenerationPayload(content);
+    if (!payload) return;
+    setGenerating(true);
+    $("#btnGenerateOutline").prop("disabled", true).text("生成纪要中...");
+    startOutlineProgress("正在提交纪要生成请求...");
+    fetch("/beamer-generator/api/generate-outline", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(function (resp) {
+        setOutlineProgress(Math.max(outlineGenerateProgress, 18), "已连接后端，正在等待 GPT 返回纪要...");
+        return resp.json().then(function (data) {
+          if (!resp.ok) throw new Error(data.detail || data.error || ("HTTP " + resp.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        setOutlineProgress(94, "已收到纪要，正在渲染可编辑目录...");
+        var outline = requireRenderableOutline(data && data.outline);
+        activeOutlineSectionIndex = 0;
+        renderOutlineEditor(outline);
+        $("#tabOutline").prop("disabled", false);
+        setActiveTab("outline");
+        finishOutlineProgress("纪要生成完成，请检查并修改后生成 LaTeX。", "success");
+        setStatus("纪要已生成，请检查并修改后点击右上角生成 LaTeX。", "success");
+      })
+      .catch(function (err) {
+        finishOutlineProgress("纪要生成失败：" + err.message, "error");
+        setStatus("纪要生成失败: " + err.message, "error");
+      })
+      .finally(function () {
+        setGenerating(false);
+        $("#btnGenerateOutline").prop("disabled", false).text("生成纪要");
+      });
+  });
+
   $("#btnGenerate").on("click", function () {
     if (isGenerating) return;
 
@@ -5850,47 +6817,29 @@
       setStatus("请先导入 .md/.markdown 知识图谱文件", "error");
       return;
     }
+    if (!generatedOutline || !generatedOutline.sections || !generatedOutline.sections.length) {
+      setStatus("请先点击“生成纪要”，确认或修改后再生成演示文稿。", "error");
+      $("#btnGenerateOutline").focus();
+      return;
+    }
 
     var previousLatex = fullLatex;
     var generatedLatex = "";
     var receivedFirstChunk = false;
-    currentCustomRequirements = $("#customRequirements").val().trim();
-    var selectedSections = getSelectedMarkdownSections().map(function (section) {
-      return {
-        file: section.fileTitle,
-        title: section.title,
-        id: section.id,
-      };
-    });
-    if (selectedSections.length) {
-      var selectionRequirement = "本次只根据已引用的 Markdown 小节生成 PPT，不要使用未引用小节。已引用小节：" +
-        selectedSections.map(function (section) {
-          return section.file + " / " + section.title;
-        }).join("；");
-      currentCustomRequirements = currentCustomRequirements
-        ? currentCustomRequirements + "\n" + selectionRequirement
-        : selectionRequirement;
-    }
     $("#tabPpt").prop("disabled", true);
+    generatedOutline = collectOutlineFromEditor();
+    var payload = buildBaseGenerationPayload(content);
+    if (!payload) return;
+    payload.outline = generatedOutline;
     setGenerating(true);
-    updateLatexGenerateProgress(5, "正在使用网站统一 DeepSeek 配置生成 LaTeX...");
+    updateLatexGenerateProgress(5, "正在根据已确认纪要生成 LaTeX...");
 
-    var payload = {
-      content: content,
-      style: $("#style").val(),
-      custom_requirements: currentCustomRequirements,
-      slide_count: Math.max(1, Math.min(80, parseInt($("#slideCount").val(), 10) || 7)),
-      language: $("#language").val(),
-      figure_assets: buildFigureAssetPayload(),
-      selected_sections: selectedSections,
-    };
-
-    var generateTimeoutMs = 300000;
+    var generateTimeoutMs = 900000;
     var abortCtrl = new AbortController();
     var timeoutId = setTimeout(function () {
       abortCtrl.abort();
       setGenerating(false);
-      setStatus("生成超时，5 分钟无新数据", "error");
+      setStatus("生成超时，15 分钟无后端数据。若页数较多，请减少页数或分章节生成。", "error");
     }, generateTimeoutMs);
 
     function resetTimeout() {
@@ -5898,7 +6847,7 @@
       timeoutId = setTimeout(function () {
         abortCtrl.abort();
         setGenerating(false);
-      setStatus("生成超时，5 分钟无新数据", "error");
+        setStatus("生成超时，15 分钟无后端数据。若页数较多，请减少页数或分章节生成。", "error");
       }, generateTimeoutMs);
     }
 
@@ -5911,7 +6860,7 @@
       .then(function (resp) {
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         resetTimeout();
-        updateLatexGenerateProgress(12, "已连接 DeepSeek，正在等待生成...");
+        updateLatexGenerateProgress(12, "已连接 GPT 5.5，正在等待生成...");
         var reader = resp.body.getReader();
         var decoder = new TextDecoder();
         var buffer = "";
@@ -5924,13 +6873,14 @@
                     setGenerating(false);
                     fullLatex = previousLatex;
                     updateLatexEditor(previousLatex);
-                    setStatus("DeepSeek 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
+                    setStatus("GPT 5.5 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
                   } else {
                     updateLatexGenerateProgress(100, "生成完成，共 " + fullLatex.length + " 字符");
                     setGenerating(false);
                     fullLatex = applyCustomRequirementOverrides(generatedLatex, currentCustomRequirements);
                     sourceLatex = fullLatex;
                     updateLatexEditor(fullLatex);
+                    setActiveTab("latex");
                     setStatus("生成完成，共 " + fullLatex.length + " 字符", "success");
                   }
                 }
@@ -5954,7 +6904,8 @@
               }
 
               if (d.type === "heartbeat") {
-                updateLatexGenerateProgress(Math.max(latexGenerateProgress, 18), "已连接，等待 DeepSeek 生成...");
+                var heartbeatProgress = Math.max(latexGenerateProgress, receivedFirstChunk ? latexGenerateProgress : 18);
+                updateLatexGenerateProgress(heartbeatProgress, d.content || "已连接，等待 GPT 5.5 生成...");
               } else if (d.type === "chunk") {
                 if (!receivedFirstChunk) {
                   receivedFirstChunk = true;
@@ -5974,12 +6925,13 @@
                   setGenerating(false);
                   fullLatex = previousLatex;
                   updateLatexEditor(previousLatex);
-                  setStatus("DeepSeek 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
+                  setStatus("GPT 5.5 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
                   return;
                 }
                 fullLatex = applyCustomRequirementOverrides(generatedLatex, currentCustomRequirements);
                 sourceLatex = fullLatex;
                 updateLatexEditor(fullLatex);
+                setActiveTab("latex");
                 updateLatexGenerateProgress(100, "生成完成，共 " + fullLatex.length + " 字符");
                 setGenerating(false);
                 setStatus("生成完成，共 " + fullLatex.length + " 字符", "success");
@@ -6035,6 +6987,23 @@
     } else if (editor && editor.getValue) {
       fullLatex = editor.getValue();
       sourceLatex = fullLatex;
+    }
+    if (latexHasExternalGraphicRefs(fullLatex) && Object.keys(buildFigureAssetPayload()).length) {
+      setStatus("当前 LaTeX 引用了 fig 图片，正在下载包含图片的 Overleaf ZIP...", "info");
+      postProjectJson(["/beamer-generator/api/overleaf-package", "/beamer-generator/api/overleaf-package/", "/api/overleaf-package"], buildOverleafPayload())
+        .then(function (data) {
+          if (!data || data.error || data.success === false || !data.snip_uri) {
+            throw new Error((data && data.error) || "未生成 ZIP");
+          }
+          return fetch(data.snip_uri).then(function (resp) { return resp.blob(); }).then(function (blob) {
+            downloadFile(blob, (data.filename || ("presentation_" + today() + "_overleaf.zip")), "application/zip");
+            setStatus("已下载包含 main.tex 和 fig 图片的 Overleaf ZIP", "success");
+          });
+        })
+        .catch(function (err) {
+          setStatus("下载 Overleaf ZIP 失败: " + (err && err.message ? err.message : err), "error");
+        });
+      return;
     }
     downloadFile(fullLatex, "presentation_" + today() + ".tex", "application/x-tex");
     setStatus("操作完成", "success");
@@ -6125,10 +7094,7 @@
     }
     if (!fullLatex) return;
     if (isLatexImportMode) {
-      loadLatexIntoEditablePpt(fullLatex, {
-        updateEditor: false,
-        chapterTitle: titleFromLatexFileName(importedLatexFileName),
-      });
+      setStatus("当前模式只保留 PPTX 转 LaTeX，不再执行高保真 PPT 渲染。", "info");
       return;
     }
     setStatus("正在解析 LaTeX 结构...", "info");
@@ -6156,8 +7122,8 @@
 
         slidesData = data;
         $("#pptChapterTitleInput").val("");
-        sourceLatex = fullLatex;
-        fullLatex = buildLatexFromSlides(slidesData);
+        sourceLatex = data.latex || fullLatex;
+        fullLatex = data.latex || buildLatexFromSlides(slidesData);
         sourceLatex = fullLatex;
         updateLatexEditor(fullLatex);
         currentSlideIdx = data.slides.length > 0 ? 0 : -1;
@@ -7626,12 +8592,14 @@
         fullLatex = data.latex || "";
         sourceLatex = fullLatex;
         updateLatexEditor(fullLatex);
-        $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt").prop("disabled", !fullLatex.trim());
+        $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf").prop("disabled", !fullLatex.trim());
+        $("#btnConvertPpt, #btnDownloadPptx").hide().prop("disabled", true);
         if (data.asset_urls) {
           setPackageImages(data.asset_urls);
         }
         var title = options.chapterTitle || titleFromLatexFileName(importedLatexFileName) || titleFromLatexFileName(file.name || "") || "Overleaf 演示文稿";
         if (Array.isArray(data.rendered_pages) && data.rendered_pages.length) {
+          setImportedPreviewImages(renderedPagesToPreviewImages(data.rendered_pages, "Overleaf 页面"), "Overleaf 导入预览");
           applyRenderedPagesToSlides(data, data.rendered_pages, { hideParsedContent: true });
           finishEditablePptLoad(data, { chapterTitle: title }, "Overleaf 导入完成");
           return;
@@ -7678,12 +8646,59 @@
           chapter_title: title,
           slides: [],
         };
+        setImportedPreviewImages(renderedPagesToPreviewImages(data.rendered_pages, "PDF 页面"), "PDF 导入预览");
         applyRenderedPagesToSlides(pptData, data.rendered_pages, { hideParsedContent: true });
         finishEditablePptLoad(pptData, { chapterTitle: title }, "PDF 渲染完成");
       },
       error: function (xhr) {
         var msg = ajaxErrorMessage(xhr, "渲染请求失败");
         setStatus("PDF 渲染失败: " + msg, "error");
+      },
+    });
+  }
+
+  function loadPptIntoLatexFromFile(file, options) {
+    options = options || {};
+    if (!file) return $.Deferred().reject(new Error("未选择文件")).promise();
+    if (!/\.pptx$/i.test(file.name || "")) {
+      return $.Deferred().reject(new Error("请选择 .pptx 文件")).promise();
+    }
+
+    var formData = new FormData();
+    formData.append("file", file);
+    importedLatexFileName = (file.name || "presentation.pptx").replace(/\.pptx$/i, ".tex");
+    importedPdfFileName = "";
+    setStatus("正在导入 PPTX 并转换为 LaTeX...", "info");
+
+    return $.ajax({
+      url: "/beamer-generator/api/import-ppt-latex",
+      method: "POST",
+      data: formData,
+      processData: false,
+      contentType: false,
+      success: function (data) {
+        if (!data || data.error || !data.latex) {
+          setStatus("PPTX 转 LaTeX 失败: " + ((data && data.error) || "未生成 LaTeX"), "error");
+          return;
+        }
+        fullLatex = data.latex || "";
+        sourceLatex = fullLatex;
+        updateLatexEditor(fullLatex);
+        $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt").prop("disabled", !fullLatex.trim());
+        if (data.asset_urls) {
+          setPackageImages(data.asset_urls);
+        }
+        var title = options.chapterTitle || titleFromLatexFileName(file.name || importedLatexFileName);
+        setImportedPreviewImages(figureAssetsToPreviewImages(data.figure_assets), "PPT 图片/公式预览");
+        $("#pptChapterTitleInput").val(title || "");
+        setActiveTab("latex");
+        var imageCount = Array.isArray(data.figure_assets) ? data.figure_assets.length : 0;
+        updateLatexImportMeta("已导入：" + (file.name || "PPTX") + "。已按页面元素转换为 LaTeX；图片保留为 Figure 编号和 fig 路径占位框，公式截图与蓝色注释框保留原页位置。");
+        setStatus("PPTX 转 LaTeX 完成：共 " + (data.slide_count || 0) + " 页，图片 " + imageCount + " 张；可点击“预览导入内容”查看缩略图。", "success");
+      },
+      error: function (xhr) {
+        var msg = ajaxErrorMessage(xhr, "转换请求失败");
+        setStatus("PPTX 转 LaTeX 失败: " + msg, "error");
       },
     });
   }
@@ -7729,6 +8744,7 @@
           setPackageImages(data.asset_urls);
         }
         var title = options.chapterTitle || titleFromLatexFileName(importedLatexFileName) || "LaTeX 演示文稿";
+        setImportedPreviewImages(renderedPagesToPreviewImages(data.rendered_pages, "LaTeX 页面"), "LaTeX 项目预览");
         applyRenderedPagesToSlides(data, data.rendered_pages, { hideParsedContent: true });
         finishEditablePptLoad(data, { chapterTitle: title }, "LaTeX 项目渲染完成");
       },
@@ -7757,12 +8773,13 @@
         url: "/beamer-generator/api/render-latex-pages",
         method: "POST",
         contentType: "application/json",
-        data: JSON.stringify({ latex: fullLatex, filename: importedLatexFileName || "presentation.tex" }),
+        data: JSON.stringify({ latex: fullLatex, filename: importedLatexFileName || "presentation.tex", asset_urls: importedPackageAssetUrls || {} }),
         success: function (data) {
           if (!data || data.error || !Array.isArray(data.rendered_pages) || !data.rendered_pages.length) {
             setStatus("高保真渲染失败: " + ((data && data.error) || "未生成页面图片"), "error");
             return;
           }
+          setImportedPreviewImages(renderedPagesToPreviewImages(data.rendered_pages, "渲染页面"), "导入内容预览");
           applyRenderedPagesToSlides(data, data.rendered_pages, { hideParsedContent: true });
           finishEditablePptLoad(data, options, "高保真渲染完成");
         },
@@ -7783,6 +8800,11 @@
         if (!data || data.error || !data.slides) {
           setStatus("解析失败: " + ((data && data.error) || "未识别到幻灯片结构"), "error");
           return;
+        }
+        if (data.latex && data.latex !== fullLatex) {
+          fullLatex = data.latex;
+          sourceLatex = fullLatex;
+          if (options.updateEditor !== false) updateLatexEditor(fullLatex);
         }
         finishEditablePptLoad(data, options, "解析完成");
       },
@@ -8010,6 +9032,26 @@
     });
 
     $(this).val("");
+  });
+
+  $("#pptLatexImporter").on("change", function () {
+    var file = this.files && this.files[0];
+    if (!file) return;
+    if (!/\.pptx$/i.test(file.name || "")) {
+      setStatus("请选择 .pptx 文件", "error");
+      $(this).val("");
+      return;
+    }
+
+    $("#btnImportPptLatex").prop("disabled", true).text("转换中...");
+    $("#btnImportPptInLatexPanel").prop("disabled", true).text("转换中...");
+    loadPptIntoLatexFromFile(file, {
+      chapterTitle: titleFromLatexFileName(file.name || ""),
+    }).always(function () {
+        $("#btnImportPptLatex").prop("disabled", false).text("导入 PPTX 转 LaTeX");
+        $("#btnImportPptInLatexPanel").prop("disabled", false).text("导入 PPTX 转 LaTeX");
+        $("#pptLatexImporter").val("");
+    });
   });
 
   function saveCurrentSlide() {
@@ -8344,14 +9386,13 @@
   $(document).on("keydown", function (e) {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
-      if (isLatexImportMode) {
-        $("#btnParseImportedLatex").click();
-      } else {
+      if (!isLatexImportMode) {
         $("#btnGenerate").click();
       }
     }
   });
 
+  restoreGptConfigFromBrowser();
   applyLatexImportMode();
   $("#savedLectureSelect, #btnRefreshSavedLectures").hide();
   $("#btnImportMarkdown").text("导入 MD 知识图谱");

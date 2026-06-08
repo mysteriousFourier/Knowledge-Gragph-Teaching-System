@@ -4,46 +4,45 @@ import { useConfigStatus, useSaveConfig } from "@/api/education"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { setSettingsOpen } from "@/store/slices/uiSlice"
 
+const DEFAULT_GPT_BASE = "https://api.openai.com/v1"
+const DEFAULT_GPT_MODEL = "gpt-5.5"
+
 export function SettingsPanel() {
   const dispatch = useAppDispatch()
   const open = useAppSelector((state) => state.ui.settingsOpen)
   const { data, refetch } = useConfigStatus()
   const saveConfig = useSaveConfig()
   const [apiKey, setApiKey] = useState("")
-  const [apiBase, setApiBase] = useState("https://api.deepseek.com")
-  const [flashModel, setFlashModel] = useState("deepseek-v4-flash")
-  const [proModel, setProModel] = useState("deepseek-v4-pro")
+  const [apiBase, setApiBase] = useState(DEFAULT_GPT_BASE)
+  const [model, setModel] = useState(DEFAULT_GPT_MODEL)
   const [showKey, setShowKey] = useState(false)
   const [message, setMessage] = useState("")
   const [savedConfigured, setSavedConfigured] = useState<boolean | null>(null)
 
   useEffect(() => {
     if (!data) return
-    setApiBase(data.deepseek_api_base || "https://api.deepseek.com")
-    setFlashModel(data.flash_model || "deepseek-v4-flash")
-    setProModel(data.pro_model || "deepseek-v4-pro")
-    setSavedConfigured(data.deepseek_api_key_configured)
+    setApiBase(data.gpt_api_base || DEFAULT_GPT_BASE)
+    setModel(data.gpt_model || data.pro_model || DEFAULT_GPT_MODEL)
+    setSavedConfigured(data.gpt_api_key_configured ?? false)
   }, [data])
 
   if (!open) return null
 
-  const apiKeyConfigured = savedConfigured ?? data?.deepseek_api_key_configured ?? false
+  const apiKeyConfigured = savedConfigured ?? data?.gpt_api_key_configured ?? false
 
   const handleSave = async () => {
     setMessage("")
     try {
       const result = await saveConfig.mutateAsync({
-        deepseek_api_key: apiKey.trim() || undefined,
-        deepseek_api_base: apiBase.trim() || undefined,
-        deepseek_flash_model: flashModel.trim() || undefined,
-        deepseek_pro_model: proModel.trim() || undefined,
+        gpt_api_key: apiKey.trim() || undefined,
+        gpt_api_base: apiBase.trim() || undefined,
+        gpt_model: model.trim() || undefined,
       })
       setApiKey("")
-      setSavedConfigured(result.deepseek_api_key_configured)
-      setApiBase(result.deepseek_api_base || apiBase)
-      setFlashModel(result.flash_model || flashModel)
-      setProModel(result.pro_model || proModel)
-      setMessage(result.deepseek_api_key_configured ? "配置已保存，DeepSeek API Key 已连接。" : "配置已保存，但 API Key 仍为空。")
+      setSavedConfigured(result.gpt_api_key_configured ?? false)
+      setApiBase(result.gpt_api_base || apiBase)
+      setModel(result.gpt_model || result.pro_model || model)
+      setMessage((result.gpt_api_key_configured ?? false) ? "配置已保存，GPT 5.5 API Key 已连接。" : "配置已保存，但 GPT API Key 仍为空。")
       await refetch()
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "后端配置接口不可用"
@@ -60,7 +59,7 @@ export function SettingsPanel() {
         <div className="mb-5 flex items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">设置</h2>
-            <p className="text-sm text-muted-foreground">DeepSeek API 用于授课文案、题库、问答和 LaTeX PPT 生成。</p>
+            <p className="text-sm text-muted-foreground">GPT 5.5 API 用于授课文案、题库、问答和 LaTeX PPT 生成。</p>
           </div>
           <button
             type="button"
@@ -76,18 +75,17 @@ export function SettingsPanel() {
             <div className="font-medium">当前状态</div>
             <div className="mt-2 text-muted-foreground">API Key：{apiKeyConfigured ? "已配置" : "未配置"}</div>
             <div className="text-muted-foreground">API Base：{apiBase || "-"}</div>
-            <div className="text-muted-foreground">Flash 模型：{flashModel || "-"}</div>
-            <div className="text-muted-foreground">Pro 模型：{proModel || "-"}</div>
+            <div className="text-muted-foreground">默认模型：{model || "-"}</div>
           </div>
 
           <label className="block text-sm font-medium">
-            DeepSeek API Key
+            GPT API Key
             <div className="mt-1 flex rounded-lg border bg-background">
               <input
                 value={apiKey}
                 onChange={(event) => setApiKey(event.target.value)}
                 type={showKey ? "text" : "password"}
-                placeholder={apiKeyConfigured ? "留空则保留现有 Key" : "请输入 DeepSeek API Key"}
+                placeholder={apiKeyConfigured ? "留空则保留现有 Key" : "请输入 GPT API Key"}
                 className="min-w-0 flex-1 bg-transparent px-3 py-2.5 text-sm outline-none"
               />
               <button
@@ -101,7 +99,7 @@ export function SettingsPanel() {
           </label>
 
           <label className="block text-sm font-medium">
-            API Base
+            GPT API Base URL
             <input
               value={apiBase}
               onChange={(event) => setApiBase(event.target.value)}
@@ -110,19 +108,10 @@ export function SettingsPanel() {
           </label>
 
           <label className="block text-sm font-medium">
-            Flash 模型
+            GPT 模型
             <input
-              value={flashModel}
-              onChange={(event) => setFlashModel(event.target.value)}
-              className="mt-1 w-full rounded-lg border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
-            />
-          </label>
-
-          <label className="block text-sm font-medium">
-            Pro 模型
-            <input
-              value={proModel}
-              onChange={(event) => setProModel(event.target.value)}
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
               className="mt-1 w-full rounded-lg border bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
             />
           </label>
@@ -140,7 +129,7 @@ export function SettingsPanel() {
           {message && <div className="rounded-lg border bg-card p-3 text-sm text-muted-foreground">{message}</div>}
 
           <div className="rounded-lg bg-muted p-3 text-xs leading-6 text-muted-foreground">
-            保存后会写入项目根目录的 .env 文件，并同步到当前后端进程；后续 DeepSeek 调用会读取这份配置。
+            保存后会写入项目根目录的 .env 文件，并同步到当前后端进程；后续大模型调用默认使用 GPT 5.5。
           </div>
         </div>
       </aside>

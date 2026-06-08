@@ -36,6 +36,9 @@ export interface HealthCheckResponse {
 export interface ConfigStatusResponse {
   success: boolean
   deepseek_api_key_configured: boolean
+  gpt_api_key_configured?: boolean
+  gpt_api_base?: string
+  gpt_model?: string
   flash_model: string
   pro_model: string
   deepseek_api_base?: string
@@ -44,6 +47,9 @@ export interface ConfigStatusResponse {
 export interface SaveConfigResponse {
   success: boolean
   deepseek_api_key_configured: boolean
+  gpt_api_key_configured?: boolean
+  gpt_api_base?: string
+  gpt_model?: string
   flash_model: string
   pro_model: string
   deepseek_api_base?: string

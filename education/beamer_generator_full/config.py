@@ -4,8 +4,11 @@ import os
 HOST = os.getenv("BG_HOST", "0.0.0.0")
 PORT = int(os.getenv("BG_PORT", "8080"))
 
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+GPT_BASE_URL = os.getenv("GPT_API_BASE", os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1"))
+GPT_MODEL = os.getenv("GPT_MODEL", "gpt-5.5")
+
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", GPT_BASE_URL)
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", GPT_MODEL)
 
 MAX_TOKENS = int(os.getenv("BG_MAX_TOKENS", "16000"))
 TEMPERATURE = float(os.getenv("BG_TEMPERATURE", "0.7"))

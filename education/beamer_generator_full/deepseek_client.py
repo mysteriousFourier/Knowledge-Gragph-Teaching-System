@@ -1,34 +1,36 @@
-﻿"""DeepSeek API 灏佽 鈥?浣跨敤 openai SDK 鍏煎鎺ュ彛锛堝紓姝ユ祦寮忚皟鐢級"""
-import httpx
+"""OpenAI-compatible streaming client for GPT 5.5 generation."""
+
 from typing import AsyncIterator
+
+import httpx
 from openai import AsyncOpenAI
 
 
 class DeepSeekClient:
-    def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com"):
-        # 鑷姩淇 base_url锛氬幓鎺夋湯灏剧殑 /v1/chat/completions 绛夎矾寰?        base_url = base_url.rstrip("/")
+    """Legacy class name kept for existing imports."""
+
+    def __init__(self, api_key: str, base_url: str = "https://api.openai.com/v1"):
+        base_url = base_url.rstrip("/")
         for suffix in ["/v1/chat/completions", "/v1", "/chat/completions"]:
             if base_url.endswith(suffix):
                 base_url = base_url[: -len(suffix)]
-        # openai SDK 闇€瑕?/v1 鍚庣紑
         if not base_url.endswith("/v1"):
             base_url = base_url + "/v1"
 
         self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
-            timeout=httpx.Timeout(120.0, connect=20.0),  # 杩炴帴瓒呮椂30s锛屾€昏秴鏃?00s
+            timeout=httpx.Timeout(120.0, connect=20.0),
         )
 
     async def stream_generate(
         self,
         system_prompt: str,
         user_prompt: str,
-        model: str = "deepseek-chat",
+        model: str = "gpt-5.5",
         max_tokens: int = 8192,
         temperature: float = 0.7,
     ) -> AsyncIterator[str]:
-        """娴佸紡璋冪敤 DeepSeek API锛岄€愬潡 yield 鏂囨湰"""
         stream = await self.client.chat.completions.create(
             model=model,
             messages=[

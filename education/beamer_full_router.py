@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -25,6 +26,13 @@ from .beamer_generator_full.latex_parser import parse_latex_to_slides
 from .beamer_generator_full.pptx_generator import generate_pptx
 from .beamer_generator_full.prompt_engine import PromptEngine
 
+try:
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+except Exception:  # pragma: no cover - optional dependency is checked at runtime.
+    Presentation = None
+    MSO_SHAPE_TYPE = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +50,7 @@ router = APIRouter(prefix="/beamer-generator", tags=["beamer-generator"])
 
 class GenerateRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=50000)
+    provider: str = Field(default="gpt")
     api_key: str = Field(default="")
     style: str = Field(default="academic")
     custom_requirements: str = Field(default="", max_length=5000)
@@ -58,7 +67,7 @@ class ParseRequest(BaseModel):
 
 
 class RenderLatexRequest(ParseRequest):
-    pass
+    asset_urls: dict[str, str] = Field(default_factory=dict)
 
 
 class SlideImage(BaseModel):
@@ -216,10 +225,10 @@ def _read_root_env_values() -> dict[str, str]:
     return values
 
 
-def _deepseek_setting(name: str, fallback: str = "") -> str:
+def _llm_setting(name: str, fallback: str = "") -> str:
     file_values = _read_root_env_values()
     for key, value in file_values.items():
-        if key.startswith("DEEPSEEK_") and value and not os.getenv(key):
+        if key.startswith(("GPT_", "OPENAI_", "DEEPSEEK_")) and value and not os.getenv(key):
             os.environ[key] = value
     return os.getenv(name) or file_values.get(name, fallback)
 
@@ -240,6 +249,575 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "service": "beamer-generator"}
 
 
+@router.post("/api/generate-outline")
+async def generate_outline(payload: dict | None = Body(default=None)) -> JSONResponse:
+    payload = payload or {}
+    content = _payload_text(payload, "content").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="请先导入 .md/.markdown 知识图谱文件")
+    api_key = _payload_text(payload, "api_key").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="请输入本次生成使用的 GPT API Key")
+    base_url = _payload_text(payload, "base_url").strip() or "https://api.ikuncode.cc/v1"
+    model = _payload_text(payload, "model").strip() or "gpt-5.5"
+    style = _payload_text(payload, "style", "academic").strip() or "academic"
+    custom_requirements = _payload_text(payload, "custom_requirements").strip()
+    language = _payload_text(payload, "language", "title_terms_en_content_zh").strip() or "title_terms_en_content_zh"
+    slide_count = max(1, min(_payload_int(payload, "slide_count", 7), 80))
+    section_slide_min = max(1, min(_payload_int(payload, "section_slide_min", 1), 80))
+    section_slide_max = max(section_slide_min, min(_payload_int(payload, "section_slide_max", 8), 80))
+    figure_assets = _payload_map(payload, "figure_assets")
+    selected_sections = _payload_selected_sections(payload)
+
+    client = DeepSeekClient(api_key=api_key, base_url=base_url)
+    try:
+        markdown_sections = _filter_outline_sections_by_selection(
+            _split_outline_markdown_sections(content),
+            selected_sections,
+        )
+        if _should_partition_outline(content, slide_count, markdown_sections, selected_sections):
+            outline, raw = await _generate_partitioned_outline(
+                client=client,
+                content=content,
+                sections=markdown_sections,
+                model=model,
+                style=style,
+                custom_requirements=custom_requirements,
+                slide_count=slide_count,
+                section_slide_min=section_slide_min,
+                section_slide_max=section_slide_max,
+                language=language,
+                figure_assets=figure_assets,
+            )
+        else:
+            outline, raw = await _generate_outline_once(
+                client=client,
+                content=content,
+                model=model,
+                style=style,
+                custom_requirements=custom_requirements,
+                slide_count=slide_count,
+                section_slide_min=section_slide_min,
+                section_slide_max=section_slide_max,
+                language=language,
+                figure_assets=figure_assets,
+                selected_sections=selected_sections,
+                timeout_seconds=180,
+            )
+        return JSONResponse({"success": True, "outline": outline, "raw": raw})
+    except json.JSONDecodeError as exc:
+        logger.exception("Outline JSON parse failed")
+        raise HTTPException(status_code=502, detail=f"纪要 JSON 解析失败：{exc}") from exc
+    except Exception as exc:
+        logger.exception("Outline generation failed")
+        raise HTTPException(status_code=502, detail=f"纪要生成失败：{exc}") from exc
+
+
+@router.post("/api/regenerate-outline-section")
+async def regenerate_outline_section(payload: dict | None = Body(default=None)) -> JSONResponse:
+    payload = payload or {}
+    content = _payload_text(payload, "content").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="请先导入 .md/.markdown 知识图谱文件")
+    api_key = _payload_text(payload, "api_key").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="请输入本次生成使用的 GPT API Key")
+    section_id = _payload_text(payload, "section_id").strip()
+    if not section_id:
+        raise HTTPException(status_code=400, detail="缺少要刷新的大节编号")
+
+    base_url = _payload_text(payload, "base_url").strip() or "https://api.ikuncode.cc/v1"
+    model = _payload_text(payload, "model").strip() or "gpt-5.5"
+    style = _payload_text(payload, "style", "academic").strip() or "academic"
+    custom_requirements = _payload_text(payload, "custom_requirements").strip()
+    language = _payload_text(payload, "language", "title_terms_en_content_zh").strip() or "title_terms_en_content_zh"
+    slide_count = max(1, min(_payload_int(payload, "slide_count", 1), 80))
+    section_slide_min = max(1, min(_payload_int(payload, "section_slide_min", 1), 80))
+    section_slide_max = max(section_slide_min, min(_payload_int(payload, "section_slide_max", 8), 80))
+    figure_assets = _payload_map(payload, "figure_assets")
+
+    sections = _split_outline_markdown_sections(content)
+    source_section = _find_outline_source_section(sections, section_id)
+    if not source_section:
+        raise HTTPException(status_code=404, detail=f"未在当前 Markdown 中找到大节 {section_id}")
+
+    client = DeepSeekClient(api_key=api_key, base_url=base_url)
+    try:
+        section_outline, raw = await _generate_outline_once(
+            client=client,
+            content=_compact_outline_section_content(source_section["content"], 5200),
+            model=model,
+            style=style,
+            custom_requirements=_section_outline_requirements(
+                custom_requirements,
+                source_section,
+                slide_count,
+            ),
+            slide_count=slide_count,
+            section_slide_min=section_slide_min,
+            section_slide_max=section_slide_max,
+            language=language,
+            figure_assets=figure_assets,
+            selected_sections=[],
+            max_tokens=_outline_section_max_tokens(slide_count),
+            timeout_seconds=75,
+        )
+        generated_section = _select_generated_outline_section(section_outline, source_section["id"])
+        section = _fit_outline_section_frame_count(generated_section, source_section, slide_count)
+        return JSONResponse({"success": True, "section": section, "raw": raw})
+    except Exception as exc:
+        logger.exception("Outline section refresh failed")
+        raise HTTPException(status_code=502, detail=f"大节纪要刷新失败：{exc}") from exc
+
+
+async def _generate_outline_once(
+    *,
+    client: DeepSeekClient,
+    content: str,
+    model: str,
+    style: str,
+    custom_requirements: str,
+    slide_count: int,
+    section_slide_min: int,
+    section_slide_max: int,
+    language: str,
+    figure_assets: dict[str, str],
+    selected_sections: list[dict[str, str]] | None = None,
+    max_tokens: int | None = None,
+    timeout_seconds: int | None = None,
+) -> tuple[dict, str]:
+    system_prompt = prompt_engine.build_outline_system_prompt(
+        style=style,
+        custom_requirements=_append_section_slide_range_requirement(
+            custom_requirements,
+            section_slide_min,
+            section_slide_max,
+        ),
+        slide_count=slide_count,
+        language=language,
+        figure_assets=figure_assets,
+    )
+    user_prompt = prompt_engine.build_outline_user_prompt(
+        content,
+        custom_requirements=_append_section_slide_range_requirement(
+            custom_requirements,
+            section_slide_min,
+            section_slide_max,
+        ),
+        slide_count=slide_count,
+        selected_sections=selected_sections or [],
+    )
+    async def collect_parts() -> list[str]:
+        collected: list[str] = []
+        async for chunk in client.stream_generate(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model,
+            max_tokens=max_tokens or min(config.MAX_TOKENS, 6000),
+            temperature=0.35,
+        ):
+            collected.append(chunk)
+        return collected
+
+    if timeout_seconds and timeout_seconds > 0:
+        parts = await asyncio.wait_for(collect_parts(), timeout=timeout_seconds)
+    else:
+        parts = await collect_parts()
+    raw = "".join(parts)
+    return _validate_outline(json.loads(_clean_json_response(raw))), raw
+
+
+async def _generate_partitioned_outline(
+    *,
+    client: DeepSeekClient,
+    content: str,
+    sections: list[dict[str, str]],
+    model: str,
+    style: str,
+    custom_requirements: str,
+    slide_count: int,
+    section_slide_min: int,
+    section_slide_max: int,
+    language: str,
+    figure_assets: dict[str, str],
+) -> tuple[dict, list[dict[str, object]]]:
+    allocations = _allocate_outline_slide_counts(
+        sections,
+        slide_count,
+        section_slide_min,
+        section_slide_max,
+    )
+    merged_sections: list[dict] = []
+    raw_sections: list[dict[str, object]] = []
+
+    for section, target_count in zip(sections, allocations):
+        section_requirements = _section_outline_requirements(
+            _partitioned_outline_requirements(
+                custom_requirements,
+                [section],
+                [target_count],
+                section_slide_min,
+                section_slide_max,
+            ),
+            section,
+            target_count,
+        )
+        try:
+            section_outline, raw = await _generate_outline_once(
+                client=client,
+                content=_compact_outline_section_content(section["content"], 5200),
+                model=model,
+                style=style,
+                custom_requirements=section_requirements,
+                slide_count=target_count,
+                section_slide_min=section_slide_min,
+                section_slide_max=section_slide_max,
+                language=language,
+                figure_assets=figure_assets,
+                selected_sections=[],
+                max_tokens=_outline_section_max_tokens(target_count),
+                timeout_seconds=75,
+            )
+            generated_section = _select_generated_outline_section(section_outline, section["id"])
+            raw_sections.append({
+                "id": section["id"],
+                "target_slide_count": target_count,
+                "status": "generated",
+                "raw": raw,
+            })
+        except Exception as exc:
+            logger.warning("Outline section %s generation failed: %s", section.get("id"), exc)
+            generated_section = {}
+            raw_sections.append({
+                "id": section["id"],
+                "target_slide_count": target_count,
+                "status": "fallback",
+                "error": str(exc),
+            })
+        merged_sections.append(
+            _fit_outline_section_frame_count(generated_section, section, target_count)
+        )
+
+    total = sum(len(section["frames"]) for section in merged_sections)
+    outline = _validate_outline({
+        "title": _infer_outline_title(content),
+        "target_slide_count": total,
+        "sections": merged_sections,
+    })
+    return outline, [{
+        "mode": "section_by_section",
+        "section_count": len(sections),
+        "allocations": allocations,
+    }, *raw_sections]
+
+
+def _should_partition_outline(
+    content: str,
+    slide_count: int,
+    sections: list[dict[str, str]],
+    selected_sections: list[dict[str, str]],
+) -> bool:
+    return len(sections) >= 2 and (slide_count >= 20 or len(content) >= 60000)
+
+
+def _split_outline_markdown_sections(content: str) -> list[dict[str, str]]:
+    matches = list(re.finditer(r"^##\s+(.+?)\s*$", content or "", flags=re.MULTILINE))
+    sections: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for index, match in enumerate(matches):
+        heading = match.group(1).strip()
+        id_match = re.search(r"(?:chapter\d+_)?(\d{3})\b", heading, flags=re.IGNORECASE)
+        if not id_match:
+            continue
+        section_id = id_match.group(1)
+        if section_id in seen_ids:
+            continue
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(content)
+        section_text = content[start:end].strip()
+        title = re.sub(
+            r"^(?:chapter\d+_)?\d{3}\s*(?:[-:：·•路–—]+)?\s*",
+            "",
+            heading,
+            flags=re.IGNORECASE,
+        ).strip()
+        sections.append({
+            "id": section_id,
+            "title": title or f"Section {section_id}",
+            "content": section_text,
+        })
+        seen_ids.add(section_id)
+    return sections
+
+
+def _filter_outline_sections_by_selection(
+    sections: list[dict[str, str]],
+    selected_sections: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    selected_numbers = _selected_outline_section_numbers(selected_sections)
+    if not selected_numbers:
+        return sections
+    filtered = [section for section in sections if section.get("id") in selected_numbers]
+    return filtered or sections
+
+
+def _selected_outline_section_numbers(selected_sections: list[dict[str, str]]) -> set[str]:
+    numbers: set[str] = set()
+    for section in selected_sections or []:
+        source = " ".join(
+            str(section.get(key) or "")
+            for key in ("id", "title", "file")
+        )
+        for match in re.finditer(r"(?:chapter\d+_)?(\d{3})\b", source, flags=re.IGNORECASE):
+            numbers.add(match.group(1))
+    return numbers
+
+
+def _allocate_outline_slide_counts(
+    sections: list[dict[str, str]],
+    target_count: int,
+    min_per_section: int = 1,
+    max_per_section: int = 8,
+) -> list[int]:
+    if not sections:
+        return []
+    section_count = len(sections)
+    min_per_section = max(1, min(int(min_per_section or 1), 80))
+    max_per_section = max(min_per_section, min(int(max_per_section or min_per_section), 80))
+    effective_min = min_per_section if min_per_section * section_count <= target_count else 1
+    if target_count <= section_count * effective_min:
+        return [effective_min] * section_count
+
+    allocations = [effective_min] * section_count
+    remaining = target_count - sum(allocations)
+    weights = [max(1, len(section.get("content") or "")) for section in sections]
+    total_weight = sum(weights) or section_count
+    exact = [remaining * weight / total_weight for weight in weights]
+    floors = [int(value) for value in exact]
+    for index, value in enumerate(floors):
+        allocations[index] += min(value, max_per_section - effective_min)
+    leftover = target_count - sum(allocations)
+    order = sorted(range(section_count), key=lambda idx: exact[idx] - floors[idx], reverse=True)
+    while leftover > 0 and any(value < max_per_section for value in allocations):
+        changed = False
+        for index in order:
+            if allocations[index] >= max_per_section:
+                continue
+            allocations[index] += 1
+            leftover -= 1
+            changed = True
+            if leftover <= 0:
+                break
+        if not changed:
+            break
+    relaxed_index = 0
+    while leftover > 0:
+        allocations[order[relaxed_index % section_count]] += 1
+        leftover -= 1
+        relaxed_index += 1
+    return allocations
+
+
+def _append_section_slide_range_requirement(
+    custom_requirements: str,
+    section_slide_min: int,
+    section_slide_max: int,
+) -> str:
+    rule = (
+        f"每个用户勾选的 Markdown 大节建议生成 {section_slide_min}-{section_slide_max} 页；"
+        "若总页数目标与该范围冲突，以后端给出的具体 section.slide_count 分配为准。"
+    )
+    base = (custom_requirements or "").strip()
+    return base + "\n" + rule if base else rule
+
+
+def _build_partitioned_outline_content(
+    content: str,
+    sections: list[dict[str, str]],
+    allocations: list[int],
+) -> str:
+    per_section_chars = max(320, min(700, 9000 // max(1, len(sections))))
+    parts = [
+        f"# {_infer_outline_title(content)}",
+        "",
+        "以下是按 001/002 大节压缩后的 Markdown 内容，用于先生成 PPT 纪要。",
+        "最终 LaTeX 生成时会再次使用完整 Markdown 原文；本阶段只需要规划大节概要和每页 frame 主题。",
+        "",
+    ]
+    for section, slide_count in zip(sections, allocations):
+        parts.append(f"## chapter_section_{section['id']} - {section['title']}")
+        parts.append(f"planned_slide_count: {slide_count}")
+        parts.append(_compact_outline_section_content(section["content"], per_section_chars))
+        parts.append("")
+    return "\n".join(parts)
+
+
+def _partitioned_outline_requirements(
+    custom_requirements: str,
+    sections: list[dict[str, str]],
+    allocations: list[int],
+    section_slide_min: int,
+    section_slide_max: int,
+) -> str:
+    allocation_lines = [
+        f"- {section['id']}：{section['title']}，{count} 个 frame"
+        for section, count in zip(sections, allocations)
+    ]
+    rules = [
+        custom_requirements.strip(),
+        "本次是大文件紧凑纪要规划。必须严格按下面的大节和页数分配输出 JSON：",
+        "\n".join(allocation_lines),
+        f"用户设置的每个勾选大节页数范围是 {section_slide_min}-{section_slide_max} 页；下面的具体分配已经按该范围估算。",
+        "sections 数量、顺序、id、title 必须与上面完全一致。",
+        "每个 section 的 slide_count 必须等于对应 frame 数量。",
+        "所有 frame 总数必须等于上述分配总和；每个 frame 对应后续 LaTeX 的一页。",
+        "不要额外新增 section，不要省略任何 001/002 大节。",
+    ]
+    return "\n".join(rule for rule in rules if rule)
+
+
+def _align_partitioned_outline_sections(
+    generated_outline: dict,
+    source_sections: list[dict[str, str]],
+    allocations: list[int],
+) -> list[dict]:
+    return [
+        _fit_outline_section_frame_count(
+            _select_generated_outline_section(generated_outline, section["id"]),
+            section,
+            target_count,
+        )
+        for section, target_count in zip(source_sections, allocations)
+    ]
+
+
+def _section_outline_requirements(
+    custom_requirements: str,
+    section: dict[str, str],
+    target_count: int,
+) -> str:
+    rules = [
+        custom_requirements.strip(),
+        (
+            f"本次只规划 Markdown 大节 {section['id']}：{section['title']}。"
+            f"输出 JSON 中只能包含这一个 section，section.id 必须是 {section['id']}。"
+        ),
+        f"该大节必须生成恰好 {target_count} 个 frame；slide_count 必须等于 {target_count}。",
+        "每个 frame 是后续 LaTeX 的一页，必须给出具体主题、中文概要和关键要点。",
+    ]
+    return "\n".join(rule for rule in rules if rule)
+
+
+def _compact_outline_section_content(content: str, max_chars: int = 18000) -> str:
+    text = (content or "").strip()
+    if len(text) <= max_chars:
+        return text
+    head = text[: int(max_chars * 0.72)].rstrip()
+    tail = text[-int(max_chars * 0.20):].lstrip()
+    return head + "\n\n[...section content truncated for outline planning...]\n\n" + tail
+
+
+def _outline_section_max_tokens(target_count: int) -> int:
+    return min(config.MAX_TOKENS, max(1200, 800 + target_count * 220))
+
+
+def _select_generated_outline_section(outline: dict, section_id: str) -> dict:
+    sections = outline.get("sections") if isinstance(outline, dict) else []
+    if not isinstance(sections, list) or not sections:
+        return {}
+    for section in sections:
+        if isinstance(section, dict) and str(section.get("id") or "").strip() == section_id:
+            return section
+    return sections[0] if isinstance(sections[0], dict) else {}
+
+
+def _find_outline_source_section(sections: list[dict[str, str]], section_id: str) -> dict[str, str] | None:
+    normalized = _normalize_outline_section_id(section_id)
+    for section in sections:
+        if _normalize_outline_section_id(section.get("id") or "") == normalized:
+            return section
+    return None
+
+
+def _normalize_outline_section_id(value: str) -> str:
+    text = str(value or "").strip()
+    match = re.search(r"(?:chapter\d+_)?(\d{3})\b", text, flags=re.IGNORECASE)
+    return match.group(1) if match else text
+
+
+def _fit_outline_section_frame_count(
+    generated_section: dict,
+    source_section: dict[str, str],
+    target_count: int,
+) -> dict:
+    frames = generated_section.get("frames") if isinstance(generated_section, dict) else []
+    normalized_frames: list[dict] = []
+    if isinstance(frames, list):
+        for index, frame in enumerate(frames[:target_count], start=1):
+            if not isinstance(frame, dict):
+                continue
+            normalized_frames.append({
+                "title": str(frame.get("title") or f"{source_section['title']} {index}").strip(),
+                "summary": str(frame.get("summary") or "").strip(),
+                "key_points": [
+                    str(point).strip()
+                    for point in (frame.get("key_points") if isinstance(frame.get("key_points"), list) else [])
+                    if str(point).strip()
+                ],
+            })
+
+    while len(normalized_frames) < target_count:
+        index = len(normalized_frames) + 1
+        normalized_frames.append({
+            "title": f"{source_section['title']} Expansion {index}",
+            "summary": "根据该大节 Markdown 内容补充展开成一页教学 frame。",
+            "key_points": [
+                "围绕本大节核心概念展开",
+                "结合原文中的定义、公式、图示或例子",
+                "保持与前后 frame 的教学顺序一致",
+            ],
+        })
+
+    return {
+        "id": source_section["id"],
+        "title": source_section["title"],
+        "summary": str(generated_section.get("summary") or "").strip()
+        or f"{source_section['title']} 的内容概要。",
+        "slide_count": target_count,
+        "frames": normalized_frames,
+    }
+
+
+def _infer_outline_title(content: str) -> str:
+    match = re.search(r"^#\s+(.+?)\s*$", content or "", flags=re.MULTILINE)
+    if match:
+        return match.group(1).strip()
+    return "Presentation"
+
+
+def _infer_chapter_directory_title(content: str) -> str:
+    text = content or ""
+    for pattern in (
+        r"^#\s*(?:Chapter\s*)?(\d+)\s*(?:[·路\.-]\s*)?(.+?)\s*$",
+        r"^##\s*chapter\d+_\d+\s*(?:[·路\.-]\s*)?(.+?)\s*$",
+    ):
+        match = re.search(pattern, text, flags=re.MULTILINE | re.IGNORECASE)
+        if not match:
+            continue
+        if len(match.groups()) >= 2:
+            number = match.group(1).strip()
+            title = re.sub(r"\s+", " ", match.group(2)).strip()
+            title = re.sub(r"^[^\w\u4e00-\u9fff]+", "", title).strip()
+            if title:
+                return f"{number} {title}"
+        title = re.sub(r"\s+", " ", match.group(1)).strip()
+        title = re.sub(r"^[^\w\u4e00-\u9fff]+", "", title).strip()
+        if title:
+            return title
+    return ""
+
+
+
 def _stream_error(message: str) -> StreamingResponse:
     async def event_stream():
         error_data = json.dumps({"type": "error", "content": message}, ensure_ascii=False)
@@ -250,6 +828,66 @@ def _stream_error(message: str) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+def _clean_json_response(text: str) -> str:
+    clean = (text or "").strip()
+    clean = re.sub(r"^```(?:json)?\s*", "", clean, flags=re.I)
+    clean = re.sub(r"\s*```$", "", clean)
+    if "{" in clean and "}" in clean:
+        clean = clean[clean.find("{"): clean.rfind("}") + 1]
+    return clean.strip()
+
+
+def _validate_outline(outline: dict) -> dict:
+    if not isinstance(outline, dict):
+        raise ValueError("outline must be a JSON object")
+    sections = outline.get("sections")
+    if not isinstance(sections, list) or not sections:
+        raise ValueError("outline.sections must be a non-empty list")
+    normalized_sections = []
+    total = 0
+    for index, section in enumerate(sections, start=1):
+        if not isinstance(section, dict):
+            continue
+        frames = section.get("frames")
+        if not isinstance(frames, list):
+            frames = []
+        normalized_frames = []
+        for frame_index, frame in enumerate(frames, start=1):
+            if not isinstance(frame, dict):
+                continue
+            title = str(frame.get("title") or "").strip() or f"Frame {frame_index}"
+            summary = str(frame.get("summary") or "").strip()
+            key_points = frame.get("key_points") if isinstance(frame.get("key_points"), list) else []
+            normalized_frames.append({
+                "title": title,
+                "summary": summary,
+                "key_points": [str(point).strip() for point in key_points if str(point).strip()],
+            })
+        if not normalized_frames:
+            normalized_frames.append({
+                "title": str(section.get("title") or f"Section {index}").strip(),
+                "summary": str(section.get("summary") or "").strip(),
+                "key_points": [],
+            })
+        section_id = str(section.get("id") or f"{index:03d}").strip()
+        normalized_section = {
+            "id": section_id,
+            "title": str(section.get("title") or f"Section {section_id}").strip(),
+            "summary": str(section.get("summary") or "").strip(),
+            "slide_count": len(normalized_frames),
+            "frames": normalized_frames,
+        }
+        total += len(normalized_frames)
+        normalized_sections.append(normalized_section)
+    if not normalized_sections:
+        raise ValueError("outline.sections has no valid sections")
+    return {
+        "title": str(outline.get("title") or "Presentation").strip(),
+        "target_slide_count": int(outline.get("target_slide_count") or total),
+        "sections": normalized_sections,
+    }
 
 
 def _payload_text(payload: dict, key: str, default: str = "") -> str:
@@ -367,7 +1005,7 @@ def _missing_equation_macro() -> str:
 
 def _safe_image_macros() -> str:
     return (
-        "\\providecommand{\\safelogoimage}[1]{\\IfFileExists{#1}{\\includegraphics[height=39pt, keepaspectratio]{#1}}{\\fbox{\\parbox[c][30pt][c]{65pt}{\\centering\\tiny Missing\\\\image}}}}\n"
+        "\\providecommand{\\safelogoimage}[1]{\\fbox{\\parbox[c][30pt][c]{65pt}{\\centering\\tiny Logo}}}\n"
         "\\providecommand{\\safecontentimage}[1]{\\IfFileExists{#1}{\\includegraphics[width=0.7\\textwidth]{#1}}{\\fbox{\\parbox[c][0.34\\textheight][c]{0.7\\textwidth}{\\centering\\scriptsize Missing image\\\\\\texttt{\\detokenize{#1}}}}}}\n"
         "\\providecommand{\\safeverticalimage}[1]{\\IfFileExists{#1}{\\includegraphics[width=\\textwidth]{#1}}{\\fbox{\\parbox[c][0.34\\textheight][c]{\\textwidth}{\\centering\\scriptsize Missing image\\\\\\texttt{\\detokenize{#1}}}}}}\n"
     )
@@ -537,7 +1175,34 @@ def _strip_missing_equation_markers(latex: str) -> str:
         "",
         text,
     )
-    return re.sub(r"\\kgmissingequation\{[^{}]*\}\{[^{}]*\}", "", text)
+    text = re.sub(r"\\kgmissingequation\{[^{}]*\}\{[^{}]*\}", "", text)
+    return _strip_missing_equation_macro_definition(text)
+
+
+def _strip_missing_equation_macro_definition(text: str) -> str:
+    source = text or ""
+    pattern = re.compile(r"\\(?:providecommand|newcommand|renewcommand)\{\\kgmissingequation\}(?:\[\d+\])?\{")
+    while True:
+        match = pattern.search(source)
+        if not match:
+            return source
+        open_pos = match.end() - 1
+        depth = 0
+        end = None
+        for idx in range(open_pos, len(source)):
+            char = source[idx]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    end = idx + 1
+                    while end < len(source) and source[end] in " \t\r\n":
+                        end += 1
+                    break
+        if end is None:
+            return source[:match.start()]
+        source = source[:match.start()] + source[end:]
 
 
 def _extract_equation_references(latex: str) -> list[dict[str, str]]:
@@ -591,6 +1256,50 @@ def _extract_equation_definition_keys(latex: str) -> set[str]:
         for tag in re.findall(r"\\tag\{([^{}]+)\}", block):
             keys.add(_equation_reference_key(tag))
     return keys
+
+
+def _frame_contains_display_formula(frame: str) -> bool:
+    return bool(re.search(
+        r"\\begin\{(?:equation|align|alignat|gather|multline)\*?\}[\s\S]*?\\end\{(?:equation|align|alignat|gather|multline)\*?\}"
+        r"|\\\[[\s\S]*?\\\]|\$\$[\s\S]*?\$\$",
+        frame or "",
+    ))
+
+
+def _reference_is_present_in_own_frame(latex: str, ref: dict[str, str]) -> bool:
+    raw = str(ref.get("raw") or "")
+    if not raw:
+        return False
+    frames = re.findall(r"\\begin\{frame\}(?:\[[^\]]*\])?(?:\{[^{}]*\})?[\s\S]*?\\end\{frame\}", latex or "")
+    for frame in frames:
+        if raw in frame and _frame_contains_display_formula(frame):
+            return True
+    return False
+
+
+def _collect_unresolved_equation_references(
+    latex: str,
+    known_equations: dict[str, str] | None = None,
+) -> tuple[list[dict[str, str]], list[str]]:
+    text = _strip_missing_equation_markers(latex or "")
+    refs = _extract_equation_references(text)
+    defined = _extract_equation_definition_keys(text)
+    known = known_equations or {}
+    missing: list[dict[str, str]] = []
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for ref in refs:
+        key = ref.get("key", "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if key in defined or _reference_is_present_in_own_frame(text, ref):
+            continue
+        if key in known:
+            resolved.append(ref.get("label") or key)
+            continue
+        missing.append(ref)
+    return missing, resolved
 
 
 def _missing_equation_macro() -> str:
@@ -793,21 +1502,36 @@ def _apply_equation_reference_policy(
     source_title: str = "",
 ) -> tuple[str, list[dict[str, str]], list[str]]:
     known = _known_equation_map(source, source_id, source_title)
-    marked, _ = _mark_missing_equations(latex or "")
-    resolved_latex, resolved, _ = _resolve_missing_equations_in_latex(marked, known_equations=known)
-    final_latex, new_missing = _mark_missing_equations(resolved_latex)
-    still_missing = [
-        {"key": match.group(1), "label": match.group(2) or match.group(1), "raw": match.group(0)}
-        for match in _missing_equation_marker_pattern().finditer(final_latex)
-    ]
-    seen: set[str] = set()
-    deduped: list[dict[str, str]] = []
-    for ref in still_missing + new_missing:
-        key = ref.get("key", "")
-        if key and key not in seen:
-            seen.add(key)
-            deduped.append(ref)
-    return final_latex, deduped, resolved
+    clean_latex = _strip_missing_equation_markers(latex or "")
+    missing, resolved = _collect_unresolved_equation_references(clean_latex, known)
+    return clean_latex, missing, resolved
+
+
+def _attach_missing_equations_to_slides(parsed: dict, latex: str, missing: list[dict[str, str]]) -> dict:
+    if not parsed or not isinstance(parsed.get("slides"), list) or not missing:
+        return parsed
+    frames = _extract_latex_frames(latex or "")
+    assigned: set[str] = set()
+    for idx, frame in enumerate(frames):
+        if idx >= len(parsed["slides"]):
+            break
+        slide_missing = []
+        for ref in missing:
+            key = ref.get("key", "")
+            raw = ref.get("raw", "")
+            if key in assigned:
+                continue
+            if raw and raw in frame:
+                slide_missing.append(ref)
+                assigned.add(key)
+        if slide_missing:
+            existing = parsed["slides"][idx].get("missing_equations") or []
+            parsed["slides"][idx]["missing_equations"] = existing + slide_missing
+    remaining = [ref for ref in missing if ref.get("key", "") not in assigned]
+    if remaining and parsed["slides"]:
+        existing = parsed["slides"][-1].get("missing_equations") or []
+        parsed["slides"][-1]["missing_equations"] = existing + remaining
+    return parsed
 
 
 def _prepare_generated_image_paths(latex: str, figure_assets: dict[str, str]) -> str:
@@ -854,7 +1578,35 @@ def _caption_text_from_image_frame_body(body: str, image_command: str) -> str:
     text = re.sub(r"\\vspace\{[^{}]*\}", " ", text)
     text = re.sub(r"%.*", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
-    return text or "图片说明待补充。"
+    return text
+
+
+def _default_image_caption(frame_title: str, image_path: str) -> str:
+    label = (frame_title or _figure_frame_title_for_path(image_path, {}) or "本图").strip()
+    if label.lower() == "figure":
+        label = "本图"
+    return (
+        f"{_escape_latex_text(label)} 用于说明本节中的关键关系或变化趋势。"
+        "阅读时先看图中的变量、坐标或模块，再比较主要曲线、区域或节点之间的差异，"
+        "最后把这些变化联系到本页对应的核心概念和公式含义。"
+    )
+
+
+def _is_uninformative_image_caption(caption: str, frame_title: str, image_path: str) -> bool:
+    text = re.sub(r"\s+", " ", str(caption or "")).strip()
+    if not text:
+        return True
+    title = re.sub(r"\s+", " ", str(frame_title or "")).strip()
+    if title and text.lower() == title.lower():
+        return True
+    normalized_text = _normalize_figure_label(text)
+    normalized_title = _normalize_figure_label(title)
+    normalized_path = _normalize_figure_label(Path(str(image_path or "")).stem)
+    if normalized_text and normalized_text in {normalized_title, normalized_path}:
+        return True
+    if re.fullmatch(r"(?:Figure|Fig\.?|图)\s*\d+(?:\.\d+)*", text, re.IGNORECASE):
+        return True
+    return False
 
 
 def _image_dimensions_from_bytes(data: bytes) -> tuple[int, int] | None:
@@ -946,31 +1698,36 @@ def _figure_frame_title_for_path(image_path: str, figure_assets: dict[str, str] 
 
 def _enforce_top_image_bottom_text_layout(latex: str, figure_assets: dict[str, str] | None = None) -> str:
     frame_pattern = re.compile(r"\\begin\{frame\}(?:\[[^\]]*\])?(?:\{[^{}]*\})?[\s\S]*?\\end\{frame\}")
-    image_pattern = re.compile(r"\\includegraphics(?:\[[^\]]*\])?\{([^{}]+)\}")
+    image_pattern = re.compile(
+        r"\\(?P<cmd>includegraphics|safecontentimage|safeverticalimage)(?:\[[^\]]*\])?\{(?P<path>[^{}]+)\}"
+    )
 
     def replace_frame(match: re.Match[str]) -> str:
         frame = match.group(0)
-        if "\\includegraphics" not in frame:
+        if not re.search(r"\\(?:includegraphics|safecontentimage|safeverticalimage)", frame):
             return frame
         image_match = image_pattern.search(frame)
         if not image_match:
             return frame
-        image_path = image_match.group(1).strip()
+        image_cmd = image_match.group("cmd")
+        image_path = image_match.group("path").strip()
         body = re.sub(r"^\\begin\{frame\}(?:\[[^\]]*\])?(?:\{[^{}]*\})?", "", frame)
         body = re.sub(r"\\end\{frame\}\s*$", "", body)
         caption = _caption_text_from_image_frame_body(body, image_match.group(0))
-        orientation = _image_orientation_for_path(image_path, figure_assets or {})
         frame_title = _figure_frame_title_for_path(image_path, figure_assets or {})
+        if _is_uninformative_image_caption(caption, frame_title, image_path):
+            caption = _default_image_caption(frame_title, image_path)
+        orientation = "vertical" if image_cmd == "safeverticalimage" else _image_orientation_for_path(image_path, figure_assets or {})
         if orientation == "vertical":
             return (
                 f"\\begin{{frame}}{{{frame_title}}}\n"
                 "  \\begin{columns}[T]\n"
                 "    \\begin{column}{0.45\\textwidth}\n"
-                "      \\centering\n"
-                f"      \\safeverticalimage{{{image_path}}}\n"
+                f"      \\scriptsize {caption}\n"
                 "    \\end{column}\n"
                 "    \\begin{column}{0.45\\textwidth}\n"
-                f"      \\scriptsize {caption}\n"
+                "      \\centering\n"
+                f"      \\safeverticalimage{{{image_path}}}\n"
                 "    \\end{column}\n"
                 "  \\end{columns}\n"
                 "\\end{frame}"
@@ -1260,7 +2017,45 @@ def _latex_compiler_command(tex_filename: str = "main.tex") -> list[str] | None:
     return None
 
 
-def _compile_latex_to_pdf_bytes(latex: str) -> bytes:
+def _latex_graphic_targets(latex: str) -> list[str]:
+    targets: list[str] = []
+    for match in re.finditer(
+        r"\\(?:includegraphics|safecontentimage|safeverticalimage)(?:\[[^\]]*\])?\{([^{}]+)\}",
+        latex or "",
+    ):
+        target = match.group(1).strip().replace("\\", "/")
+        if target and target not in targets:
+            targets.append(target)
+    return targets
+
+
+def _materialize_latex_assets(temp_dir: Path, latex: str, asset_urls: dict[str, str] | None = None) -> None:
+    lookup = {str(key).replace("\\", "/").lower(): str(value) for key, value in (asset_urls or {}).items()}
+    for target in _latex_graphic_targets(latex):
+        normalized = target.lstrip("./")
+        candidates = [
+            normalized,
+            Path(normalized).name,
+            "fig/" + Path(normalized).name,
+        ]
+        source_value = ""
+        for candidate in candidates:
+            source_value = lookup.get(candidate.lower(), "")
+            if source_value:
+                break
+        source_path = _resolve_uploaded_asset_path(source_value) if source_value else _resolve_uploaded_asset_path(normalized)
+        if not source_path:
+            continue
+        output_path = (temp_dir / normalized).resolve()
+        try:
+            output_path.relative_to(temp_dir.resolve())
+        except ValueError:
+            continue
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_path, output_path)
+
+
+def _compile_latex_to_pdf_bytes(latex: str, asset_urls: dict[str, str] | None = None) -> bytes:
     compiler = _latex_compiler_command("main.tex")
     if not compiler:
         raise RuntimeError("当前服务器未安装 xelatex / pdflatex / tectonic，不能直接把 .tex 编译成高保真页面。请先安装 TeX Live/MiKTeX，或在此处导入对应 PDF。")
@@ -1269,6 +2064,7 @@ def _compile_latex_to_pdf_bytes(latex: str) -> bytes:
         temp_dir = Path(temp_name)
         tex_path = temp_dir / "main.tex"
         tex_path.write_text(latex or "", encoding="utf-8")
+        _materialize_latex_assets(temp_dir, latex or "", asset_urls)
         last_output = ""
         for _ in range(2):
             proc = subprocess.run(
@@ -1337,11 +2133,63 @@ def _extract_latex_frames(latex: str) -> list[str]:
 
 
 def _frame_title(frame: str) -> str:
-    match = re.search(r"\\begin\{frame\}(?:\[[^\]]*\])?\{([^{}]*)\}", frame or "")
-    if match:
-        return re.sub(r"\s+", " ", match.group(1)).strip()
+    parsed_title = _frame_begin_title(frame)
+    if parsed_title:
+        return re.sub(r"\s+", " ", parsed_title).strip()
     match = re.search(r"\\frametitle\{([^{}]*)\}", frame or "")
     return re.sub(r"\s+", " ", match.group(1)).strip() if match else ""
+
+
+def _balanced_group_span(text: str, open_pos: int) -> tuple[int, int] | None:
+    if open_pos < 0 or open_pos >= len(text) or text[open_pos] != "{":
+        return None
+    depth = 0
+    escaped = False
+    for idx in range(open_pos, len(text)):
+        char = text[idx]
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return open_pos, idx + 1
+    return None
+
+
+def _frame_begin_title_span(frame: str) -> tuple[int, int, int, int] | None:
+    text = frame or ""
+    match = re.search(r"\\begin\{frame\}", text)
+    if not match:
+        return None
+    pos = match.end()
+    while pos < len(text) and text[pos].isspace():
+        pos += 1
+    if pos < len(text) and text[pos] == "[":
+        close = text.find("]", pos + 1)
+        if close == -1:
+            return None
+        pos = close + 1
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+    if pos >= len(text) or text[pos] != "{":
+        return None
+    span = _balanced_group_span(text, pos)
+    if not span:
+        return None
+    return span[0], span[1], span[0] + 1, span[1] - 1
+
+
+def _frame_begin_title(frame: str) -> str:
+    span = _frame_begin_title_span(frame)
+    if not span:
+        return ""
+    return (frame or "")[span[2]:span[3]]
 
 
 def _normalize_frame_body(frame: str) -> str:
@@ -1479,7 +2327,7 @@ def _bimsa_latex_preamble() -> str:
 \definecolor{myline}{RGB}{0,116,112}
 \definecolor{myblue}{RGB}{40,100,180}
 
-\providecommand{\safelogoimage}[1]{\IfFileExists{#1}{\includegraphics[height=39pt, keepaspectratio]{#1}}{\fbox{\parbox[c][30pt][c]{65pt}{\centering\tiny Missing\\image}}}}
+\providecommand{\safelogoimage}[1]{\fbox{\parbox[c][30pt][c]{65pt}{\centering\tiny Logo}}}
 \providecommand{\safecontentimage}[1]{\IfFileExists{#1}{\includegraphics[width=0.7\textwidth]{#1}}{\fbox{\parbox[c][0.34\textheight][c]{0.7\textwidth}{\centering\scriptsize Missing image\\\texttt{\detokenize{#1}}}}}}
 \providecommand{\safeverticalimage}[1]{\IfFileExists{#1}{\includegraphics[width=\textwidth]{#1}}{\fbox{\parbox[c][0.34\textheight][c]{\textwidth}{\centering\scriptsize Missing image\\\texttt{\detokenize{#1}}}}}}
 
@@ -1509,9 +2357,9 @@ def _bimsa_latex_preamble() -> str:
           minimum height=39pt, fill=gray!30, text=black, align=center]
           at (current page.north west) {Public course in BIMSA in 2026 spring semester};
     \node[anchor=north east, inner sep=0] (f3) at ([xshift=-3pt] current page.north east)
-          {\safelogoimage{fig/图片2.png}};
+          {\safelogoimage{logo-right}};
     \node[anchor=north east, inner sep=0] at (f3.north west)
-          {\safelogoimage{fig/图片1.png}};
+          {\safelogoimage{logo-left}};
   \end{tikzpicture}%
   \vspace*{36pt}
   \begin{center}
@@ -1536,9 +2384,10 @@ def _bimsa_title_frame() -> str:
     return r"""\setbeamertemplate{footline}{}
 
 {
-\setbeamertemplate{footline}{%
-  \leavevmode%
-  \makebox[\paperwidth][l]{\includegraphics[width=\paperwidth]{fig/图片3.png}}%
+\usebackgroundtemplate{%
+  \begin{tikzpicture}[remember picture, overlay]
+    \fill[gray!12] (current page.south west) rectangle (current page.north east);
+  \end{tikzpicture}%
 }
 \begin{frame}
     \titlepage
@@ -1547,8 +2396,57 @@ def _bimsa_title_frame() -> str:
 """
 
 
+def _safe_title_background_template() -> str:
+    return (
+        "\\usebackgroundtemplate{%\n"
+        "  \\begin{tikzpicture}[remember picture, overlay]\n"
+        "    \\fill[gray!12] (current page.south west) rectangle (current page.north east);\n"
+        "  \\end{tikzpicture}%\n"
+        "}"
+    )
+
+
+def _sanitize_unsafe_title_assets(latex: str) -> str:
+    text = latex or ""
+    text = text.replace("\t" + "itle", r"\title")
+    text = text.replace("\b" + "egin{", r"\begin{")
+    text = re.sub(
+        r"(?m)^([ \t]*)itle(\s*(?:\[[^\]]*\])?\s*\{)",
+        r"\1\\title\2",
+        text,
+    )
+    text = re.sub(
+        r"(?m)^([ \t]*)(title|subtitle|author|date)(\s*(?:\[[^\]]*\])?\s*\{)",
+        r"\1\\\2\3",
+        text,
+    )
+    text = re.sub(
+        r"(?m)^([ \t]*)(begin|end)(\{(?:document|frame|center|itemize|enumerate|columns|column|tikzpicture|table|tabular|equation|align\*?|minipage)\})",
+        r"\1\\\2\3",
+        text,
+    )
+    text = re.sub(
+        r"\\providecommand\{\\safelogoimage\}\[1\]\{[\s\S]*?\}\s*(?=\\providecommand\{\\safecontentimage\})",
+        lambda _match: "\\providecommand{\\safelogoimage}[1]{\\fbox{\\parbox[c][30pt][c]{65pt}{\\centering\\tiny Logo}}}\n",
+        text,
+        count=1,
+    )
+    text = re.sub(
+        r"\\usebackgroundtemplate\{\s*\\includegraphics\[[^\]]*\]\{fig/图片3\.png\}\s*\}",
+        lambda _match: _safe_title_background_template(),
+        text,
+    )
+    text = re.sub(
+        r"\\setbeamertemplate\{footline\}\{[\s\S]*?fig/图片3\.png[\s\S]*?\n\}",
+        lambda _match: _safe_title_background_template(),
+        text,
+    )
+    return text
+
+
 def _ensure_complete_bimsa_latex(latex: str) -> str:
     text = _strip_markdown_code_fence(latex or "")
+    text = _sanitize_unsafe_title_assets(text)
     frames = _extract_latex_frames(text)
     has_document = r"\begin{document}" in text and r"\end{document}" in text
     if not has_document:
@@ -1589,6 +2487,611 @@ def _dedupe_latex_frames(latex: str) -> str:
     return result
 
 
+def _extract_display_formula_blocks(frame: str) -> list[str]:
+    blocks: list[str] = []
+    for match in re.finditer(r"\\\[[\s\S]*?\\\]", frame or ""):
+        blocks.append(match.group(0).strip())
+    for match in re.finditer(r"\\begin\{(?:equation|align|gather|multline)\*?\}[\s\S]*?\\end\{(?:equation|align|gather|multline)\*?\}", frame or ""):
+        blocks.append(match.group(0).strip())
+    return blocks
+
+
+def _extract_item_texts(frame: str, limit: int = 3) -> list[str]:
+    texts: list[str] = []
+    for match in re.finditer(r"\\item(?:<[^>]*>)?(?:\[[\s\S]*?\])?\s*([\s\S]*?)(?=\\item|\\end\{itemize\}|\\end\{enumerate\})", frame or ""):
+        item = re.sub(r"\s+", " ", match.group(1)).strip()
+        if item:
+            texts.append(item)
+        if len(texts) >= limit:
+            break
+    return texts
+
+
+def _short_formula_note(frame: str) -> str:
+    items = _extract_item_texts(frame, 2)
+    if not items:
+        return ""
+    note = " ".join(items)
+    note = re.sub(r"\\begin\{[^{}]*\}|\\end\{[^{}]*\}", " ", note)
+    note = re.sub(r"\s+", " ", note).strip()
+    return note[:180]
+
+
+def _formula_annotation_targets(formula_text: str) -> list[tuple[str, str, str]]:
+    source = formula_text or ""
+    labels: list[tuple[str, str, str]] = []
+    if re.search(r"\\pi\s*_\s*\{?j\}?", source):
+        labels.append(("pij", r"\pi", "突变 j 被固定的概率"))
+    if re.search(r"\bp_b\b|p_\{b\}", source):
+        labels.append(("pb", "p_b", "新突变有益的概率"))
+    if re.search(r"\\Phi\b", source):
+        labels.append(("phi", r"\Phi", "标准正态分布的累积函数"))
+    if re.search(r"\\sum\b", source):
+        labels.append(("sum", r"\sum", "把所有候选突变的效应加总"))
+    if re.search(r"s\s*_\s*\{?j\}?", source):
+        labels.append(("sj", "s_j", "突变 j 的选择优势"))
+    if re.search(r"s\s*_\s*\{?\\ell\}?", source):
+        labels.append(("sell", r"s_{\ell}", "第 $\\ell$ 个突变的选择优势"))
+    if re.search(r"\\sqrt\{?n\}?|\bn\b", source):
+        labels.append(("n", "n", "参与适应的性状数量"))
+    if re.search(r"\br\b", source):
+        labels.append(("r", "r", "新突变带来的表型改变大小"))
+    if re.search(r"\bd\b", source):
+        labels.append(("d", "d", r"当前表型到最优值 $\theta$ 的距离"))
+    if re.search(r"\bk\b", source):
+        labels.append(("k", "k", "可供选择的有益突变数"))
+    if re.search(r"\bi\b", source):
+        labels.append(("i", "i", "当前排序或行走步数"))
+    if re.search(r"平均步数|average", source, re.IGNORECASE):
+        labels.append(("avgsteps", r"\text{平均步数}", "预期需要走多少步"))
+    if re.search(r"\\nu\b", source):
+        labels.append(("nu", r"\nu", "最优值移动的速度"))
+    if re.search(r"\bN\b|N\\mu", source):
+        labels.append(("N", "N", "群体大小"))
+    if re.search(r"\\mu\b", source):
+        labels.append(("mu", r"\mu", "突变率"))
+    return labels[:5]
+
+
+def _formula_anchor_name(mark: str, page_index: int) -> str:
+    suffix = re.sub(r"[^A-Za-z0-9]+", "", str(mark or "")) or "mark"
+    return f"kgp{max(1, int(page_index or 1))}_{suffix}"
+
+
+def _mark_formula_annotation_targets(formula: str, targets: list[tuple[str, str, str]], page_index: int = 1) -> str:
+    result = formula or ""
+    for mark, token, _label in targets:
+        safe_mark = _formula_anchor_name(mark, page_index)
+        if f"\\tikzmark{{{safe_mark}}}" in result:
+            continue
+        if token == "p_b":
+            result = re.sub(r"p_b", r"\\tikzmark{" + safe_mark + r"}p_b", result, count=1)
+        elif token == r"\Phi":
+            result = re.sub(r"\\Phi", r"\\tikzmark{" + safe_mark + r"}\\Phi", result, count=1)
+        elif token == r"\sum":
+            result = re.sub(r"\\sum", r"\\tikzmark{" + safe_mark + r"}\\sum", result, count=1)
+        elif token == r"\nu":
+            result = re.sub(r"\\nu", r"\\tikzmark{" + safe_mark + r"}\\nu", result, count=1)
+        elif token == r"\mu":
+            result = re.sub(r"\\mu", r"\\tikzmark{" + safe_mark + r"}\\mu", result, count=1)
+        elif token == r"\pi":
+            result = re.sub(r"\\pi", r"\\tikzmark{" + safe_mark + r"}\\pi", result, count=1)
+        elif token == r"\text{平均步数}":
+            result = re.sub(r"\\text\{平均步数\}", r"\\tikzmark{" + safe_mark + r"}\\text{平均步数}", result, count=1)
+        elif token == "s_j":
+            result = re.sub(r"s\s*_\s*(?:\{j\}|j)", r"\\tikzmark{" + safe_mark + r"}s_{j}", result, count=1)
+        elif token == r"s_{\ell}":
+            result = re.sub(r"s\s*_\s*(?:\{\\ell\}|\\ell)", r"\\tikzmark{" + safe_mark + r"}s_{\\ell}", result, count=1)
+        elif token in {"r", "n", "d", "N", "k", "i"}:
+            result = re.sub(r"(?<![A-Za-z])" + re.escape(token) + r"(?![A-Za-z])", r"\\tikzmark{" + safe_mark + r"}" + token, result, count=1)
+    return result
+
+
+def _formula_callout_latex(formula_text: str, page_index: int = 1) -> str:
+    labels = _formula_annotation_targets(formula_text)
+    if not labels:
+        return ""
+    nodes: list[str] = ["  \\begin{tikzpicture}[remember picture, overlay]"]
+    offsets = [
+        ("-2.5cm", "-0.2cm", "2.9cm"),
+        ("0.5cm", "1.0cm", "2.4cm"),
+        ("0.5cm", "-0.8cm", "2.7cm"),
+        ("2.5cm", "-0.5cm", "3.3cm"),
+        ("-1.8cm", "1.1cm", "3.6cm"),
+    ]
+    for idx, (mark, _token, label) in enumerate(labels[:5]):
+        x, y, width = offsets[idx]
+        safe_mark = _formula_anchor_name(mark, page_index)
+        nodes.append(
+            f"    \\onslide<{idx + 4}->{{\n"
+            "    \\node[rectangle callout, callout absolute pointer={(pic cs:" + safe_mark + ")}, "
+            "draw=blue, fill=white, rounded corners, "
+            f"text width={width}, align=center, font=\\footnotesize] "
+            f"at ([shift={{({x},{y})}}] pic cs:{safe_mark}) "
+            "{" + label + "};\n"
+            "    }"
+        )
+    nodes.append("  \\end{tikzpicture}")
+    return "\n".join(nodes)
+
+
+def _enforce_formula_callout_anchor_positioning(latex: str) -> str:
+    offsets = [
+        ("2.0cm", "1.15cm"),
+        ("3.2cm", "0.0cm"),
+        ("2.0cm", "-1.15cm"),
+        ("-2.2cm", "0.95cm"),
+        ("-2.2cm", "-0.95cm"),
+    ]
+    index = 0
+
+    pattern = re.compile(
+        r"(\\node\[(?=[^\]]*rectangle callout)(?=[^\]]*callout absolute pointer=\{\(pic cs:(?P<mark>[^)}]+)\)\})[^\]]*\]\s*)"
+        r"at\s*\(\s*\[xshift=[^\]]+\]\s*current page\.north west\s*\)",
+        re.MULTILINE,
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal index
+        mark = match.group("mark").strip()
+        x, y = offsets[index % len(offsets)]
+        index += 1
+        return f"{match.group(1)}at ([shift={{({x},{y})}}] pic cs:{mark})"
+
+    return pattern.sub(replace, latex or "")
+
+
+def _enforce_formula_callout_sequence_and_spacing(latex: str) -> str:
+    text = latex or ""
+    frames = _extract_latex_frames(text)
+    if not frames:
+        return text
+    offsets = [
+        ("2.0cm", "1.15cm"),
+        ("3.2cm", "0.0cm"),
+        ("2.0cm", "-1.15cm"),
+        ("-2.2cm", "0.95cm"),
+        ("-2.2cm", "-0.95cm"),
+    ]
+    result = text
+    callout_pattern = re.compile(
+        r"\\onslide<\d+->\{\s*"
+        r"\\node\[(?P<options>[^\]]*rectangle callout[^\]]*callout absolute pointer=\{\(pic cs:(?P<ptr>[^)}]+)\)\}[^\]]*)\]\s*"
+        r"at\s*\(\[shift=\{\([^)]*\)\}\]\s*pic cs:(?P=ptr)\)",
+        re.DOTALL,
+    )
+
+    def replace_frame(frame: str) -> str:
+        index = 0
+
+        def replace_callout(match: re.Match[str]) -> str:
+            nonlocal index
+            mark = match.group("ptr").strip()
+            x, y = offsets[index % len(offsets)]
+            index += 1
+            return (
+                f"\\onslide<{index}->{{\n"
+                f"      \\node[{match.group('options')}] at ([shift={{({x},{y})}}] pic cs:{mark})"
+            )
+
+        return callout_pattern.sub(replace_callout, frame)
+
+    for frame in frames:
+        if "rectangle callout" not in frame or "pic cs:" not in frame:
+            continue
+        replacement = replace_frame(frame)
+        if replacement != frame:
+            result = result.replace(frame, replacement, 1)
+    return result
+
+
+def _anchor_already_page_scoped(mark: str) -> bool:
+    return bool(re.match(r"^(?:kg)?p\d+_", str(mark or "")))
+
+
+def _scope_frame_tikzmarks(frame: str, page_index: int) -> str:
+    labels: set[str] = set()
+    for match in re.finditer(r"\\tikzmark\{([^{}]+)\}", frame or ""):
+        label = match.group(1).strip()
+        if label and not _anchor_already_page_scoped(label):
+            labels.add(label)
+    for match in re.finditer(r"pic cs:([A-Za-z0-9_.:-]+)", frame or ""):
+        label = match.group(1).strip()
+        if label and not _anchor_already_page_scoped(label):
+            labels.add(label)
+    if not labels:
+        return frame
+
+    scoped = frame
+    for label in sorted(labels, key=len, reverse=True):
+        safe_label = re.sub(r"[^A-Za-z0-9_.:-]+", "", label)
+        if not safe_label:
+            continue
+        replacement = _formula_anchor_name(safe_label, page_index)
+        scoped = scoped.replace(f"\\tikzmark{{{label}}}", f"\\tikzmark{{{replacement}}}")
+        scoped = scoped.replace(f"pic cs:{label}", f"pic cs:{replacement}")
+    return scoped
+
+
+def _enforce_unique_tikzmark_names(latex: str) -> str:
+    text = latex or ""
+    frames = _extract_latex_frames(text)
+    if not frames:
+        return text
+    result = text
+    for frame_index, frame in enumerate(frames, 1):
+        replacement = _scope_frame_tikzmarks(frame, frame_index)
+        if replacement != frame:
+            result = result.replace(frame, replacement, 1)
+    return result
+
+
+def _build_formula_breakdown_frame(title: str, formulas: list[str], note: str = "", page_index: int = 1) -> str:
+    out = [f"\\begin{{frame}}{{{title}}}", "  \\vspace*{0.35cm}", "  \\begin{center}"]
+    all_targets = _formula_annotation_targets("\n".join(formulas[:2]))
+    for idx, formula in enumerate(formulas[:2]):
+        body = formula
+        if body.startswith(r"\[") and body.endswith(r"\]"):
+            body = body[2:-2].strip()
+        body = _mark_formula_annotation_targets(body, all_targets, page_index)
+        out.append("    {\\Large")
+        out.append("    \\[")
+        out.append("      " + body)
+        out.append("    \\]")
+        out.append("    }")
+        if idx == 0 and len(formulas[:2]) > 1:
+            out.append("    \\vspace{0.35cm}")
+    out.append("  \\end{center}")
+    if note:
+        out.append("  \\vspace{0.15cm}")
+        out.append("  {\\scriptsize " + note + "}")
+    callouts = _formula_callout_latex("\n".join(formulas[:2]), page_index)
+    if callouts:
+        out.append(callouts)
+    out.append("\\end{frame}")
+    return "\n".join(out)
+
+
+def _enforce_formula_breakdown_layout(latex: str) -> str:
+    text = latex or ""
+    frames = _extract_latex_frames(text)
+    if not frames:
+        return text
+    result = text
+    for frame_index, frame in enumerate(frames, 1):
+        if r"\safecontentimage" in frame or r"\safeverticalimage" in frame or r"\includegraphics" in frame:
+            continue
+        formulas = _extract_display_formula_blocks(frame)
+        if not formulas:
+            continue
+        has_list = r"\begin{itemize}" in frame or r"\begin{enumerate}" in frame
+        has_callout = (
+            "rectangle callout" in frame
+            and "callout absolute pointer={(pic cs:" in frame
+            and r"\tikzmark{" in frame
+        )
+        if not has_list and has_callout:
+            continue
+        title = _frame_title(frame) or "Formula Breakdown"
+        note = _short_formula_note(frame)
+        replacement = _build_formula_breakdown_frame(title, formulas, note, frame_index)
+        result = result.replace(frame, replacement, 1)
+    return result
+
+
+def _frame_inner_body(frame: str) -> str:
+    text = frame or ""
+    begin_match = re.search(r"\\begin\{frame\}", text)
+    if begin_match:
+        span = _frame_begin_title_span(text)
+        if span:
+            text = text[span[1]:]
+        else:
+            text = text[begin_match.end():]
+            text = re.sub(r"^\s*\[[^\]]*\]", "", text, count=1)
+    text = re.sub(r"\\frametitle\{[^{}]*\}", "", text)
+    text = re.sub(r"\\end\{frame\}\s*$", "", text).strip()
+    return text
+
+
+def _clean_latex_heading_text(value: str) -> str:
+    text = value or ""
+    text = text.replace("\\\\", " ")
+    text = re.sub(r"\\(?:textbf|textit|emph|textcolor)\*?(?:\[[^\]]*\])?\{([^{}]*)\}", r"\1", text)
+    text = re.sub(r"\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^{}]*)\})?", r" \1 ", text)
+    text = re.sub(r"[{}$]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _is_generic_outline_title(title: str) -> bool:
+    clean = _clean_latex_heading_text(title).lower()
+    clean = re.sub(r"[^a-z0-9 ]+", " ", clean)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean in {
+        "outline",
+        "chapter outline",
+        "outline of this chapter",
+        "contents",
+        "table of contents",
+    }
+
+
+def _is_empty_outline_frame(frame: str) -> bool:
+    title = _frame_title(frame)
+    if not _is_generic_outline_title(title):
+        return False
+    body = _frame_inner_body(frame)
+    body = re.sub(r"%.*", "", body).strip()
+    return not body
+
+
+def _outline_items_from_latex(latex: str) -> list[str]:
+    sections = []
+    for match in re.finditer(r"\\section\*?\{([^{}]+)\}", latex or ""):
+        title = re.sub(r"\s+", " ", match.group(1)).strip()
+        if title and title not in sections:
+            sections.append(title)
+    if sections:
+        return sections[:8]
+    titles = []
+    for frame in _extract_latex_frames(latex):
+        title = _frame_title(frame)
+        if not title:
+            continue
+        low = _clean_latex_heading_text(title).lower()
+        if _is_generic_outline_title(title) or low == "review of last course":
+            continue
+        if title not in titles:
+            titles.append(title)
+        if len(titles) >= 6:
+            break
+    return titles
+
+
+def _document_chapter_title(latex: str) -> str:
+    text = latex or ""
+    match = re.search(r"\\title(?:\[[^\]]*\])?", text)
+    if match:
+        pos = match.end()
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+        span = _balanced_group_span(text, pos) if pos < len(text) and text[pos] == "{" else None
+        if span:
+            title = _clean_latex_heading_text(text[span[0] + 1:span[1] - 1])
+            if title:
+                return title
+    return "Evolutionary Theory on Polygenic Trait"
+
+
+def _replace_frame_begin_title(frame: str, title: str) -> str:
+    span = _frame_begin_title_span(frame)
+    if span:
+        return frame[:span[0]] + "{" + title + "}" + frame[span[1]:]
+    begin_match = re.search(r"\\begin\{frame\}(?:\[[^\]]*\])?", frame or "")
+    if not begin_match:
+        return frame
+    return frame[:begin_match.end()] + "{" + title + "}" + frame[begin_match.end():]
+
+
+def _enforce_outline_frame_titles(latex: str, preferred_title: str = "") -> str:
+    text = latex or ""
+    chapter_title = preferred_title.strip() or _document_chapter_title(text)
+    if not chapter_title:
+        return text
+    result = text
+    changed_first_outline = False
+    for frame in _extract_latex_frames(text):
+        title = _frame_title(frame)
+        if not title:
+            continue
+        body = _frame_inner_body(frame)
+        if r"\begin{itemize}" not in body and r"\tableofcontents" not in body:
+            continue
+        clean_title = _clean_latex_heading_text(title).lower()
+        is_template_outline_title = clean_title in {
+            "evolutionary theory on polygenic trait",
+            "long term response",
+        }
+        should_replace = (
+            (bool(preferred_title.strip()) and not changed_first_outline)
+            or _is_generic_outline_title(title)
+            or is_template_outline_title
+        )
+        if not should_replace:
+            continue
+        replacement = _replace_frame_begin_title(frame, chapter_title)
+        result = result.replace(frame, replacement, 1)
+        changed_first_outline = True
+    return result
+
+
+def _build_filled_outline_frame(title: str, items: list[str], has_sections: bool) -> str:
+    if not items:
+        items = ["Key Concepts", "Main Results", "Summary"]
+    out = [
+        f"\\begin{{frame}}{{{title}}}",
+        "  \\vfill",
+        "  \\begin{center}",
+        "    \\begin{minipage}{0.7\\textwidth}",
+        "      \\begin{itemize}",
+        "        \\setlength{\\itemsep}{0.3\\baselineskip}",
+    ]
+    for item in items:
+        out.append(f"        \\item \\textcolor{{black}}{{{item}}}")
+    out.extend([
+        "      \\end{itemize}",
+        "    \\end{minipage}",
+        "  \\end{center}",
+        "  \\vfill",
+        "\\end{frame}",
+    ])
+    return "\n".join(out)
+
+
+def _fill_empty_outline_frames(latex: str, preferred_title: str = "") -> str:
+    text = latex or ""
+    frames = _extract_latex_frames(text)
+    if not frames:
+        return _enforce_outline_frame_titles(text, preferred_title)
+    items = _outline_items_from_latex(text)
+    has_sections = bool(re.search(r"\\section\*?\{[^{}]+\}", text))
+    chapter_title = preferred_title.strip() or _document_chapter_title(text)
+    result = text
+    for frame in frames:
+        if not _is_empty_outline_frame(frame):
+            continue
+        replacement = _build_filled_outline_frame(chapter_title, items, has_sections)
+        result = result.replace(frame, replacement, 1)
+    return _enforce_outline_frame_titles(result, preferred_title)
+
+
+def _is_empty_frame(frame: str) -> bool:
+    body = _frame_inner_body(frame)
+    body = re.sub(r"%.*", "", body).strip()
+    return not body
+
+
+def _content_snippet_for_empty_title(title: str, source_text: str) -> list[str]:
+    title_words = [w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9-]+", title or "") if len(w) > 3]
+    lines = [re.sub(r"\s+", " ", line).strip() for line in (source_text or "").splitlines()]
+    candidates: list[str] = []
+    for line in lines:
+        if not line or line.startswith("\\"):
+            continue
+        low = line.lower()
+        if title_words and not any(word in low for word in title_words[:4]):
+            continue
+        plain = re.sub(r"^[#>*\-\d.\s]+", "", line).strip()
+        if plain and plain not in candidates:
+            candidates.append(plain[:180])
+        if len(candidates) >= 4:
+            break
+    return candidates
+
+
+def _build_nonempty_placeholder_frame(title: str, items: list[str]) -> str:
+    if not items:
+        items = [
+            "该主题需要补充定义、核心假设和适用条件。",
+            "请结合导入的补充章节或公式章节完善本页内容。",
+        ]
+    out = [f"\\begin{{frame}}{{{title or 'Topic'}}}", "  \\begin{itemize}"]
+    for item in items[:4]:
+        out.append(f"    \\item {_escape_latex_text_preserving_inline_math(item)}")
+    out.extend(["  \\end{itemize}", "\\end{frame}"])
+    return "\n".join(out)
+
+
+def _fill_empty_content_frames(latex: str, source_text: str = "") -> str:
+    text = latex or ""
+    result = text
+    for frame in _extract_latex_frames(text):
+        if not _is_empty_frame(frame) or _is_empty_outline_frame(frame):
+            continue
+        title = _frame_title(frame) or "Topic"
+        items = _content_snippet_for_empty_title(title, source_text)
+        result = result.replace(frame, _build_nonempty_placeholder_frame(title, items), 1)
+    return result
+
+
+def _remove_numbered_outline_item_labels(latex: str) -> str:
+    text = latex or ""
+    text = re.sub(
+        r"\\item\s*\[\s*\\textcolor\{(black|gray)\}\{\\textbf\{\d+\.\}\}\s*\]\s*\\textcolor\{\1\}\{",
+        r"\\item \\textcolor{\1}{",
+        text,
+    )
+    text = re.sub(r"\\item\s*\[\s*(?:\\textbf\{)?\d+\.(?:\})?\s*\]\s*", r"\\item ", text)
+    text = re.sub(r"(?<=\})\s*\[\d+\.\]", "", text)
+    text = re.sub(r"(?<=[A-Za-z\u4e00-\u9fff])\s*\[\d+\.\](?=\s*(?:\\\\|$|[}\n]))", "", text)
+    return text
+
+
+def _figure_caption_map_from_markdown(content: str) -> dict[str, str]:
+    captions: dict[str, str] = {}
+    pattern = re.compile(r"^\s*>?\s*Figure\s+(\d+(?:\.\d+)*)\s+(.+)$", re.IGNORECASE)
+    for line in (content or "").splitlines():
+        match = pattern.match(line.strip())
+        if not match:
+            continue
+        number = match.group(1)
+        caption = re.sub(r"\s+", " ", match.group(2)).strip()
+        caption = re.sub(r"^(?:[·路\-:：]\s*)+", "", caption).strip()
+        if caption and number not in captions:
+            captions[number] = caption
+    return captions
+
+
+def _matched_image_caption(frame_title: str, image_path: str, content: str) -> str:
+    caption_map = _figure_caption_map_from_markdown(content)
+    candidates = [frame_title or "", image_path or "", Path(str(image_path or "")).stem]
+    for value in candidates:
+        match = re.search(r"(?:Figure|Fig\.?|图)?\s*(\d+(?:[._]\d+)*)", value, re.IGNORECASE)
+        if not match:
+            continue
+        number = match.group(1).replace("_", ".")
+        caption = caption_map.get(number)
+        if caption:
+            return _escape_latex_text_preserving_inline_math(f"Figure {number} {caption}")
+    return ""
+
+
+def _enforce_matched_image_captions(
+    latex: str,
+    content: str,
+    figure_assets: dict[str, str] | None = None,
+) -> str:
+    if not content:
+        return latex or ""
+    frame_pattern = re.compile(r"\\begin\{frame\}(?:\[[^\]]*\])?(?:\{[^{}]*\})?[\s\S]*?\\end\{frame\}")
+    image_pattern = re.compile(
+        r"\\(?P<cmd>includegraphics|safecontentimage|safeverticalimage)(?:\[[^\]]*\])?\{(?P<path>[^{}]+)\}"
+    )
+
+    def replace_frame(match: re.Match[str]) -> str:
+        frame = match.group(0)
+        image_match = image_pattern.search(frame)
+        if not image_match:
+            return frame
+        image_path = image_match.group("path").strip()
+        frame_title = _figure_frame_title_for_path(image_path, figure_assets or {})
+        body = re.sub(r"^\\begin\{frame\}(?:\[[^\]]*\])?(?:\{[^{}]*\})?", "", frame)
+        body = re.sub(r"\\end\{frame\}\s*$", "", body)
+        caption = _caption_text_from_image_frame_body(body, image_match.group(0))
+        if not _is_uninformative_image_caption(caption, frame_title, image_path):
+            return frame
+        matched_caption = _matched_image_caption(frame_title, image_path, content)
+        if not matched_caption:
+            return frame
+        orientation = "vertical" if image_match.group("cmd") == "safeverticalimage" else _image_orientation_for_path(image_path, figure_assets or {})
+        if orientation == "vertical":
+            return (
+                f"\\begin{{frame}}{{{frame_title}}}\n"
+                "  \\begin{columns}[T]\n"
+                "    \\begin{column}{0.45\\textwidth}\n"
+                f"      \\scriptsize {matched_caption}\n"
+                "    \\end{column}\n"
+                "    \\begin{column}{0.45\\textwidth}\n"
+                "      \\centering\n"
+                f"      \\safeverticalimage{{{image_path}}}\n"
+                "    \\end{column}\n"
+                "  \\end{columns}\n"
+                "\\end{frame}"
+            )
+        return (
+            f"\\begin{{frame}}{{{frame_title}}}\n"
+            "  \\centering\n"
+            f"  \\safecontentimage{{{image_path}}}\n"
+            "  \\vspace{0.3cm}\n"
+            "  \\begin{center}\n"
+            f"    \\parbox{{0.95\\textwidth}}{{\\scriptsize {matched_caption}}}\n"
+            "  \\end{center}\n"
+            "\\end{frame}"
+        )
+
+    return frame_pattern.sub(replace_frame, latex or "")
+
+
 def _escape_latex_text(value: str) -> str:
     text = str(value or "")
     replacements = {
@@ -1604,6 +3107,451 @@ def _escape_latex_text(value: str) -> str:
     for src, dst in replacements.items():
         text = text.replace(src, dst)
     return text
+
+
+def _escape_latex_text_preserving_inline_math(value: str) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    tokens: list[str] = []
+
+    def store(match: re.Match[str]) -> str:
+        tokens.append(match.group(0))
+        return f"@@PPTMATH{len(tokens) - 1}@@"
+
+    text = re.sub(r"\\\([\s\S]*?\\\)", store, text)
+    text = re.sub(r"\$[^$\n]+\$", store, text)
+    text = _escape_latex_text(text)
+    for idx, token in enumerate(tokens):
+        text = text.replace(f"@@PPTMATH{idx}@@", token)
+    return text
+
+
+def _ppt_formula_like(value: str) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if re.search(r"^(\$\$[\s\S]*\$\$|\\\[[\s\S]*\\\]|\\\([\s\S]*\\\))$", text):
+        return True
+    if re.search(r"\\(?:frac|sqrt|sum|prod|int|bar|overline|hat|vec|theta|alpha|beta|gamma|delta|lambda|mu|sigma|phi|omega|partial|nabla|mathrm|mathbb|mathcal)\b", text):
+        return True
+    return bool(re.search(r"[_^]\s*\{?|\b[xyzndr]\s*[=<>]", text) and not re.search(r"[\u4e00-\u9fff]{4,}", text))
+
+
+def _ppt_formula_source(value: str) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"^\$\$\s*|\s*\$\$$", "", text)
+    text = re.sub(r"^\\\[\s*|\s*\\\]$", "", text)
+    text = re.sub(r"^\\\(\s*|\s*\\\)$", "", text)
+    text = re.sub(r"^\$\s*|\s*\$$", "", text)
+    return text.strip()
+
+
+def _ppt_figure_numbers_from_text(value: str) -> list[str]:
+    text = str(value or "")
+    numbers: list[str] = []
+    for match in re.finditer(r"(?:Figure|Fig\.?|图)\s*([0-9]+(?:[._][0-9]+)*)", text, re.IGNORECASE):
+        number = match.group(1).replace("_", ".")
+        if number and number not in numbers:
+            numbers.append(number)
+    return numbers
+
+
+def _ppt_normalize_symbol_text(value: str) -> str:
+    text = str(value or "")
+    replacements = {
+        "θ": r"$\theta$",
+        "μ": r"$\mu$",
+        "Φ": r"$\Phi$",
+        "σ": r"$\sigma$",
+        "¦È": r"$\theta$",
+        "¦Ì": r"$\mu$",
+        "¦Ð": r"$\Phi$",
+        "¦Ó": r"$\sigma$",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return text
+
+
+def _ppt_text_lines(shape: object) -> list[str]:
+    if not getattr(shape, "has_text_frame", False):
+        return []
+    lines: list[str] = []
+    for paragraph in getattr(shape.text_frame, "paragraphs", []) or []:
+        parts = [str(getattr(run, "text", "") or "") for run in getattr(paragraph, "runs", []) or []]
+        text = "".join(parts).strip() if parts else str(getattr(paragraph, "text", "") or "").strip()
+        if text:
+            lines.append(_ppt_normalize_symbol_text(text))
+    if not lines:
+        text = str(getattr(shape, "text", "") or "").strip()
+        if text:
+            lines.extend(_ppt_normalize_symbol_text(line.strip()) for line in text.splitlines() if line.strip())
+    return lines
+
+
+def _ppt_is_title_shape(shape: object) -> bool:
+    if not getattr(shape, "has_text_frame", False):
+        return False
+    try:
+        ph_type = shape.placeholder_format.type
+        if ph_type in {1, 3, 4}:
+            return True
+    except Exception:
+        pass
+    try:
+        for paragraph in shape.text_frame.paragraphs:
+            for run in paragraph.runs:
+                if run.font.size and int(run.font.size) >= 24 * 12700:
+                    return True
+                if run.font.bold:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def _ppt_table_latex(shape: object) -> str:
+    if not getattr(shape, "has_table", False):
+        return ""
+    rows = []
+    try:
+        for row in shape.table.rows:
+            rows.append([_escape_latex_text_preserving_inline_math(str(cell.text or "").strip()) for cell in row.cells])
+    except Exception:
+        return ""
+    if not rows or not rows[0]:
+        return ""
+    col_count = max(len(row) for row in rows)
+    spec = "l" * col_count
+    out = [
+        "  \\begin{table}",
+        "    \\centering",
+        f"    \\begin{{tabular}}{{{spec}}}",
+        "      \\toprule",
+    ]
+    for idx, row in enumerate(rows):
+        padded = row + [""] * (col_count - len(row))
+        out.append("      " + " & ".join(padded) + r" \\")
+        if idx == 0:
+            out.append("      \\midrule")
+    out.extend(["      \\bottomrule", "    \\end{tabular}", "  \\end{table}"])
+    return "\n".join(out)
+
+
+def _ppt_shape_bounds(shape: object) -> dict[str, int]:
+    return {
+        "left": int(getattr(shape, "left", 0) or 0),
+        "top": int(getattr(shape, "top", 0) or 0),
+        "width": int(getattr(shape, "width", 0) or 0),
+        "height": int(getattr(shape, "height", 0) or 0),
+    }
+
+
+def _ppt_image_extension(shape: object) -> str:
+    try:
+        ext = str(shape.image.ext or "").strip().lower()
+        if ext:
+            return "." + ext.lstrip(".")
+    except Exception:
+        pass
+    content_type = ""
+    try:
+        content_type = str(shape.image.content_type or "").lower()
+    except Exception:
+        pass
+    if "jpeg" in content_type or "jpg" in content_type:
+        return ".jpg"
+    if "webp" in content_type:
+        return ".webp"
+    if "gif" in content_type:
+        return ".gif"
+    return ".png"
+
+
+def _ppt_shape_image_bytes(shape: object) -> bytes:
+    try:
+        return bytes(shape.image.blob)
+    except Exception:
+        return b""
+
+
+def _ppt_image_latex_path(slide_index: int, image_index: int, ext: str, preferred_number: str = "") -> tuple[str, str]:
+    number = str(preferred_number or "").strip().replace("_", ".")
+    if not number:
+        number = f"{slide_index}.{image_index}"
+    return f"Figure {number}", f"fig/{number}{ext}"
+
+
+def _ppt_box_cm(bounds: dict[str, int], slide_width: int, slide_height: int) -> tuple[float, float, float, float]:
+    width = max(1, int(slide_width or 12192000))
+    height = max(1, int(slide_height or 6858000))
+    return (
+        bounds["left"] / width * 16.0,
+        bounds["top"] / height * 9.0,
+        max(0.2, bounds["width"] / width * 16.0),
+        max(0.2, bounds["height"] / height * 9.0),
+    )
+
+
+def _ppt_tikz_node_at(bounds: dict[str, int], slide_width: int, slide_height: int, options: str, content: str) -> str:
+    x, y, _w, _h = _ppt_box_cm(bounds, slide_width, slide_height)
+    return (
+        f"    \\node[{options}] at ([xshift={x:.3f}cm,yshift=-{y:.3f}cm] current page.north west) "
+        f"{{{content}}};"
+    )
+
+
+def _ppt_box_center_cm(bounds: dict[str, int], slide_width: int, slide_height: int) -> tuple[float, float]:
+    x, y, w, h = _ppt_box_cm(bounds, slide_width, slide_height)
+    return x + w / 2.0, y + h / 2.0
+
+
+def _ppt_nearest_pointer_coordinate(
+    note_bounds: dict[str, int],
+    target_bounds: list[dict[str, int]],
+    slide_width: int,
+    slide_height: int,
+) -> str:
+    nx, ny = _ppt_box_center_cm(note_bounds, slide_width, slide_height)
+    if not target_bounds:
+        return f"([xshift={nx:.3f}cm,yshift=-{ny:.3f}cm] current page.north west)"
+    target = min(
+        target_bounds,
+        key=lambda bounds: (
+            (_ppt_box_center_cm(bounds, slide_width, slide_height)[0] - nx) ** 2
+            + (_ppt_box_center_cm(bounds, slide_width, slide_height)[1] - ny) ** 2
+        ),
+    )
+    tx, ty = _ppt_box_center_cm(target, slide_width, slide_height)
+    return f"([xshift={tx:.3f}cm,yshift=-{ty:.3f}cm] current page.north west)"
+
+
+def _ppt_lines_to_latex(lines: list[str]) -> str:
+    return r" \\ ".join(_escape_latex_text_preserving_inline_math(line) for line in lines if str(line or "").strip())
+
+
+def _ppt_shape_is_blue_note(shape: object) -> bool:
+    name = str(getattr(shape, "name", "") or "").lower()
+    if "标注" in name or "callout" in name:
+        return True
+    try:
+        rgb = shape.line.color.rgb
+        if rgb and int(rgb[2]) > int(rgb[0]) and int(rgb[2]) > int(rgb[1]):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _ppt_picture_is_formula(bounds: dict[str, int], slide_width: int, slide_height: int, has_figure_number: bool) -> bool:
+    if has_figure_number:
+        return False
+    width = max(1, bounds.get("width", 0))
+    height = max(1, bounds.get("height", 0))
+    if width / height >= 2.6:
+        return True
+    return height <= max(1, int(slide_height or 6858000)) * 0.24 and width >= max(1, int(slide_width or 12192000)) * 0.20
+
+
+def _safe_upload_filename(filename: str, fallback: str) -> str:
+    name = Path(str(filename or "").replace("\\", "/")).name.strip() or fallback
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", name).strip(" .")
+    return name or fallback
+
+
+def _ppt_slide_to_latex_frame(
+    slide: object,
+    slide_index: int,
+    package_dir: Path,
+    asset_urls: dict[str, str],
+    slide_width: int = 12192000,
+    slide_height: int = 6858000,
+) -> tuple[str, list[dict[str, str]]]:
+    title = ""
+    all_text: list[str] = []
+    for shape in slide.shapes:
+        lines = _ppt_text_lines(shape)
+        if lines:
+            all_text.extend(lines)
+            bounds = _ppt_shape_bounds(shape)
+            is_title_candidate = (
+                _ppt_is_title_shape(shape)
+                and not _ppt_shape_is_blue_note(shape)
+                and bounds["top"] <= int(slide_height * 0.22)
+            )
+            if is_title_candidate and not title:
+                title = " ".join(lines)
+
+    preferred_numbers = _ppt_figure_numbers_from_text("\n".join(all_text))
+    pointer_targets = [
+        _ppt_shape_bounds(shape)
+        for shape in slide.shapes
+        if MSO_SHAPE_TYPE is not None and getattr(shape, "shape_type", None) == MSO_SHAPE_TYPE.PICTURE
+    ]
+    image_records: list[dict[str, str]] = []
+    image_index = 0
+    formula_index = 0
+    nodes: list[str] = []
+
+    for shape in slide.shapes:
+        bounds = _ppt_shape_bounds(shape)
+        x, y, w, h = _ppt_box_cm(bounds, slide_width, slide_height)
+        shape_type = getattr(shape, "shape_type", None)
+
+        if MSO_SHAPE_TYPE is not None and shape_type == MSO_SHAPE_TYPE.PICTURE:
+            blob = _ppt_shape_image_bytes(shape)
+            if not blob:
+                continue
+            ext = _ppt_image_extension(shape)
+            has_figure_number = image_index < len(preferred_numbers)
+            if _ppt_picture_is_formula(bounds, slide_width, slide_height, has_figure_number):
+                formula_index += 1
+                output_name = f"formula-{slide_index}.{formula_index}{ext}"
+                latex_path = f"fig/{output_name}"
+                label = f"Formula {slide_index}.{formula_index}"
+                content = (
+                    f"\\parbox[c][{h:.3f}cm][c]{{{w:.3f}cm}}"
+                    f"{{\\centering\\includegraphics[width=\\textwidth,keepaspectratio]{{{latex_path}}}}}"
+                )
+                node_options = (
+                    f"anchor=north west, inner sep=0pt, "
+                    f"minimum width={w:.3f}cm, minimum height={h:.3f}cm"
+                )
+            else:
+                image_index += 1
+                preferred_number = preferred_numbers[image_index - 1] if image_index - 1 < len(preferred_numbers) else ""
+                label, latex_path = _ppt_image_latex_path(slide_index, image_index, ext, preferred_number)
+                content = (
+                    f"\\parbox[c][{h:.3f}cm][c]{{{w:.3f}cm}}"
+                    f"{{\\centering\\includegraphics[width=\\textwidth,keepaspectratio]{{{latex_path}}}}}"
+                )
+                node_options = (
+                    f"anchor=north west, draw=black, inner sep=0pt, "
+                    f"minimum width={w:.3f}cm, minimum height={h:.3f}cm, "
+                    f"text width={w:.3f}cm, align=center, font=\\scriptsize"
+                )
+            output_name = Path(latex_path).name
+            output_path = package_dir / output_name
+            output_path.write_bytes(blob)
+            url = f"/beamer-generator/uploads/{package_dir.name}/{output_name}"
+            asset_urls[latex_path] = url
+            asset_urls[output_name] = url
+            image_records.append({"label": label, "path": latex_path, "url": url})
+            nodes.append(_ppt_tikz_node_at(bounds, slide_width, slide_height, node_options, content))
+            continue
+
+        if getattr(shape, "has_table", False):
+            table_latex = _ppt_table_latex(shape)
+            if table_latex:
+                content = f"\\parbox[t][{h:.3f}cm][t]{{{w:.3f}cm}}{{\\scriptsize {table_latex}}}"
+                nodes.append(_ppt_tikz_node_at(bounds, slide_width, slide_height, "anchor=north west, inner sep=0pt", content))
+            continue
+
+        lines = _ppt_text_lines(shape)
+        if not lines:
+            continue
+        formulas = [_ppt_formula_source(line) for line in lines if _ppt_formula_like(line)]
+        if formulas and len(formulas) == len(lines):
+            content = "\\parbox[t][" + f"{h:.3f}cm" + "][t]{" + f"{w:.3f}cm" + "}{" + " ".join(f"\\[{formula}\\]" for formula in formulas) + "}"
+            nodes.append(_ppt_tikz_node_at(bounds, slide_width, slide_height, "anchor=north west, inner sep=0pt", content))
+            continue
+        text_content = _ppt_lines_to_latex(lines)
+        if not text_content:
+            continue
+        if _ppt_shape_is_blue_note(shape):
+            pointer = _ppt_nearest_pointer_coordinate(bounds, pointer_targets, slide_width, slide_height)
+            content = f"\\parbox[c][{h:.3f}cm][c]{{{w:.3f}cm}}{{\\centering {text_content}}}"
+            options = (
+                f"rectangle callout, callout absolute pointer={{{pointer}}}, "
+                f"anchor=north west, draw=blue, fill=white, rounded corners, "
+                f"inner sep=0pt, text width={w:.3f}cm, minimum width={w:.3f}cm, minimum height={h:.3f}cm, "
+                "align=center, font=\\footnotesize"
+            )
+        else:
+            content = f"\\parbox[t][{h:.3f}cm][t]{{{w:.3f}cm}}{{{text_content}}}"
+            options = f"anchor=north west, inner sep=0pt, text width={w:.3f}cm, align=left, font=\\scriptsize"
+        nodes.append(_ppt_tikz_node_at(bounds, slide_width, slide_height, options, content))
+
+    if not nodes:
+        nodes.append("    \\node[anchor=center, font=\\small] at (current page.center) {暂无可提取内容};")
+    out = [
+        "\\begin{frame}[plain]",
+        "  \\begin{tikzpicture}[remember picture, overlay]",
+        *nodes,
+        "  \\end{tikzpicture}",
+        "\\end{frame}",
+    ]
+    return "\n".join(out), image_records
+
+
+def _pptx_to_beamer_latex(file_bytes: bytes, filename: str) -> dict[str, object]:
+    if Presentation is None:
+        raise RuntimeError("服务器未安装 python-pptx，无法导入 PPT")
+    prs = Presentation(BytesIO(file_bytes))
+    package_id = uuid.uuid4().hex
+    package_dir = UPLOAD_DIR / package_id
+    package_dir.mkdir(parents=True, exist_ok=True)
+    asset_urls: dict[str, str] = {}
+    figure_assets: list[dict[str, str]] = []
+    frames: list[str] = []
+    slide_width = int(getattr(prs, "slide_width", 12192000) or 12192000)
+    slide_height = int(getattr(prs, "slide_height", 6858000) or 6858000)
+    for slide_index, slide in enumerate(prs.slides, 1):
+        frame, images = _ppt_slide_to_latex_frame(slide, slide_index, package_dir, asset_urls, slide_width, slide_height)
+        frames.append(frame)
+        figure_assets.extend(images)
+    title = Path(filename or "PPT").stem or "Imported PPT"
+    latex = _bimsa_latex_preamble().rstrip()
+    title_tex = _escape_latex_text_preserving_inline_math(title)
+    latex = re.sub(
+        r"\\title\[\]\{[^{}]*\}",
+        lambda _match: f"\\title[]{{{title_tex}}}",
+        latex,
+        count=1,
+    )
+    latex += "\n\n\\begin{document}\n\n" + "\n\n".join(frames) + "\n\n\\end{document}\n"
+    return {
+        "success": True,
+        "filename": filename,
+        "latex": latex,
+        "slide_count": len(frames),
+        "asset_urls": asset_urls,
+        "figure_assets": figure_assets,
+        "package_id": package_id,
+        "message": "PPT 已转换为 LaTeX",
+    }
+
+
+def _convert_legacy_ppt_to_pptx_bytes(file_bytes: bytes, filename: str) -> bytes:
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if not soffice:
+        raise RuntimeError("当前环境未安装 LibreOffice，无法直接转换 .ppt；请先另存为 .pptx 后导入。")
+    with tempfile.TemporaryDirectory(prefix="kg-ppt-convert-") as temp_name:
+        temp_dir = Path(temp_name)
+        source_name = _safe_upload_filename(filename or "presentation.ppt", "presentation.ppt")
+        source_path = temp_dir / source_name
+        source_path.write_bytes(file_bytes)
+        result = subprocess.run(
+            [
+                soffice,
+                "--headless",
+                "--convert-to",
+                "pptx",
+                "--outdir",
+                str(temp_dir),
+                str(source_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=120,
+        )
+        pptx_files = list(temp_dir.glob("*.pptx"))
+        if result.returncode != 0 or not pptx_files:
+            tail = (result.stdout or "").strip()[-1200:]
+            raise RuntimeError("PPT 转 PPTX 失败：" + (tail or "LibreOffice 未生成 pptx 文件"))
+        return pptx_files[0].read_bytes()
 
 
 def _english_frame_topic_title(value: str) -> str:
@@ -1906,7 +3854,10 @@ async def generate(payload: dict | None = Body(default=None)) -> StreamingRespon
     slide_count = max(1, min(_payload_int(payload, "slide_count", 7), 80))
     figure_assets = _payload_map(payload, "figure_assets")
     selected_sections = _payload_selected_sections(payload)
+    outline_payload = payload.get("outline") if isinstance(payload.get("outline"), dict) else None
+    outline = _validate_outline(outline_payload) if outline_payload else None
     selected_sections_requirement = _selected_sections_requirement(selected_sections)
+    chapter_directory_title = _infer_chapter_directory_title(content)
     if selected_sections_requirement:
         custom_requirements = (
             custom_requirements + "\n" + selected_sections_requirement
@@ -1926,98 +3877,131 @@ async def generate(payload: dict | None = Body(default=None)) -> StreamingRespon
         custom_requirements,
         slide_count=slide_count,
         figure_assets=figure_assets,
+        outline=outline,
     )
-    api_key = _payload_text(payload, "api_key").strip() or _deepseek_setting("DEEPSEEK_API_KEY")
+    api_key = _payload_text(payload, "api_key").strip()
     if not api_key:
-        return _stream_error("未配置 DeepSeek API Key，请先在网站右上角齿轮设置中保存 API Key")
+        return _stream_error("请输入本次生成使用的 GPT API Key")
 
     base_url = (
         _payload_text(payload, "base_url").strip()
-        or _deepseek_setting("DEEPSEEK_API_BASE")
-        or _deepseek_setting("DEEPSEEK_BASE_URL")
-        or config.DEEPSEEK_BASE_URL
+        or "https://api.ikuncode.cc/v1"
     )
     model = (
         _payload_text(payload, "model").strip()
-        or _deepseek_setting("DEEPSEEK_PRO_MODEL")
-        or _deepseek_setting("DEEPSEEK_MODEL")
-        or config.DEEPSEEK_MODEL
+        or "gpt-5.5"
     )
-    logger.info("Generating Beamer: base_url=%s, model=%s, content_len=%s", base_url, model, len(content))
+    logger.info("Generating Beamer: provider=gpt, base_url=%s, model=%s, content_len=%s", base_url, model, len(content))
     client = DeepSeekClient(api_key=api_key, base_url=base_url)
 
     async def event_stream():
-        yield f'data: {json.dumps({"type": "heartbeat", "content": "connected"})}\n\n'
-        try:
-            chunk_count = 0
-            generated_parts: list[str] = []
-            async for chunk_text in client.stream_generate(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                model=model,
-                max_tokens=config.MAX_TOKENS,
-                temperature=config.TEMPERATURE,
-            ):
-                chunk_count += 1
-                generated_parts.append(chunk_text)
-            latex = _ensure_complete_bimsa_latex("".join(generated_parts))
-            latex = _dedupe_latex_frames(latex)
-            actual_slide_count = _count_generated_slides(latex)
-            repair_attempts = 0
-            while actual_slide_count < slide_count and repair_attempts < 4:
-                previous_count = actual_slide_count
-                repair_attempts += 1
-                logger.info(
-                    "Generated %s/%s slides; requesting DeepSeek repair pass %s",
-                    actual_slide_count,
-                    slide_count,
-                    repair_attempts,
-                )
-                repaired = await _repair_latex_with_deepseek(
-                    client=client,
-                    content=content,
-                    latex=latex,
-                    target_count=slide_count,
-                    current_count=actual_slide_count,
+        queue: asyncio.Queue[dict[str, str]] = asyncio.Queue()
+
+        async def send_event(event_type: str, content: str = "") -> None:
+            await queue.put({"type": event_type, "content": content})
+
+        async def worker() -> None:
+            try:
+                chunk_count = 0
+                generated_parts: list[str] = []
+                await send_event("heartbeat", "已连接后端，正在请求 GPT 5.5 生成 LaTeX...")
+                async for chunk_text in client.stream_generate(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
                     model=model,
-                )
-                latex = _dedupe_latex_frames(repaired)
-                actual_slide_count = _count_generated_slides(latex)
-                if actual_slide_count <= previous_count:
-                    logger.info("DeepSeek repair pass made no progress at %s slides", actual_slide_count)
-                    break
-            if actual_slide_count < slide_count:
-                logger.info("DeepSeek repair still produced %s/%s slides; using local dedup fallback", actual_slide_count, slide_count)
-                latex = _build_auto_expansion_frames(latex, slide_count, content=content)
+                    max_tokens=config.MAX_TOKENS,
+                    temperature=config.TEMPERATURE,
+                ):
+                    chunk_count += 1
+                    generated_parts.append(chunk_text)
+                    if chunk_count % 8 == 0:
+                        await send_event("heartbeat", f"GPT 5.5 正在生成 LaTeX，已收到 {chunk_count} 个片段...")
+                await send_event("heartbeat", "GPT 已返回内容，正在检查页数和格式...")
+                latex = _ensure_complete_bimsa_latex("".join(generated_parts))
                 latex = _dedupe_latex_frames(latex)
                 actual_slide_count = _count_generated_slides(latex)
-            if actual_slide_count < slide_count:
-                logger.info("Local fallback still produced %s/%s slides; applying strict minimum pass", actual_slide_count, slide_count)
-                latex = _build_auto_expansion_frames(latex, slide_count, content=content)
-                actual_slide_count = _count_generated_slides(latex)
-            latex = _prepare_generated_image_paths(latex, figure_assets)
-            latex = _enforce_top_image_bottom_text_layout(latex, figure_assets)
-            latex = _merge_duplicate_image_frames(latex)
-            latex = _ensure_safe_image_macros(latex)
-            latex, missing_equations, resolved_equations = _apply_equation_reference_policy(latex)
-            if missing_equations:
-                logger.info("Marked %s missing equation references", len(missing_equations))
-            logger.info("Beamer generation done: %s chunks, %s slides", chunk_count, actual_slide_count)
-            data = json.dumps({"type": "chunk", "content": latex}, ensure_ascii=False)
-            yield f"data: {data}\n\n"
-            yield f'data: {json.dumps({"type": "done", "content": ""})}\n\n'
-        except Exception as exc:
-            logger.error("Beamer generation error: %s: %s", type(exc).__name__, exc)
-            error_msg = str(exc)
-            low = error_msg.lower()
-            if "connect" in low or "timeout" in low:
-                error_msg = f"无法连接 API ({base_url})，请检查网络或 Base URL"
-            elif "401" in error_msg or "auth" in low:
-                error_msg = "API Key 无效，请检查 Key 是否正确"
-            elif "model" in low:
-                error_msg = f"模型 '{model}' 不可用，请检查模型名称"
-            error_data = json.dumps({"type": "error", "content": error_msg}, ensure_ascii=False)
-            yield f"data: {error_data}\n\n"
+                repair_attempts = 0
+                while actual_slide_count < slide_count and repair_attempts < 4:
+                    previous_count = actual_slide_count
+                    repair_attempts += 1
+                    await send_event("heartbeat", f"当前 {actual_slide_count}/{slide_count} 页，正在补齐第 {repair_attempts} 轮...")
+                    logger.info(
+                        "Generated %s/%s slides; requesting GPT 5.5 repair pass %s",
+                        actual_slide_count,
+                        slide_count,
+                        repair_attempts,
+                    )
+                    repaired = await _repair_latex_with_deepseek(
+                        client=client,
+                        content=content,
+                        latex=latex,
+                        target_count=slide_count,
+                        current_count=actual_slide_count,
+                        model=model,
+                    )
+                    latex = _dedupe_latex_frames(repaired)
+                    actual_slide_count = _count_generated_slides(latex)
+                    if actual_slide_count <= previous_count:
+                        logger.info("GPT 5.5 repair pass made no progress at %s slides", actual_slide_count)
+                        break
+                if actual_slide_count < slide_count:
+                    await send_event("heartbeat", f"正在本地补足页面：{actual_slide_count}/{slide_count}...")
+                    logger.info("GPT 5.5 repair still produced %s/%s slides; using local dedup fallback", actual_slide_count, slide_count)
+                    latex = _build_auto_expansion_frames(latex, slide_count, content=content)
+                    latex = _dedupe_latex_frames(latex)
+                    actual_slide_count = _count_generated_slides(latex)
+                if actual_slide_count < slide_count:
+                    logger.info("Local fallback still produced %s/%s slides; applying strict minimum pass", actual_slide_count, slide_count)
+                    latex = _build_auto_expansion_frames(latex, slide_count, content=content)
+                    actual_slide_count = _count_generated_slides(latex)
+                await send_event("heartbeat", "正在应用图片、公式和目录格式约束...")
+                latex = _prepare_generated_image_paths(latex, figure_assets)
+                latex = _enforce_top_image_bottom_text_layout(latex, figure_assets)
+                latex = _enforce_matched_image_captions(latex, content, figure_assets)
+                latex = _merge_duplicate_image_frames(latex)
+                latex = _enforce_formula_breakdown_layout(latex)
+                latex = _enforce_formula_callout_anchor_positioning(latex)
+                latex = _enforce_formula_callout_sequence_and_spacing(latex)
+                latex = _enforce_unique_tikzmark_names(latex)
+                latex = _fill_empty_outline_frames(latex, chapter_directory_title)
+                latex = _fill_empty_content_frames(latex, content)
+                latex = _enforce_formula_breakdown_layout(latex)
+                latex = _enforce_formula_callout_anchor_positioning(latex)
+                latex = _enforce_formula_callout_sequence_and_spacing(latex)
+                latex = _enforce_unique_tikzmark_names(latex)
+                latex = _remove_numbered_outline_item_labels(latex)
+                latex = _ensure_safe_image_macros(latex)
+                latex, missing_equations, resolved_equations = _apply_equation_reference_policy(latex)
+                if missing_equations:
+                    logger.info("Marked %s missing equation references", len(missing_equations))
+                logger.info("Beamer generation done: %s chunks, %s slides", chunk_count, actual_slide_count)
+                await send_event("chunk", latex)
+                await send_event("done", "")
+            except Exception as exc:
+                logger.error("Beamer generation error: %s: %s", type(exc).__name__, exc)
+                error_msg = str(exc)
+                low = error_msg.lower()
+                if "connect" in low or "timeout" in low:
+                    error_msg = f"无法连接 API ({base_url})，请检查网络或 Base URL"
+                elif "401" in error_msg or "auth" in low:
+                    error_msg = "API Key 无效，请检查 Key 是否正确"
+                elif "model" in low:
+                    error_msg = f"模型 '{model}' 不可用，请检查模型名称"
+                await send_event("error", error_msg)
+
+        task = asyncio.create_task(worker())
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=20)
+                except asyncio.TimeoutError:
+                    event = {"type": "heartbeat", "content": "后端仍在生成 LaTeX，请继续等待..."}
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if event.get("type") in {"done", "error"}:
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
 
     return StreamingResponse(
         event_stream(),
@@ -2033,8 +4017,22 @@ async def generate(payload: dict | None = Body(default=None)) -> StreamingRespon
 @router.post("/api/parse-slides")
 async def parse_slides(req: ParseRequest) -> JSONResponse:
     try:
-        latex, missing_equations, resolved_equations = _apply_equation_reference_policy(req.latex)
+        latex = _sanitize_unsafe_title_assets(req.latex or "")
+        latex = _enforce_top_image_bottom_text_layout(latex, {})
+        latex = _enforce_formula_breakdown_layout(latex)
+        latex = _enforce_formula_callout_anchor_positioning(latex)
+        latex = _enforce_formula_callout_sequence_and_spacing(latex)
+        latex = _enforce_unique_tikzmark_names(latex)
+        latex = _fill_empty_outline_frames(latex)
+        latex = _fill_empty_content_frames(latex)
+        latex = _enforce_formula_breakdown_layout(latex)
+        latex = _enforce_formula_callout_anchor_positioning(latex)
+        latex = _enforce_formula_callout_sequence_and_spacing(latex)
+        latex = _enforce_unique_tikzmark_names(latex)
+        latex = _remove_numbered_outline_item_labels(latex)
+        latex, missing_equations, resolved_equations = _apply_equation_reference_policy(latex)
         parsed = parse_latex_to_slides(latex)
+        parsed = _attach_missing_equations_to_slides(parsed, latex, missing_equations)
         parsed["latex"] = latex
         parsed["missing_equations"] = missing_equations
         parsed["resolved_equations"] = resolved_equations
@@ -2047,17 +4045,31 @@ async def parse_slides(req: ParseRequest) -> JSONResponse:
 @router.post("/api/render-latex-pages")
 async def render_latex_pages(req: RenderLatexRequest) -> JSONResponse:
     try:
-        latex = req.latex or ""
+        latex = _sanitize_unsafe_title_assets(req.latex or "")
+        latex = _enforce_top_image_bottom_text_layout(latex, {})
+        latex = _enforce_formula_breakdown_layout(latex)
+        latex = _enforce_formula_callout_anchor_positioning(latex)
+        latex = _enforce_formula_callout_sequence_and_spacing(latex)
+        latex = _enforce_unique_tikzmark_names(latex)
+        latex = _fill_empty_outline_frames(latex)
+        latex = _fill_empty_content_frames(latex)
+        latex = _enforce_formula_breakdown_layout(latex)
+        latex = _enforce_formula_callout_anchor_positioning(latex)
+        latex = _enforce_formula_callout_sequence_and_spacing(latex)
+        latex = _enforce_unique_tikzmark_names(latex)
+        latex = _remove_numbered_outline_item_labels(latex)
+        latex, missing_equations, resolved_equations = _apply_equation_reference_policy(latex)
         try:
             parsed = parse_latex_to_slides(latex)
+            parsed = _attach_missing_equations_to_slides(parsed, latex, missing_equations)
         except Exception:
             parsed = {"title": Path(req.filename or "presentation.tex").stem, "slides": []}
-        pdf_bytes = _compile_latex_to_pdf_bytes(latex)
+        pdf_bytes = _compile_latex_to_pdf_bytes(latex, req.asset_urls)
         return JSONResponse(content={
             **parsed,
             "latex": latex,
-            "missing_equations": [],
-            "resolved_equations": [],
+            "missing_equations": missing_equations,
+            "resolved_equations": resolved_equations,
             "rendered_pages": _render_pdf_bytes_to_pages(pdf_bytes),
             "render_source": "latex",
             "filename": req.filename,
@@ -2611,6 +4623,24 @@ async def import_image_package(files: List[UploadFile] = File(...)):
         raise
     except Exception as exc:
         logger.error("Beamer image package import error: %s", exc)
+        return JSONResponse(content={"error": str(exc)}, status_code=500)
+
+
+@router.post("/api/import-ppt-latex")
+async def import_ppt_latex(file: UploadFile = File(...)):
+    try:
+        filename = file.filename or "presentation.pptx"
+        ext = Path(filename).suffix.lower()
+        if ext != ".pptx":
+            return JSONResponse(content={"error": "仅支持 .pptx 文件"}, status_code=400)
+        content = await file.read()
+        if not content:
+            return JSONResponse(content={"error": "上传文件为空"}, status_code=400)
+        if len(content) > 80 * 1024 * 1024:
+            return JSONResponse(content={"error": "PPT 文件超过 80MB 限制"}, status_code=400)
+        return _pptx_to_beamer_latex(content, filename)
+    except Exception as exc:
+        logger.error("Beamer PPT to LaTeX import error: %s", exc)
         return JSONResponse(content={"error": str(exc)}, status_code=500)
 
 

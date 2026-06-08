@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LaTeX Beamer 演示文稿生成器</title>
-  <link rel="stylesheet" href="/beamer-generator/static/style.css?v=20260525-saved-ppt-catalog-v70">
+  <link rel="stylesheet" href="/beamer-generator/static/style.css?v=20260607-outline-progress-v97">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
@@ -27,11 +27,43 @@
         <input type="number" id="slideCount" value="7" min="1" max="80" />
         <small>默认至少生成 7 页，系统会严格补足到该页数</small>
       </div>
+      <div class="form-group slide-range-group">
+        <label>每节页数范围</label>
+        <div class="inline-number-range">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" id="sectionSlideMin" value="1" title="每个勾选大节最少页数" />
+          <span>到</span>
+          <input type="text" inputmode="numeric" pattern="[0-9]*" id="sectionSlideMax" value="8" title="每个勾选大节最多页数" />
+        </div>
+        <small>用于分配 001、002... 大节的 frame 数，并约束 GPT 纪要规划</small>
+      </div>
       <div class="form-group">
         <label for="language">语言风格</label>
         <select id="language">
           <option value="title_terms_en_content_zh" selected>大标题/人名/专业词汇英文，小标题和内容中文</option>
         </select>
+      </div>
+    </div>
+
+    <div class="api-config-panel">
+      <div class="api-config-title">本次 GPT API 配置</div>
+      <div class="form-group">
+        <label for="gptApiKey">API Key</label>
+        <input id="gptApiKey" type="password" autocomplete="new-password" placeholder="请输入你自己的 API Key，本次生成临时使用" />
+        <small>Key 只随本次生成请求发送给后端，不写入 .env，也不保存在浏览器。</small>
+      </div>
+      <div class="form-row api-config-row">
+        <div class="form-group">
+          <label for="gptApiBase">API Base URL</label>
+          <input id="gptApiBase" type="text" value="https://api.ikuncode.cc/v1" placeholder="https://api.ikuncode.cc/v1" />
+        </div>
+        <div class="form-group">
+          <label for="gptModel">模型</label>
+          <input id="gptModel" type="text" value="gpt-5.5" placeholder="gpt-5.5" />
+        </div>
+      </div>
+      <div class="api-config-actions">
+        <button id="btnApplyGptConfig" type="button" class="btn-secondary">提交配置</button>
+        <button id="btnSaveGptConfig" type="button" class="btn-primary">保存配置</button>
       </div>
     </div>
 
@@ -69,15 +101,33 @@
       </div>
     </div>
 
-    <button id="btnGenerate" class="btn-primary">生成演示文稿</button>
-    <div id="latexImportPanel" class="latex-import-panel" style="display:none;">
-      <div class="latex-import-title">导入 LaTeX 渲染高保真 PPT</div>
-      <div class="latex-import-actions">
-        <button id="btnImportLatexFile" type="button" class="btn-secondary">导入 .tex / PDF / ZIP 文件</button>
-        <button id="btnImportLatexProject" type="button" class="btn-secondary">导入 LaTeX 项目目录</button>
-        <button id="btnParseImportedLatex" type="button" class="btn-primary">渲染为高保真 PPT</button>
+    <div class="generate-actions">
+      <button id="btnGenerateOutline" class="btn-secondary">生成纪要</button>
+      <button id="btnLoadSavedOutlineInput" class="btn-secondary">调用已保存纪要</button>
+    </div>
+    <div id="outlineProgressPanel" class="outline-progress-panel" style="display:none;" aria-live="polite">
+      <div class="outline-progress-head">
+        <span id="outlineProgressMessage">纪要生成准备中...</span>
+        <span id="outlineProgressPercent">0%</span>
       </div>
-      <div id="latexImportMeta" class="latex-import-meta">导入 LaTeX、PDF 或 Overleaf ZIP 后，将按编译 PDF 页面渲染为 PPT；若源码引用图片或样式文件，请使用项目目录导入。</div>
+      <div class="outline-progress-bar">
+        <div id="outlineProgressFill" class="outline-progress-fill" style="width:0%"></div>
+      </div>
+    </div>
+    <div id="latexImportPanel" class="latex-import-panel" style="display:none;">
+      <div class="latex-import-title">导入 PPTX 转 LaTeX</div>
+      <div class="latex-import-actions">
+        <button id="btnImportPptInLatexPanel" type="button" class="btn-secondary">导入 PPTX 转 LaTeX</button>
+        <button id="btnToggleImportPreview" type="button" class="btn-secondary" disabled>预览导入内容</button>
+      </div>
+      <div id="latexImportMeta" class="latex-import-meta">导入 PPTX 后，将按页面元素转换为 LaTeX；图片保留为 Figure 编号和 fig 路径占位框。</div>
+      <div id="importPreviewPanel" class="import-preview-panel" style="display:none;">
+        <div class="import-preview-header">
+          <div id="importPreviewTitle" class="import-preview-title">导入内容预览</div>
+          <button type="button" class="import-preview-close" data-action="close-import-preview" aria-label="关闭导入预览">×</button>
+        </div>
+        <div id="importPreviewGrid" class="import-preview-grid"></div>
+      </div>
     </div>
   </div>
 
@@ -90,6 +140,7 @@
     <div class="output-header">
       <div class="tab-bar">
         <button class="tab-btn active" data-tab="latex">LaTeX 代码</button>
+        <button class="tab-btn" data-tab="outline" id="tabOutline" disabled>纪要</button>
         <button class="tab-btn" data-tab="ppt" id="tabPpt" disabled>PPT 编辑</button>
       </div>
       <div class="output-actions">
@@ -97,7 +148,6 @@
           <button id="btnCopy" type="button" class="btn-secondary" disabled>复制代码</button>
           <button id="btnDownloadTex" type="button" class="btn-secondary" disabled>下载 .tex</button>
           <button id="btnOpenOverleaf" type="button" class="btn-secondary" disabled>在 Overleaf 中编辑</button>
-          <button id="btnImportOverleafResult" type="button" class="btn-secondary">导入 Overleaf 结果</button>
           <button id="btnImportEquationSource" type="button" class="btn-secondary">导入公式章节</button>
           <button id="btnConvertPpt" type="button" class="btn-accent" disabled>转换为 PPT</button>
           <button id="btnDownloadPptx" type="button" class="btn-accent" disabled>下载 PPT</button>
@@ -122,7 +172,35 @@
       </div>
     </div>
 
+    <div id="viewOutline" class="view-panel" style="display:none;">
+      <div id="outlinePanel" class="outline-panel outline-panel-workspace" style="display:none;">
+        <div class="outline-panel-header">
+          <div>
+            <div class="outline-panel-title">PPT 纪要</div>
+            <div id="outlineSummary" class="outline-panel-summary"></div>
+          </div>
+          <div class="outline-panel-actions">
+            <button id="btnAddOutlineSection" type="button" class="btn-secondary">添加大节</button>
+            <button id="btnSaveOutline" type="button" class="btn-secondary">保存纪要</button>
+            <button id="btnLoadSavedOutline" type="button" class="btn-secondary">调用纪要</button>
+            <button id="btnDownloadOutline" type="button" class="btn-secondary">下载纪要</button>
+            <button id="btnGenerate" type="button" class="btn-primary">生成 LaTeX</button>
+          </div>
+        </div>
+        <div id="outlineEditor" class="outline-editor"></div>
+        <small>大节对应 Markdown 中的 001、002...；每个 frame 是后续生成 LaTeX 的一页小节。保存修改后点击右上角“生成 LaTeX”。</small>
+      </div>
+      <div id="outlinePlaceholder" class="slide-placeholder">生成纪要后，这里会显示可编辑的大节目录和每页 frame 清单。</div>
+    </div>
+
     <div id="viewLatex" class="view-panel active">
+      <div class="page-checklist-toolbar">
+        <button id="btnTogglePageChecklist" type="button" class="btn-secondary" disabled>逐页清单</button>
+        <button id="btnDownloadPageChecklist" type="button" class="btn-secondary" disabled>保存清单.txt</button>
+      </div>
+      <div id="pageChecklistPanel" class="page-checklist-panel" style="display:none;">
+        <pre id="pageChecklistText"></pre>
+      </div>
       <div id="status" class="status latex-status"></div>
       <div id="editorWrapper">
         <textarea id="editor"></textarea>
@@ -150,9 +228,10 @@
 <input type="file" id="markdownImporter" accept=".md,.markdown,text/markdown,text/x-markdown" multiple style="display:none;" />
 <input type="file" id="supplementMarkdownImporter" accept=".md,.markdown,text/markdown,text/x-markdown" multiple style="display:none;" />
 <input type="file" id="graphPackageImporter" accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.bmp" webkitdirectory multiple style="display:none;" />
-<input type="file" id="latexImporter" accept=".tex,.latex,.pdf,.zip,text/x-tex,text/plain,application/pdf,application/zip" style="display:none;" />
+<input type="file" id="latexImporter" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" style="display:none;" />
 <input type="file" id="latexProjectImporter" webkitdirectory multiple style="display:none;" />
 <input type="file" id="equationSourceImporter" accept=".tex,.latex,.md,.markdown,.txt,text/x-tex,text/markdown,text/plain" style="display:none;" />
+<input type="file" id="pptLatexImporter" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" style="display:none;" />
 <form id="openOverleafForm" action="https://www.overleaf.com/docs" method="post" target="_blank" style="display:none;">
   <input type="hidden" name="snip_uri[]" id="overleafZipDataUri" />
 </form>
@@ -193,6 +272,10 @@
     <button id="btnCloseEquationSourcePanel" type="button" class="equation-source-close" aria-label="关闭">×</button>
   </div>
   <div class="equation-source-columns">
+    <div class="equation-source-column equation-source-missing-column">
+      <div class="equation-source-column-title">当前缺失公式目录</div>
+      <div id="equationMissingList" class="equation-source-list equation-missing-list"></div>
+    </div>
     <div class="equation-source-column">
       <div class="equation-source-column-title">当前章节可引用公式</div>
       <div id="equationSourceList" class="equation-source-list"></div>
@@ -203,6 +286,7 @@
     </div>
   </div>
   <div class="equation-source-panel-actions">
+    <button id="btnChooseEquationSourceFile" type="button" class="btn-secondary">选择公式章节文件</button>
     <button id="btnReferenceSelectedEquations" type="button" class="btn-primary">引用选中公式</button>
   </div>
 </div>
@@ -231,7 +315,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/stex/stex.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="/beamer-generator/static/app.js?v=20260529-latex-project-render-v77"></script>
+<script src="/beamer-generator/static/app.js?v=20260607-outline-progress-v97"></script>
 
 </body>
 </html>

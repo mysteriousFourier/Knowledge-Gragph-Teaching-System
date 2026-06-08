@@ -165,12 +165,25 @@ def _parse_frame(frame_text: str, slide_id: int, metadata: Optional[dict] = None
     callouts = _extract_callouts(frame_text)
     overview = _extract_overview(frame_text)
     plain_caption = _extract_plain_parbox_caption(frame_text)
+    textboxes = []
+    if plain_caption and images:
+        textboxes.append({
+            "text": plain_caption,
+            "color": "#172033",
+            "bg": "rgba(255,255,255,0)",
+            "fontSize": 11,
+            "width": 710,
+            "height": 92,
+            "x": 75,
+            "y": 350,
+            "align": "left",
+            "bold": False,
+            "italic": False,
+        })
 
     notes_parts = []
     if overview:
         notes_parts.append(overview)
-    if plain_caption and plain_caption not in notes_parts:
-        notes_parts.append(plain_caption)
     title_credit = ""
     if frame_type == "title":
         author = str((metadata or {}).get("author") or "").strip()
@@ -188,6 +201,7 @@ def _parse_frame(frame_text: str, slide_id: int, metadata: Optional[dict] = None
         "table": table,
         "images": images,
         "placeholders": placeholders,
+        "textboxes": textboxes,
         "callouts": callouts,
         "reviewBackground": review_background,
         "notes": "\n".join(notes_parts) if notes_parts else "",
@@ -463,9 +477,14 @@ def _is_readable_equation(eq: str) -> bool:
         return False
     if len(s) > 420:
         return False
+    allowed_env_checked = re.sub(
+        r"\\(?:begin|end)\{(?:aligned|alignedat|gathered|split|cases|matrix|pmatrix|bmatrix|vmatrix|Vmatrix|smallmatrix)\*?\}",
+        "",
+        s,
+    )
+    if re.search(r"\\(?:begin|end)\{", allowed_env_checked):
+        return False
     forbidden = [
-        r"\\begin\{",
-        r"\\end\{",
         r"\\item\b",
         r"\\onslide",
         r"\\only",

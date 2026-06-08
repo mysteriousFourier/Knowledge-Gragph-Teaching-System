@@ -21,8 +21,8 @@ from kg_constraints import (
     relation_evidence_from_graph,
 )
 
-DEFAULT_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
-DEFAULT_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
+DEFAULT_DEEPSEEK_FLASH_MODEL = "gpt-5.5"
+DEFAULT_DEEPSEEK_PRO_MODEL = "gpt-5.5"
 _DEFAULT_TIMEOUT = object()
 
 QA_SYSTEM_PROMPT = """你是一个公式友好的教学问答助手。
@@ -34,6 +34,9 @@ QA_SYSTEM_PROMPT = """你是一个公式友好的教学问答助手。
 
 def get_deepseek_model(kind: str = "flash") -> str:
     """Resolve task-specific DeepSeek model names."""
+    gpt_model = (os.getenv("GPT_MODEL") or "").strip()
+    if gpt_model:
+        return gpt_model
     if kind == "pro":
         return (
             os.getenv("DEEPSEEK_PRO_MODEL")
@@ -63,8 +66,13 @@ class DeepSeekAPIClient:
     """DeepSeek chat-completions client for lecture, QA, and exercise generation."""
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
-        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
-        self.base_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
+        self.api_key = api_key or os.getenv("GPT_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("DEEPSEEK_API_KEY", "")
+        self.base_url = (
+            os.getenv("GPT_API_BASE")
+            or os.getenv("OPENAI_API_BASE")
+            or os.getenv("DEEPSEEK_API_BASE")
+            or "https://api.openai.com/v1"
+        ).rstrip("/")
         self.model = (model or get_deepseek_model("flash")).strip() or DEFAULT_DEEPSEEK_FLASH_MODEL
 
     async def generate_lecture(self, graph_data: Dict, chapter_data: Dict, style: str = "引导式教学") -> str:

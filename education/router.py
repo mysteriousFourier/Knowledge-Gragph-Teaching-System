@@ -143,17 +143,23 @@ def _read_env_file_values() -> dict[str, str]:
 def _current_config_status() -> dict[str, Any]:
     file_values = _read_env_file_values()
     for key, value in file_values.items():
-        if key.startswith("DEEPSEEK_") and value and not os.getenv(key):
+        if key.startswith(("GPT_", "OPENAI_", "DEEPSEEK_")) and value and not os.getenv(key):
             os.environ[key] = value
 
-    api_key = os.getenv("DEEPSEEK_API_KEY") or file_values.get("DEEPSEEK_API_KEY", "")
-    api_base = os.getenv("DEEPSEEK_API_BASE") or file_values.get("DEEPSEEK_API_BASE") or "https://api.deepseek.com"
+    gpt_api_key = os.getenv("GPT_API_KEY") or os.getenv("OPENAI_API_KEY") or file_values.get("GPT_API_KEY", "") or file_values.get("OPENAI_API_KEY", "")
+    gpt_api_base = os.getenv("GPT_API_BASE") or os.getenv("OPENAI_API_BASE") or file_values.get("GPT_API_BASE") or file_values.get("OPENAI_API_BASE") or "https://api.openai.com/v1"
+    gpt_model = os.getenv("GPT_MODEL") or file_values.get("GPT_MODEL") or "gpt-5.5"
+    deepseek_api_key = os.getenv("DEEPSEEK_API_KEY") or file_values.get("DEEPSEEK_API_KEY", "")
+    deepseek_api_base = os.getenv("DEEPSEEK_API_BASE") or file_values.get("DEEPSEEK_API_BASE") or "https://api.deepseek.com"
     return {
         "success": True,
-        "deepseek_api_key_configured": bool(api_key.strip()),
-        "deepseek_api_base": api_base,
-        "flash_model": get_deepseek_model("flash"),
-        "pro_model": get_deepseek_model("pro"),
+        "deepseek_api_key_configured": bool(deepseek_api_key.strip()),
+        "deepseek_api_base": deepseek_api_base,
+        "gpt_api_key_configured": bool(gpt_api_key.strip()),
+        "gpt_api_base": gpt_api_base,
+        "gpt_model": gpt_model,
+        "flash_model": gpt_model,
+        "pro_model": gpt_model,
     }
 
 
@@ -207,6 +213,9 @@ async def update_config(request: AppConfigUpdateRequest):
         "DEEPSEEK_API_BASE": request.deepseek_api_base,
         "DEEPSEEK_FLASH_MODEL": request.deepseek_flash_model,
         "DEEPSEEK_PRO_MODEL": request.deepseek_pro_model,
+        "GPT_API_KEY": request.gpt_api_key,
+        "GPT_API_BASE": request.gpt_api_base,
+        "GPT_MODEL": request.gpt_model,
     }
     for key, value in updates.items():
         if value is None or not str(value).strip():
@@ -1027,12 +1036,13 @@ async def generate_beamer_latex(request: BeamerGenerateRequest):
     if not content:
         raise HTTPException(status_code=400, detail="请先提供授课文案")
     warning = ""
-    model = request.model or get_deepseek_model("pro")
+    model = request.model or os.getenv("GPT_MODEL") or "gpt-5.5"
     latex = ""
-    api_key = (request.api_key or os.getenv("DEEPSEEK_API_KEY") or "").strip()
+    api_key = (request.api_key or os.getenv("GPT_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
-        raise HTTPException(status_code=400, detail="未配置 DeepSeek API Key，LaTeX/PPT 生成必须通过 DeepSeek 完成")
+        raise HTTPException(status_code=400, detail="未配置 GPT API Key，LaTeX/PPT 生成必须通过 GPT 5.5 完成")
     try:
+        os.environ["DEEPSEEK_API_BASE"] = os.getenv("GPT_API_BASE") or os.getenv("OPENAI_API_BASE") or "https://api.openai.com/v1"
         client = DeepSeekAPIClient(
             api_key=api_key,
             model=model,
@@ -1051,11 +1061,11 @@ async def generate_beamer_latex(request: BeamerGenerateRequest):
             )
         )
         if not latex.startswith("\\documentclass") or "\\end{document}" not in latex:
-            raise HTTPException(status_code=502, detail="DeepSeek 返回内容不完整，未生成可用 LaTeX")
+            raise HTTPException(status_code=502, detail="GPT 5.5 返回内容不完整，未生成可用 LaTeX")
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"DeepSeek LaTeX 生成不可用：{str(e)}")
+        raise HTTPException(status_code=502, detail=f"GPT 5.5 LaTeX 生成不可用：{str(e)}")
 
     return {
         "success": True,

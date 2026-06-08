@@ -38,8 +38,8 @@ class BeamerGenerateRequest(BaseModel):
     content: str = Field(..., description="Lecture script to convert into Beamer LaTeX")
     style: str = Field("academic", description="Slide style")
     slide_count: int = Field(0, ge=0, le=80, description="Target slide count; 0 means auto")
-    api_key: Optional[str] = Field(None, description="DeepSeek API key")
-    model: Optional[str] = Field(None, description="DeepSeek model name")
+    api_key: Optional[str] = Field(None, description="GPT API key")
+    model: Optional[str] = Field(None, description="GPT model name")
 
 
 class BeamerParseRequest(BaseModel):
@@ -55,6 +55,9 @@ class AppConfigUpdateRequest(BaseModel):
     deepseek_api_base: Optional[str] = Field(None, description="DeepSeek API base URL")
     deepseek_flash_model: Optional[str] = Field(None, description="Flash model")
     deepseek_pro_model: Optional[str] = Field(None, description="Pro model")
+    gpt_api_key: Optional[str] = Field(None, description="GPT API key")
+    gpt_api_base: Optional[str] = Field(None, description="GPT API base URL")
+    gpt_model: Optional[str] = Field(None, description="GPT model")
 
 
 class ChapterRequest(BaseModel):
