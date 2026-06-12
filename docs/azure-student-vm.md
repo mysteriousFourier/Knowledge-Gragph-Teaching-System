@@ -364,6 +364,8 @@ curl -s http://127.0.0.1:8000/api/tts/status
 sudo journalctl -u kgts-tts -n 80 --no-pager
 ```
 
+TTS 相关更新后建议再合成一小段文本，确认代理返回的是可播放 WAV，而不是空文件、HTML 错误页或 OOM 后的半截文件。主站和代理都会校验 WAV 头和音频帧数；如果日志出现 `not a valid WAV file`、`empty or incomplete` 或 `no playable audio frames`，先查看 `kgts-tts` 日志和 VM 内存，再重新合成。
+
 如果 VM 工作区不是干净的，先查清本地修改来源，不要直接 `git reset --hard` 或覆盖项目目录。生产运行数据应留在 `.runtime/`，不要混进 Git 工作区；确实需要同步大文件时只按前文运行时数据同步方式处理。
 
 ## 可选：本地图结构向量检索

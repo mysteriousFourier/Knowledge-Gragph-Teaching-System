@@ -20,6 +20,7 @@ from KGTS.core.tts_service import (
     gpt_sovits_local_service,
     is_tts_cache_admin_enabled,
     tts_audio_cache,
+    validate_wav_audio_file,
 )
 from KGTS.core.tts_text import normalize_tts_text
 from KGTS.core.tts_text import resolve_genie_tts_language
@@ -237,8 +238,16 @@ async def _synthesize_via_server(payload: TtsSynthesizeRequest) -> Path:
         else:
             content = response.content
 
+    if not content:
+        raise HTTPException(status_code=502, detail="Genie-TTS server returned an empty audio response.")
+
     audio_path = settings.output_dir / f"tts-server-{hashlib.sha256(content).hexdigest()[:24]}.wav"
     audio_path.write_bytes(content)
+    try:
+        validate_wav_audio_file(audio_path, label="Genie-TTS server response")
+    except RuntimeError as exc:
+        audio_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     genie_tts_service.cleanup_audio_dir(settings.output_dir, settings.max_audio_files)
     return audio_path
 

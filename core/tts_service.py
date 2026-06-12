@@ -112,6 +112,28 @@ def _as_path(value: str | None, *, default: Path | None = None) -> Path | None:
     return path
 
 
+def validate_wav_audio_file(path: Path, *, label: str = "TTS audio") -> Path:
+    if not path.is_file():
+        raise RuntimeError(f"{label} was not created: {path}")
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        raise RuntimeError(f"{label} cannot be inspected: {path}") from exc
+    if size <= 44:
+        raise RuntimeError(f"{label} is empty or incomplete: {path}")
+    try:
+        with wave.open(str(path), "rb") as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            frame_rate = wav_file.getframerate()
+            frames = wav_file.getnframes()
+    except (wave.Error, EOFError, OSError) as exc:
+        raise RuntimeError(f"{label} is not a valid WAV file: {path}") from exc
+    if channels <= 0 or sample_width <= 0 or frame_rate <= 0 or frames <= 0:
+        raise RuntimeError(f"{label} has no playable audio frames: {path}")
+    return path
+
+
 def _tts_path_policy_violations(settings: TtsSettings) -> list[dict[str, Any]]:
     return outside_project_paths(
         [
@@ -1610,13 +1632,32 @@ class GenieTtsService:
                 kwargs.pop("split_sentence", None)
                 result = genie.tts(**kwargs)
 
+            if isinstance(result, (str, Path)) and Path(result).exists():
+                output_path = Path(result)
+            elif isinstance(result, bytes):
+                output_path.write_bytes(result)
+
+            deadline = time.monotonic() + 3
+            last_size = -1
+            stable_checks = 0
+            while time.monotonic() < deadline:
+                if output_path.is_file():
+                    try:
+                        current_size = output_path.stat().st_size
+                    except OSError:
+                        current_size = -1
+                    if current_size > 44 and current_size == last_size:
+                        stable_checks += 1
+                        if stable_checks >= 2:
+                            break
+                    else:
+                        stable_checks = 0
+                    last_size = current_size
+                time.sleep(0.1)
+
             if not output_path.exists():
-                if isinstance(result, (str, Path)) and Path(result).exists():
-                    output_path = Path(result)
-                elif isinstance(result, bytes):
-                    output_path.write_bytes(result)
-                else:
-                    raise RuntimeError("Genie-TTS completed without producing an audio file.")
+                raise RuntimeError("Genie-TTS completed without producing an audio file.")
+            validate_wav_audio_file(output_path, label="Genie-TTS output")
 
         self.cleanup_audio_dir(settings.output_dir, settings.max_audio_files)
         return output_path

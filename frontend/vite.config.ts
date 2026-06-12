@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
   const enableSourceMap = env.VITE_BUILD_SOURCEMAP === "1" || env.VITE_BUILD_SOURCEMAP === "true"
 
   return {
-    plugins: [react(), TanStackRouterVite()],
+    plugins: [TanStackRouterVite({ autoCodeSplitting: true }), react()],
     resolve: {
       alias: {
         "@": "/src",
@@ -34,6 +34,7 @@ export default defineConfig(({ mode }) => {
       sourcemap: enableSourceMap,
       target: qaxBrowserTarget,
       cssTarget: qaxBrowserTarget,
+      chunkSizeWarningLimit: 1500,
       reportCompressedSize: false,
       rollupOptions: {
         output: {
@@ -42,8 +43,14 @@ export default defineConfig(({ mode }) => {
             if (id.includes("react-markdown") || id.includes("react-katex") || id.includes("remark-") || id.includes("rehype-") || id.includes("katex")) {
               return "vendor-markdown"
             }
-            if (id.includes("@xyflow") || id.includes("@dagrejs") || id.includes("elkjs")) {
-              return "vendor-graph"
+            if (id.includes("elkjs")) {
+              return "vendor-elk"
+            }
+            if (id.includes("@dagrejs")) {
+              return "vendor-dagre"
+            }
+            if (id.includes("@xyflow")) {
+              return "vendor-xyflow"
             }
             if (id.includes("lucide-react")) {
               return "vendor-icons"

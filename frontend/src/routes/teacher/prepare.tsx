@@ -1288,6 +1288,12 @@ function TeacherPreparePage() {
         }
       : undefined
 
+  const effectiveCoursewareTitle = (...fallbacks: Array<string | null | undefined>) =>
+    chapterTitle.trim() ||
+    preview?.chapter_title?.trim() ||
+    fallbacks.map((value) => String(value || "").trim()).find(Boolean) ||
+    "未命名课件"
+
   const applyPreviewResult = (result: PptPreviewResponse, fallbackTitle?: string) => {
     const editable = normalizeEditableModelLayout(result.editable_model || null)
     setPreview(result)
@@ -1343,7 +1349,7 @@ function TeacherPreparePage() {
     if (!preview || !chapterId || chapterId.startsWith("cw_")) return false
     const existingChapter = savedTeacherChapter.data?.chapter
     if (!existingChapter) return false
-    const title = preview.chapter_title || chapterTitle || existingChapter.title || "未命名PPT"
+    const title = effectiveCoursewareTitle(existingChapter.title, "未命名PPT")
     const saveSourceNodeIds = lectureNodeIds.length ? lectureNodeIds : pptNodeIds
     const saveSourceScope = lectureSourceScope || pptSourceScope || (lectureNodeContext?.success ? lectureNodeContext.scope : existingChapter.source_scope)
     await saveChapter.mutateAsync({
@@ -1491,7 +1497,7 @@ function TeacherPreparePage() {
     try {
       setStatus("正在分配每页字数并逐页生成讲解...")
       const result = await generateSlideLectures.mutateAsync({
-        chapter_title: preview.chapter_title || chapterTitle,
+        chapter_title: effectiveCoursewareTitle(),
         slides: preview.slides.map(compactSlideForLectureRequest),
         tex_content: texContent,
         style,
@@ -1544,7 +1550,7 @@ function TeacherPreparePage() {
     const pageFeedback = selectedSlideFeedback.trim()
     try {
       const result = await generateSlideLectures.mutateAsync({
-        chapter_title: preview.chapter_title || chapterTitle,
+        chapter_title: effectiveCoursewareTitle(),
         slides: [compactSlideForLectureRequest(selectedSlide)],
         tex_content: "",
         style,
@@ -1862,7 +1868,7 @@ function TeacherPreparePage() {
 
   const handleSaveCoursewareProject = async () => {
     if (!editableModel) return
-    const title = preview?.chapter_title || chapterTitle || file?.name.replace(/\.[^.]+$/, "") || "未命名课件"
+    const title = effectiveCoursewareTitle(file?.name.replace(/\.[^.]+$/, ""), "未命名课件")
     const modelForSave = currentEditableModelForSave(title)
     if (!modelForSave) return
     const result = await saveCoursewareProject.mutateAsync({
@@ -1908,7 +1914,7 @@ function TeacherPreparePage() {
 
   const handleExportCoursewarePptx = async () => {
     if (!editableModel) return
-    const title = preview?.chapter_title || chapterTitle || file?.name.replace(/\.[^.]+$/, "") || "未命名课件"
+    const title = effectiveCoursewareTitle(file?.name.replace(/\.[^.]+$/, ""), "未命名课件")
     const result = await exportCoursewarePptx.mutateAsync({
       title,
       editable_model: currentEditableModelForSave(title) || { ...editableModel, title, assets: mergedAssetMap },
@@ -1924,7 +1930,7 @@ function TeacherPreparePage() {
       setStatus("暂无可保存的逐页讲解，请先生成至少一页有效文案")
       return
     }
-    const title = preview.chapter_title || chapterTitle || file?.name.replace(/\.[^.]+$/, "") || "未命名PPT"
+    const title = effectiveCoursewareTitle(file?.name.replace(/\.[^.]+$/, ""), "未命名PPT")
     const chapterId = `ppt_${Date.now()}`
     const saveSourceNodeIds = lectureNodeIds.length ? lectureNodeIds : pptNodeIds
     const saveSourceScope = lectureSourceScope || pptSourceScope || (lectureNodeContext?.success ? lectureNodeContext.scope : undefined)
@@ -1982,7 +1988,7 @@ function TeacherPreparePage() {
 
   const handleExportLectureMarkdown = () => {
     if (!hasGeneratedSlideLectures || !mergedLecture.trim()) return
-    const title = chapterTitle || preview?.chapter_title || "课件文案"
+    const title = effectiveCoursewareTitle("课件文案")
     const generatedAt = new Date().toLocaleString("zh-CN", { hour12: false })
     const content = [`# ${title}`, "", `导出时间：${generatedAt}`, `页面数：${preview?.slides.length || slideLectures.length}`, "", mergedLecture].join("\n")
     const blob = new Blob([content], { type: "text/markdown;charset=utf-8" })

@@ -40,6 +40,16 @@ curl http://127.0.0.1:8000/api/tts/status
 
 如果配置了项目外路径，状态接口会返回 `outside_project_paths` 和明确的 `detail`。仅调试迁移旧资产时才建议临时设置 `KGTS_ALLOW_EXTERNAL_PATHS=1`。
 
+## 音频有效性校验
+
+KGTS 会在写入或转发 TTS 音频后校验 WAV 文件是否真实可播放：
+
+- 本地 `genie` provider 会等待输出文件大小短暂稳定，再检查 WAV 头、声道、采样宽度、采样率和帧数。
+- `genie_server` provider 会拒绝空响应、HTML/JSON 错误页或其它非 WAV 内容，并删除无效缓存文件。
+- 独立 `scripts/genie_tts_proxy_server.py` 返回文件前也会做同样校验，避免上游生成半截文件时主站缓存坏音频。
+
+如果接口返回 `not a valid WAV file`、`empty or incomplete` 或 `no playable audio frames`，优先检查 TTS 代理日志、模型是否 OOM、参考音频路径是否存在，以及代理是否把异常页当成音频返回。修复后重新合成即可生成新的缓存文件。
+
 ## 模型来源
 
 `models/tts/shu` 是由本地 GPT-SoVITS `shu` 权重转换得到的 Genie ONNX 模型：

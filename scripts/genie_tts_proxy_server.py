@@ -37,6 +37,7 @@ from KGTS.core.tts_service import (
     genie_tts_service,
     get_tts_settings,
     get_tts_status,
+    validate_wav_audio_file,
 )
 from KGTS.core.tts_text import normalize_tts_text, resolve_genie_tts_language
 
@@ -206,6 +207,10 @@ def synthesize(payload: TtsRequest, background_tasks: BackgroundTasks) -> FileRe
             _release_genie_models(payload.character_name or settings.character_name or settings.predefined_character)
         if _env_flag("KGTS_TTS_PROXY_EXIT_AFTER_SYNTH", False):
             background_tasks.add_task(_schedule_process_exit)
+    try:
+        validate_wav_audio_file(audio_path, label="Genie-TTS proxy output")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     elapsed = time.perf_counter() - started_at
     print(
         f"[genie-proxy] synthesize done chars={len(text)} "

@@ -1,5 +1,3 @@
-import { graphlib, layout as dagreLayout } from "@dagrejs/dagre"
-import ELK from "elkjs/lib/elk.bundled.js"
 import type { Edge, Node } from "@xyflow/react"
 
 export type GraphLayoutMode = "elk" | "dagre" | "grid"
@@ -13,7 +11,6 @@ export interface LayoutOptions {
 
 const DEFAULT_NODE_WIDTH = 220
 const DEFAULT_NODE_HEIGHT = 70
-const elk = new ELK()
 
 export async function layoutGraphNodes(
   nodes: Node[],
@@ -33,7 +30,7 @@ export async function layoutGraphNodes(
 
   if (options.mode === "elk" || options.mode === "dagre") {
     try {
-      return layoutWithDagre(nodes, validEdges, options)
+      return await layoutWithDagre(nodes, validEdges, options)
     } catch (error) {
       console.warn("Dagre layout failed, falling back to grid.", error)
     }
@@ -43,6 +40,8 @@ export async function layoutGraphNodes(
 }
 
 async function layoutWithElk(nodes: Node[], edges: Edge[], options: LayoutOptions): Promise<Node[]> {
+  const { default: ELK } = await import("elkjs/lib/elk.bundled.js")
+  const elk = new ELK()
   const nodeWidth = options.nodeWidth ?? DEFAULT_NODE_WIDTH
   const nodeHeight = options.nodeHeight ?? DEFAULT_NODE_HEIGHT
   const elkGraph = {
@@ -75,7 +74,8 @@ async function layoutWithElk(nodes: Node[], edges: Edge[], options: LayoutOption
   }))
 }
 
-function layoutWithDagre(nodes: Node[], edges: Edge[], options: LayoutOptions): Node[] {
+async function layoutWithDagre(nodes: Node[], edges: Edge[], options: LayoutOptions): Promise<Node[]> {
+  const { graphlib, layout: dagreLayout } = await import("@dagrejs/dagre")
   const nodeWidth = options.nodeWidth ?? DEFAULT_NODE_WIDTH
   const nodeHeight = options.nodeHeight ?? DEFAULT_NODE_HEIGHT
   const graph = new graphlib.Graph()
