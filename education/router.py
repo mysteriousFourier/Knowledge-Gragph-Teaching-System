@@ -1761,9 +1761,7 @@ async def _plan_slide_speech_cues_with_model(request: PlanSlideSpeechRequest) ->
 5. target_text 长度控制在 10 到 80 个字符，优先选择承载本页结论、定义、公式含义或易错点的短句。
 """
     if request.teacher_guidance:
-        prompt += "
-教师强调偏好：
-" + _truncate_for_prompt(str(request.teacher_guidance), 500)
+        prompt += "\n教师强调偏好：\n" + _truncate_for_prompt(str(request.teacher_guidance), 500)
     client = DeepSeekAPIClient(api_key=request.api_key, model=request.model or get_deepseek_model("flash"))
     try:
         raw = await client._call_deepseek(
