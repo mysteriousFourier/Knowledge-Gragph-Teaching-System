@@ -20,6 +20,29 @@ def test_normalize_tts_text_speaks_common_math_symbols() -> None:
     assert "丘提艾勒" in normalized
 
 
+def test_normalize_tts_text_speaks_extended_math_symbols() -> None:
+    normalized = normalize_tts_text("当 Ne≫1 且 p≪q，A∈B，A⊆C，x≈y，a⇒b，∴成立。", "zh").normalized_text
+
+    assert "远大于" in normalized
+    assert "远小于" in normalized
+    assert "属于" in normalized
+    assert "子集或等于" in normalized
+    assert "约等于" in normalized
+    assert "推出" in normalized
+    assert "所以" in normalized
+    assert "≫" not in normalized
+    assert "≪" not in normalized
+
+
+def test_normalize_tts_text_speaks_latex_comparison_symbols() -> None:
+    normalized = normalize_tts_text(r"条件是 $N_e \gg 1$ 且 $\theta \ll 1$。", "all_zh").normalized_text
+
+    assert "远大于" in normalized
+    assert "远小于" in normalized
+    assert r"\gg" not in normalized
+    assert r"\ll" not in normalized
+
+
 def test_normalize_tts_text_preserves_chinese_pause_punctuation() -> None:
     normalized = normalize_tts_text("同学们,今天看选择:它会持续吗?", "zh").normalized_text
 
@@ -35,11 +58,25 @@ def test_normalize_tts_text_adds_pauses_for_markdown_structure() -> None:
     assert normalized == "标题。第一点：选择会改变频率。第二点：漂移会带来随机性。"
 
 
-def test_normalize_tts_text_repeats_markdown_bold_emphasis() -> None:
+def test_normalize_tts_text_does_not_repeat_markdown_bold_emphasis() -> None:
     normalized = normalize_tts_text("**最终响应依赖有效群体大小。**", "zh").normalized_text
 
-    assert "这个很重要，我们重复一遍" in normalized
-    assert normalized.count("最终响应依赖有效群体大小") == 2
+    assert "重复一遍" not in normalized
+    assert normalized.count("最终响应依赖有效群体大小") == 1
+
+
+def test_apply_speech_cues_repeats_valid_target_text() -> None:
+    text = "最终响应依赖有效群体大小。后面我们再看固定概率。"
+    planned = apply_speech_cues_for_tts(text, [{"type": "repeat", "target_text": "最终响应依赖有效群体大小"}])
+
+    assert "这个关键点我们再说一遍" in planned
+    assert planned.count("最终响应依赖有效群体大小") == 2
+
+
+def test_normalize_speech_cues_rejects_missing_target_text() -> None:
+    cues = normalize_speech_cues("正文只有这一句。", [{"type": "repeat", "target_text": "不存在的重点"}])
+
+    assert cues == []
 
 
 def test_normalize_tts_text_adds_pause_around_symbol_speech() -> None:

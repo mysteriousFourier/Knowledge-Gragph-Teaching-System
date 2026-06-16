@@ -525,6 +525,7 @@ async def generate_ppt_tex(request: GeneratePptTexRequest):
             fallback_content=context_content,
             max_slides=max(1, min(int(request.max_slides or 12), 30)),
         )
+        slides = _attach_slide_source_node_ids(slides, learning_plan.get("evidence") or source_evidence)
         tex_content = build_tex_from_slides(chapter_title, slides, style_reference=request.style_reference)
         editable_model = build_editable_model_from_slide_details(
             slides,
@@ -1061,6 +1062,39 @@ def _compact_evidence_for_prompt(evidence: Any, limit: int = 4, content_chars: i
     return compacted
 
 
+def _source_node_ids_from_evidence(evidence: Any) -> List[str]:
+    node_ids: List[str] = []
+    seen = set()
+    for item in evidence or []:
+        if not isinstance(item, dict):
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        node_id = str(item.get("node_id") or item.get("id") or metadata.get("id") or "").strip()
+        if not node_id or node_id.startswith("ppt_slide::") or node_id in seen:
+            continue
+        seen.add(node_id)
+        node_ids.append(node_id)
+    return node_ids
+
+
+def _attach_slide_source_node_ids(
+    slides: List[Dict[str, Any]],
+    evidence: Any,
+) -> List[Dict[str, Any]]:
+    for slide in slides:
+        if not isinstance(slide, dict):
+            continue
+        slide_text = _compact_slide_for_lecture(slide, max_chars=1200)
+        slide_evidence = _select_slide_source_evidence(
+            evidence,
+            slide_text,
+            limit=6,
+            content_chars=260,
+        )
+        slide["source_node_ids"] = _source_node_ids_from_evidence(slide_evidence)
+    return slides
+
+
 def _slide_match_tokens(text: Any) -> set[str]:
     value = str(text or "").lower()
     tokens = {token for token in re.findall(r"[a-zA-Z0-9_]{2,}", value) if len(token) >= 2}
@@ -1132,6 +1166,34 @@ def _select_slide_evidence_for_prompt(
         scored.append((score, -index, item))
     scored.sort(reverse=True)
     return _compact_evidence_for_prompt([item for _, _, item in scored], limit=limit, content_chars=content_chars)
+
+
+def _select_slide_source_evidence(
+    evidence: Any,
+    slide_text: str,
+    *,
+    limit: int = 6,
+    content_chars: int = 260,
+) -> List[Dict[str, Any]]:
+    items = [item for item in (evidence or []) if isinstance(item, dict)]
+    if not items:
+        return []
+    slide_tokens = _slide_match_tokens(slide_text)
+    if not slide_tokens:
+        return []
+    scored: List[tuple[int, int, Dict[str, Any]]] = []
+    for index, item in enumerate(items):
+        score = _slide_evidence_score(item, slide_text, slide_tokens)
+        if score <= 0:
+            continue
+        scored.append((score, -index, item))
+    if not scored:
+        return []
+    scored.sort(reverse=True)
+    top_score = scored[0][0]
+    min_score = max(2, int(top_score * 0.35))
+    strong_matches = [item for score, _, item in scored if score >= min_score]
+    return _compact_evidence_for_prompt(strong_matches, limit=limit, content_chars=content_chars)
 
 
 def _build_slide_transition_context(slides: List[Dict[str, Any]], slide_index: Any) -> str:
@@ -1680,7 +1742,7 @@ def _attach_slide_lecture_timing(
 def _speech_plan_sentence_candidates(lecture: str) -> List[str]:
     text = re.sub(r"\*\*([^*]+)\*\*", r"\1", str(lecture or ""))
     text = re.sub(r"`([^`]*)`", r"\1", text)
-    raw_parts = re.split(r"(?<=[???!??;])\s*|\n+", text)
+    raw_parts = re.split(r"(?<=[。！？!?；;])\s*|\n+", text)
     candidates: List[str] = []
     for raw in raw_parts:
         sentence = re.sub(r"^[#>*\-\d.\s]+", "", raw).strip()
@@ -2594,6 +2656,7 @@ async def _generate_per_slide_lectures(
                         "title": slide.get("title", ""),
                         "lecture": "",
                         "skipped": True,
+                        "source_node_ids": [],
                         "learning_plan": learning_plan,
                         "sources": [],
                         "graph_paths": [],
@@ -2677,12 +2740,14 @@ async def _generate_per_slide_lectures(
                 sources = []
         prompt_evidence = _compact_evidence_for_prompt(learning_plan.get("evidence") or [], limit=4, content_chars=260)
         prompt_evidence = _select_slide_evidence_for_prompt(prompt_evidence, slide_text, limit=4, content_chars=260)
+        source_evidence_for_slide = _select_slide_source_evidence(prompt_evidence, slide_text, limit=4, content_chars=260)
         graph_paths = graph_paths_for_evidence(slide_graph_data, prompt_evidence, limit=4)[:4]
         formula_context = ((slide_graphrag_context or {}).get("formula_context") or formula_context_for_text(slide_text, limit=4))[:4]
         transition_context = _build_slide_transition_context(slide_details, slide.get("index"))
         visible_elements = _format_slide_visible_elements_for_prompt(slide)
         page_feedback = _slide_feedback_for_index(slide_feedback, slide.get("index"))
         sources = prompt_evidence
+        slide_source_node_ids = _source_node_ids_from_evidence(source_evidence_for_slide)
 
         requirements = [
             *build_lecture_gc_dpg_requirements(style, slide_level=True),
@@ -2767,6 +2832,7 @@ Output only the final slide lecture script."""
             "prompt": prompt,
             "pacing": pacing,
             "sources": sources,
+            "source_node_ids": slide_source_node_ids,
             "retrieval_mode": (slide_graphrag_context or {}).get("retrieval_mode"),
             "retrieval_stats": (slide_graphrag_context or {}).get("retrieval_stats"),
             "graphrag_context": slide_graphrag_context,
@@ -3002,6 +3068,7 @@ def _finalize_slide_lecture_result(
         "lecture": lecture,
         "skipped": not lecture.strip(),
         "error": error,
+        "source_node_ids": item.get("source_node_ids") or [],
         "sources": item.get("sources") or [],
         "retrieval_mode": item.get("retrieval_mode"),
         "retrieval_stats": item.get("retrieval_stats"),

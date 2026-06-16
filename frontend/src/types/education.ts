@@ -376,6 +376,7 @@ export interface PptSlideDetail {
   source_body_tex?: string
   source_start?: number | null
   source_end?: number | null
+  source_node_ids?: string[]
   missing_image_refs?: string[]
   layout?: {
     mode?: "text" | "title" | "columns" | "image_only" | "image_text" | "text_image" | string
@@ -437,6 +438,7 @@ export interface PptSlideLecture {
   budget_source?: string
   estimated_chars?: number
   estimated_duration_seconds?: number
+  source_node_ids?: string[]
   sources?: unknown[]
   graph_paths?: unknown[]
   formula_context?: unknown[]

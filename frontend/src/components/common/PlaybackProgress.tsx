@@ -1,16 +1,21 @@
-import { Activity, CheckCircle2, Clock3, Database, Loader2 } from "lucide-react"
-import type { PlaybackProgress as PlaybackProgressState } from "@/hooks/useLecturePlayback"
+import { Activity, CheckCircle2, Clock3, Database, Loader2, Timer } from "lucide-react"
+import type { AudioPlaybackPosition, PlaybackProgress as PlaybackProgressState } from "@/hooks/useLecturePlayback"
 import { cn } from "@/lib/utils"
 
 export function PlaybackProgress({
   progress,
   statusText,
+  audioPosition,
+  onSeek,
 }: {
   progress: PlaybackProgressState
   statusText: string
+  audioPosition?: AudioPlaybackPosition
+  onSeek?: (percent: number) => void
 }) {
   const showBar = progress.total > 1 || progress.isActive
   const displayPercent = progress.total > 0 ? Math.max(progress.percent, progress.isActive ? 6 : 0) : 0
+  const canSeek = Boolean(audioPosition?.seekable && onSeek)
 
   return (
     <div className="border-b px-4 py-2.5">
@@ -59,6 +64,37 @@ export function PlaybackProgress({
           />
         </div>
       )}
+      <div className="mt-3 grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center">
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          <Timer size={13} />
+          {formatPlaybackTime(audioPosition?.currentTime || 0)}
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={0.1}
+          value={audioPosition?.percent || 0}
+          disabled={!canSeek}
+          aria-label="语音播放进度"
+          onChange={(event) => onSeek?.(Number(event.target.value))}
+          className={cn(
+            "h-2 w-full cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-45",
+            canSeek && "focus:outline-none focus:ring-2 focus:ring-primary/20"
+          )}
+        />
+        <span className="text-xs text-muted-foreground sm:text-right">
+          {audioPosition?.duration ? formatPlaybackTime(audioPosition.duration) : "--:--"}
+        </span>
+      </div>
     </div>
   )
+}
+
+function formatPlaybackTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "00:00"
+  const totalSeconds = Math.floor(seconds)
+  const minutes = Math.floor(totalSeconds / 60)
+  const remainingSeconds = totalSeconds % 60
+  return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`
 }

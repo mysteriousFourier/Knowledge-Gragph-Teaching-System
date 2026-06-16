@@ -7,9 +7,16 @@
     lineNumbers: true,
     lineWrapping: true,
     readOnly: false,
+    extraKeys: {
+      "Alt-Up": function (cm) { scrollLatexEditorByLine(cm, -1); },
+      "Alt-Down": function (cm) { scrollLatexEditorByLine(cm, 1); },
+      "Ctrl-Shift-Up": function (cm) { scrollLatexEditorByLine(cm, -1); },
+      "Ctrl-Shift-Down": function (cm) { scrollLatexEditorByLine(cm, 1); },
+    },
   });
 
   var isGenerating = false;
+  var latexGenerateStatusMessage = "";
   var fullLatex = "";
   var sourceLatex = "";
   var slidesData = null;
@@ -19,13 +26,31 @@
   var lastFocusedTextbox = null;
   var lastFocusedRichText = null;
   var savedRichTextRange = null;
+  var toolbarSelectionHoldUntil = 0;
   var latexSyncTimer = null;
   var currentCustomRequirements = "";
+  var generatedOutline = null;
+  var activeOutlineSectionIndex = 0;
+  var pageChecklistText = "";
+  var pageChecklistTimer = null;
+  var GPT_CONFIG_STORAGE_KEY = "beamer_generator_gpt_config_v1";
+  var OUTLINE_STORAGE_KEY = "beamer_generator_saved_outline_v1";
+  var activeGptConfig = null;
   var historyTimer = null;
   var undoStack = [];
   var redoStack = [];
   var historyLock = false;
   var HISTORY_LIMIT = 4;
+
+  function scrollLatexEditorByLine(cm, direction) {
+    if (!cm || typeof cm.scrollTo !== "function" || typeof cm.getScrollInfo !== "function") return;
+    var info = cm.getScrollInfo();
+    var lineHeight = typeof cm.defaultTextHeight === "function" ? cm.defaultTextHeight() : 18;
+    var maxTop = Math.max(0, info.height - info.clientHeight);
+    var nextTop = Math.max(0, Math.min(maxTop, info.top + direction * lineHeight));
+    cm.scrollTo(null, nextTop);
+  }
+
   var REVIEW_BACKGROUND_LATEX_PREFIX = [
     "{",
     "% 设置全页背景：灰色 + 中心白色渐变矩形",
@@ -69,6 +94,8 @@
   ].join("\n");
   var savedLectureChapters = [];
   var savedPptProjects = [];
+  var selectedSavedPptProjectIndex = null;
+  var savedPptLoadError = "";
   var savedSlideDragPayload = null;
   var savedPptGalleryManualPosition = null;
   var slideThumbDragIndex = null;
@@ -78,24 +105,44 @@
   var currentSyncKey = "";
   var latexSelectionTimer = null;
   var syncSelectionLock = false;
+  var suppressLatexSelectionSyncUntil = 0;
+  var suppressPptSelectionSyncUntil = 0;
   var pptSyncHighlightTimer = null;
   var latexProgrammaticUpdate = false;
   var latexManualSyncTimer = null;
   var latexManualSyncSeq = 0;
   var suppressNextLatexManualSync = false;
   var latexGenerateProgress = 0;
+  var outlineGenerateProgress = 0;
+  var outlineProgressTimer = null;
+  var queuedStatusMessage = null;
   var importedPackageImages = [];
+  var importedPreviewImages = [];
+  var importPreviewPanelOpen = false;
+  var importPreviewTitle = "导入内容预览";
   var packageImagePanelOpen = false;
   var editedImageGeometry = { placeholders: {}, images: {} };
   var rawMarkdownContent = "";
+  var selectedMarkdownSectionIds = {};
   var importedPackageAssetUrls = {};
   var packageImageViewerOpen = false;
   var figurePreviewMap = {};
   var figureHoverPreviewOpen = false;
+  var importedMarkdownFiles = [];
+  var activeMarkdownPreviewIndex = null;
+  var importedEquationCatalog = [];
+  var extraEquationCatalog = [];
+  var missingEquationCatalog = [];
+  var supplementChapterCatalog = [];
   var latexPptSplitRatio = parseFloat(localStorage.getItem("bg_latex_ppt_split_ratio") || "0.5");
   if (Number.isNaN(latexPptSplitRatio)) latexPptSplitRatio = 0.5;
   latexPptSplitRatio = Math.max(0.25, Math.min(0.75, latexPptSplitRatio));
   var collapsedPaneResize = null;
+  var urlParams = new URLSearchParams(window.location.search || "");
+  var appMode = urlParams.get("mode") || "generate";
+  var isLatexImportMode = appMode === "latex-import";
+  var importedLatexFileName = "";
+  var importedPdfFileName = "";
 
   function refreshEditorSize() {
     if (editor && editor.refresh) {
@@ -103,35 +150,6 @@
         editor.refresh();
       }, 0);
     }
-  }
-
-  function syncTextboxHeight($box) {
-    if (!$box || !$box.length) return;
-    var $content = $box.find(".slide-textbox-content").first();
-    if (!$content.length) return;
-    var textarea = $content[0];
-    var $preview = $box.find(".slide-rich-text-preview").first();
-    var currentHeight = cssPx($box, "height", $box.outerHeight() || 40);
-    var contentHeight = 0;
-    if (textarea) {
-      textarea.style.height = "auto";
-      contentHeight = Math.max(contentHeight, textarea.scrollHeight || 0);
-    }
-    if ($preview.length) {
-      contentHeight = Math.max(contentHeight, $preview[0].scrollHeight || $preview.outerHeight() || 0);
-    }
-    var nextHeight = Math.max(currentHeight, Math.ceil(contentHeight + 24));
-    var parentHeight = $box.parent().height() || SLIDE_DESIGN_HEIGHT;
-    var top = parseFloat($box.css("top")) || 0;
-    nextHeight = Math.min(nextHeight, Math.max(36, parentHeight - top));
-    $box.css("height", nextHeight + "px");
-    if (textarea) textarea.style.height = Math.max(30, nextHeight - 18) + "px";
-  }
-
-  function syncAllTextboxHeights($scope) {
-    ($scope || $("#slideCanvas")).find(".slide-textbox").each(function () {
-      syncTextboxHeight($(this));
-    });
   }
 
   function hasMathSyntax(text) {
@@ -179,7 +197,10 @@
   }
 
   function normalizeFigureLabel(label) {
-    return String(label || "").replace(/\s+/g, " ").trim().toLowerCase();
+    var text = String(label || "");
+    var m = text.match(/(?:Figure|Fig\.?|图)\s*(\d+(?:[._]\d+)?)/i);
+    if (m) return "figure " + String(m[1] || "").replace(/_/g, ".");
+    return text.replace(/\s+/g, " ").trim().toLowerCase();
   }
 
   function extractFigureReference(text) {
@@ -209,6 +230,84 @@
     return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   }
 
+  function uniqueList(values) {
+    var seen = {};
+    var result = [];
+    (values || []).forEach(function (value) {
+      value = String(value || "").trim();
+      if (!value || seen[value]) return;
+      seen[value] = true;
+      result.push(value);
+    });
+    return result;
+  }
+
+  function pad2(value) {
+    var n = parseInt(value, 10);
+    if (Number.isNaN(n)) return "";
+    return n < 10 ? "0" + n : String(n);
+  }
+
+  function figureNumberParts(label) {
+    var match = String(label || "").match(/\d+(?:\.\d+)?/);
+    if (!match) return null;
+    var parts = match[0].split(".");
+    return {
+      raw: match[0],
+      major: parts[0] || "",
+      minor: parts.length > 1 ? (parts[1] || "") : "",
+    };
+  }
+
+  function figureAssetCodes(label) {
+    var parts = figureNumberParts(label);
+    if (!parts) return [];
+    var codes = [];
+    var digits = parts.raw.replace(/[^0-9]/g, "");
+    if (digits) codes.push(digits);
+    if (parts.minor) {
+      codes.push(parts.major + parts.minor);
+      codes.push(parts.major + pad2(parts.minor));
+      codes.push(pad2(parts.major) + parts.minor);
+      codes.push(pad2(parts.major) + pad2(parts.minor));
+    }
+    return uniqueList(codes).sort(function (a, b) { return b.length - a.length; });
+  }
+
+  function inferFigureLabelsFromAssetName(name) {
+    var rawName = String(name || "").toLowerCase().replace(/\\/g, "/").split("/").pop();
+    var stem = normalizeAssetStem(rawName.replace(/\.[a-z0-9]+$/i, ""));
+    var labels = [];
+    if (!stem) return labels;
+
+    String(rawName).replace(/(?:figure|fig\.?|图)[^0-9]*(\d{1,3})[._-](\d{1,3})/ig, function (_match, major, minor) {
+      labels.push("Figure " + parseInt(major, 10) + "." + parseInt(minor, 10));
+      return _match;
+    });
+    String(rawName).replace(/(^|[^0-9])(\d{1,3})[._-](\d{1,3})(?=[^0-9]|$)/g, function (_match, _prefix, major, minor) {
+      labels.push("Figure " + parseInt(major, 10) + "." + parseInt(minor, 10));
+      return _match;
+    });
+
+    var runs = stem.match(/\d+/g) || [];
+    runs.forEach(function (run) {
+      if (!/(figure|fig|图)/i.test(rawName)) return;
+      if (run.length >= 4) {
+        var code = run.slice(-4);
+        labels.push("Figure " + parseInt(code.slice(0, 2), 10) + "." + parseInt(code.slice(2), 10));
+      } else if (run.length === 3) {
+        labels.push("Figure " + parseInt(run.slice(0, 1), 10) + "." + parseInt(run.slice(1), 10));
+        labels.push("Figure " + parseInt(run.slice(0, 2), 10) + "." + parseInt(run.slice(2), 10));
+      } else if (run.length === 2) {
+        labels.push("Figure " + parseInt(run.slice(0, 1), 10) + "." + parseInt(run.slice(1), 10));
+      }
+    });
+
+    return uniqueList(labels.filter(function (label) {
+      return !/NaN/.test(label);
+    }));
+  }
+
   function pickPackageImageForFigure(label) {
     var labelKey = normalizeFigureLabel(label);
     var digits = labelKey.replace(/[^0-9]/g, "");
@@ -216,6 +315,7 @@
     var dashed = dotted.replace(/\./g, "-");
     var underscored = dotted.replace(/\./g, "_");
     var compact = normalizeAssetStem(labelKey);
+    var assetCodes = figureAssetCodes(label);
     var best = "";
 
     for (var i = 0; i < importedPackageImages.length; i++) {
@@ -224,9 +324,16 @@
       var stem = normalizeAssetStem(rawName);
       if (!stem) continue;
       var figureNamedFile = rawName.indexOf("figure") !== -1 || rawName.indexOf("fig") !== -1;
+      if (dotted && rawName === dotted + rawName.slice(rawName.lastIndexOf("."))) return img.url;
+      if (dotted && rawName.indexOf(dotted) !== -1) return img.url;
+      if (dashed && rawName.indexOf(dashed) !== -1) return img.url;
+      if (underscored && rawName.indexOf(underscored) !== -1) return img.url;
       if (figureNamedFile && dotted && rawName.indexOf(dotted) !== -1) return img.url;
       if (figureNamedFile && dashed && rawName.indexOf(dashed) !== -1) return img.url;
       if (figureNamedFile && underscored && rawName.indexOf(underscored) !== -1) return img.url;
+      for (var c = 0; c < assetCodes.length; c++) {
+        if (figureNamedFile && assetCodes[c] && stem.indexOf(assetCodes[c]) !== -1) return img.url;
+      }
       if (figureNamedFile && digits && stem.indexOf(digits) !== -1) return img.url;
       if (figureNamedFile && compact && stem.indexOf(compact) !== -1) return img.url;
       if (!best && figureNamedFile && digits && stem.replace(/figure/g, "").indexOf(digits) !== -1) {
@@ -247,7 +354,8 @@
       var match = line.match(/!\[([^\]]*)\]\(([^)]+)\)/i);
       if (!match) continue;
       var labelMatch = match[1].match(/(?:Figure|Fig\.?|图)\s*\d+(?:\.\d+)?/i) || line.match(/(?:Figure|Fig\.?|图)\s*\d+(?:\.\d+)?/i);
-      var label = labelMatch ? extractFigureReference(labelMatch[0]) : findNearbyFigureLabel(lines, i);
+      var inferredLabels = inferFigureLabelsFromAssetName(match[2]);
+      var label = labelMatch ? extractFigureReference(labelMatch[0]) : (findNearbyFigureLabel(lines, i) || inferredLabels[0] || "");
       if (!label) continue;
       var url = resolvePackageAssetUrl(match[2]);
       if (!url) continue;
@@ -264,8 +372,71 @@
         assetUrl: match[2],
         caption: caption || label,
       };
+      inferredLabels.forEach(function (assetLabel) {
+        var key = normalizeFigureLabel(assetLabel);
+        if (!key || figurePreviewMap[key]) return;
+        figurePreviewMap[key] = {
+          label: assetLabel,
+          url: url,
+          assetUrl: match[2],
+          caption: caption || assetLabel,
+        };
+      });
     }
 
+    importedPackageImages.forEach(function (img) {
+      inferFigureLabelsFromAssetName(img && img.name).forEach(function (label) {
+        var key = normalizeFigureLabel(label);
+        if (!key || figurePreviewMap[key]) return;
+        figurePreviewMap[key] = {
+          label: label,
+          url: img.url,
+          assetUrl: img.name,
+          caption: img.name || label,
+        };
+      });
+    });
+
+    var orderedRefs = collectFigureReferences(source);
+    var imageCursor = 0;
+    orderedRefs.forEach(function (ref) {
+      var key = normalizeFigureLabel(ref);
+      if (!key || figurePreviewMap[key]) return;
+      var explicitUrl = pickPackageImageForFigure(ref);
+      var img = null;
+      if (explicitUrl) {
+        img = { url: explicitUrl, name: ref };
+      } else {
+        while (imageCursor < importedPackageImages.length) {
+          img = importedPackageImages[imageCursor++];
+          if (img && img.url) break;
+          img = null;
+        }
+      }
+      if (!img || !img.url) return;
+      figurePreviewMap[key] = {
+        label: ref,
+        url: img.url,
+        assetUrl: img.name || "",
+        caption: img.name || ref,
+      };
+    });
+  }
+
+  function resolveSlideImageUrl(rawPath) {
+    var raw = String(rawPath || "").trim();
+    if (!raw) return "";
+    if (/^(https?:\/\/|data:|\/beamer-generator\/uploads\/|\/uploads\/)/i.test(raw)) return raw;
+    var packageUrl = resolvePackageAssetUrl(raw);
+    if (packageUrl) return packageUrl;
+    var labels = inferFigureLabelsFromAssetName(raw);
+    for (var i = 0; i < labels.length; i++) {
+      var figure = figurePreviewMap[normalizeFigureLabel(labels[i])];
+      if (figure && figure.url) return figure.url;
+      var picked = pickPackageImageForFigure(labels[i]);
+      if (picked) return picked;
+    }
+    return raw;
   }
 
   function buildFigureAssetPayload() {
@@ -286,7 +457,20 @@
         });
       });
     }
+    String(fullLatex || "").replace(/\\(?:includegraphics|safecontentimage|safeverticalimage)(?:\[[^\]]*\])?\{([^{}]+\.(?:png|jpe?g|pdf|webp))\}/gi, function (_match, rawPath) {
+      var target = String(rawPath || "").trim().replace(/\\/g, "/");
+      if (!target || payload[target]) return _match;
+      var url = /^(?:https?:\/\/|data:|\/beamer-generator\/uploads\/|\/uploads\/)/i.test(target)
+        ? target
+        : resolvePackageAssetUrl(target);
+      if (url) payload[target] = url;
+      return _match;
+    });
     return payload;
+  }
+
+  function latexHasExternalGraphicRefs(tex) {
+    return /\\(?:includegraphics|safecontentimage|safeverticalimage)(?:\[[^\]]*\])?\{(?!data:)([^{}]+\.(?:png|jpe?g|pdf|webp))\}/i.test(String(tex || ""));
   }
 
   function appendTextNode($target, text) {
@@ -341,6 +525,16 @@
     }
     if (tag) s += tag;
     return s;
+  }
+
+  function latexMathDisplaySource(formula) {
+    var s = repairPptLatexArtifacts(String(formula || "")).trim();
+    if (!s) return "";
+    s = s.replace(/^\\\[\s*/, "").replace(/\s*\\\]$/, "");
+    s = s.replace(/^\$\$\s*/, "").replace(/\s*\$\$$/, "");
+    s = s.replace(/^\\\(\s*/, "").replace(/\s*\\\)$/, "");
+    s = s.replace(/^\$\s*/, "").replace(/\s*\$$/, "");
+    return s.trim();
   }
 
   function appendKatexNode($target, formula, displayMode, originalText, extraClass) {
@@ -416,6 +610,24 @@
     }
   }
 
+  function containNestedWheelScroll(event) {
+    var target = event.target;
+    var scrollNode = $(target).closest(
+      ".slide-canvas, .slide-list, .panel, .CodeMirror-scroll, .math-preview, .saved-ppt-slide-gallery, .saved-ppt-chapter-list"
+    )[0];
+    if (!scrollNode) return;
+    var deltaY = event.deltaY || 0;
+    if (!deltaY) return;
+    var maxScrollTop = scrollNode.scrollHeight - scrollNode.clientHeight;
+    if (maxScrollTop <= 0) return;
+    var atTop = scrollNode.scrollTop <= 0;
+    var atBottom = scrollNode.scrollTop >= maxScrollTop - 1;
+    if ((deltaY < 0 && atTop) || (deltaY > 0 && atBottom)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
   function extractMathFormulaSnippets(text) {
     var source = String(text || "");
     var snippets = [];
@@ -461,6 +673,174 @@
       appendKatexNode($(box), item.formula, item.displayMode, item.formula);
       $target.append(box);
     }
+  }
+
+  function extractEquationCatalog(sourceText, fileName) {
+    var source = String(sourceText || "").replace(/\r\n/g, "\n");
+    var catalog = [];
+    var seen = {};
+
+    function surroundingTitle(index) {
+      var lines = source.slice(0, index).split("\n").reverse();
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (/^#{1,6}\s+/.test(line)) return line.replace(/^#{1,6}\s+/, "").trim();
+        if (/^\\(?:section|subsection|subsubsection)\*?\{/.test(line)) {
+          return line.replace(/^\\(?:section|subsection|subsubsection)\*?\{/, "").replace(/\}\s*$/, "").trim();
+        }
+      }
+      return fileName || "公式章节";
+    }
+
+    function nearbyEquationNumber(index) {
+      var before = source.slice(Math.max(0, index - 260), index);
+      var after = source.slice(index, Math.min(source.length, index + 120));
+      var candidates = [before, after];
+      for (var i = 0; i < candidates.length; i++) {
+        var m = candidates[i].match(/(?:Equation|Eq\.?|公式)\s*[:：]?\s*\(?([0-9]+(?:\.[0-9]+)+)\)?|\(([0-9]+(?:\.[0-9]+)+)\)/i);
+        if (m) return m[1] || m[2] || "";
+      }
+      return "";
+    }
+
+    function addEquation(raw, startIndex, envName) {
+      var block = repairPptLatexArtifacts(String(raw || "")).trim();
+      if (!block) return;
+      var number = "";
+      block = block.replace(/\\tag\{([^}]*)\}/g, function (_match, value) {
+        if (!number) number = String(value || "").trim();
+        return "";
+      });
+      var label = "";
+      block = block.replace(/\\label\{([^}]*)\}/g, function (_match, value) {
+        if (!label) label = String(value || "").trim();
+        return "";
+      });
+      if (!number) number = nearbyEquationNumber(startIndex || 0);
+      var formula = latexMathDisplaySource(block);
+      if (!formula || formula.length < 2) return;
+      var key = (number || label || formula).replace(/\s+/g, "");
+      if (seen[key]) return;
+      seen[key] = true;
+      catalog.push({
+        id: "eq-" + catalog.length,
+        number: number || (label ? label.replace(/^eq[:_.-]?/i, "") : String(catalog.length + 1)),
+        label: label,
+        formula: formula,
+        env: envName || "",
+        section: surroundingTitle(startIndex || 0),
+      });
+    }
+
+    var envPattern = /\\begin\{(equation|align|alignat|gather|multline)\*?\}([\s\S]*?)\\end\{\1\*?\}/g;
+    var match;
+    while ((match = envPattern.exec(source)) !== null) {
+      addEquation(match[2], match.index, match[1]);
+    }
+    var displayPattern = /\\\[([\s\S]*?)\\\]|\$\$([\s\S]*?)\$\$/g;
+    while ((match = displayPattern.exec(source)) !== null) {
+      addEquation(match[1] || match[2] || "", match.index, "display");
+    }
+    if (!catalog.length) {
+      var inlinePattern = /(^|[^\\])\$([^$\n]{3,260})\$/g;
+      while ((match = inlinePattern.exec(source)) !== null) {
+        addEquation(match[2] || "", match.index, "inline");
+      }
+    }
+    return catalog;
+  }
+
+  function equationCatalogKey(eq) {
+    eq = eq || {};
+    if (eq.label) return "label:" + String(eq.label).trim();
+    if (eq.number) return "num:" + String(eq.number).trim();
+    return "formula:" + latexMathDisplaySource(eq.formula || "").replace(/\s+/g, "");
+  }
+
+  function collectCurrentMissingEquations() {
+    var items = [];
+    var seen = {};
+
+    function add(keyValue, labelValue, context) {
+      var key = String(keyValue || "").trim();
+      var label = String(labelValue || key || "").trim();
+      var raw = label || key;
+      if (!raw) return;
+      var numberMatch = raw.match(/\d+(?:\.\d+)+|\d+/) || key.match(/\d+(?:\.\d+)+|\d+/);
+      var number = numberMatch ? numberMatch[0] : "";
+      var dedupeKey = number ? "num:" + number : "label:" + raw.replace(/\s+/g, "");
+      if (seen[dedupeKey]) return;
+      seen[dedupeKey] = true;
+      items.push({
+        key: key || raw,
+        label: label || key || raw,
+        number: number,
+        chapterHint: number && number.indexOf(".") > -1 ? ("建议导入第 " + number.split(".")[0] + " 章相关公式章节") : "",
+        context: context || "",
+      });
+    }
+
+    if (slidesData && Array.isArray(slidesData.missing_equations)) {
+      slidesData.missing_equations.forEach(function (eq) {
+        add((eq && eq.key) || "", (eq && eq.label) || "", "全局缺失公式");
+      });
+    }
+    if (slidesData && Array.isArray(slidesData.slides)) {
+      slidesData.slides.forEach(function (slide, idx) {
+        (slide.missing_equations || []).forEach(function (eq) {
+          var title = slide && slide.title ? String(slide.title) : ("第 " + (idx + 1) + " 页");
+          add((eq && eq.key) || "", (eq && eq.label) || "", title);
+        });
+      });
+    }
+    var source = "";
+    if (editor && editor.getValue) source = editor.getValue();
+    else source = fullLatex || "";
+    var markerPattern = /\\kgmissingequation\{([^{}]+)\}\{([^{}]*)\}/g;
+    var match;
+    while ((match = markerPattern.exec(source || "")) !== null) {
+      add(match[1], match[2] || match[1], "LaTeX 标记");
+    }
+    return items;
+  }
+
+  function refreshMissingEquationCatalog() {
+    missingEquationCatalog = collectCurrentMissingEquations();
+    return missingEquationCatalog;
+  }
+
+  function currentMissingEquationKeys() {
+    var keys = {};
+
+    function add(value) {
+      var raw = String(value || "").trim();
+      if (!raw) return;
+      keys[raw] = true;
+      var number = raw.match(/\d+(?:\.\d+)+|\d+/);
+      if (number) keys["num:" + number[0]] = true;
+      keys["label:" + raw] = true;
+    }
+
+    refreshMissingEquationCatalog().forEach(function (eq) {
+      add(eq.key);
+      add(eq.label);
+      if (eq.number) add(eq.number);
+    });
+    return keys;
+  }
+
+  function splitEquationCatalogForCurrentChapter(catalog) {
+    var missingKeys = currentMissingEquationKeys();
+    var hasMissing = Object.keys(missingKeys).length > 0;
+    var matched = [];
+    var extra = [];
+    (catalog || []).forEach(function (eq) {
+      var numberKey = eq && eq.number ? "num:" + String(eq.number).trim() : "";
+      var labelKey = eq && eq.label ? "label:" + String(eq.label).trim() : "";
+      var isCurrent = !hasMissing || (numberKey && missingKeys[numberKey]) || (labelKey && missingKeys[labelKey]);
+      (isCurrent ? matched : extra).push(eq);
+    });
+    return { matched: matched, extra: extra };
   }
 
   function serializeRichMathText(root) {
@@ -595,6 +975,74 @@
     savedRichTextRange = range.cloneRange();
   }
 
+  function rememberCurrentRichTextSelection() {
+    var selection = window.getSelection ? window.getSelection() : null;
+    if (!selection || !selection.rangeCount) return false;
+    var range = selection.getRangeAt(0);
+    var $root = $(range.commonAncestorContainer.nodeType === 1
+      ? range.commonAncestorContainer
+      : range.commonAncestorContainer.parentNode);
+    var $rich = $root.closest(".slide-rich-text-preview");
+    if (!$rich.length && lastFocusedRichText && selectionInsideElement(lastFocusedRichText, range)) {
+      $rich = $(lastFocusedRichText);
+    }
+    if (!$rich.length) return false;
+    lastFocusedRichText = $rich[0];
+    lastFocusedInput = $rich[0];
+    lastFocusedTextbox = $rich.closest(".slide-textbox, .slide-callout")[0] || null;
+    savedRichTextRange = range.cloneRange();
+    syncToolbarFontSizeFromSelection(range);
+    return true;
+  }
+
+  function getSelectionFontSizeValue(range) {
+    var candidate = null;
+    if (!range) return candidate;
+    var node = range.commonAncestorContainer;
+    if (!node) return candidate;
+    if (node.nodeType !== 1) node = node.parentNode;
+    if (!node) return candidate;
+    var $node = $(node).closest(".slide-rich-text-preview");
+    if (!$node.length) return candidate;
+
+    var anchor = range.startContainer;
+    if (anchor && anchor.nodeType !== 1) anchor = anchor.parentNode;
+    if (!anchor || !document.body.contains(anchor)) return candidate;
+
+    var $target = $(anchor).closest("font, span, strong, b, em, i, u, sub, sup, [style]");
+    var el = $target.length ? $target[0] : anchor;
+    var computed = window.getComputedStyle ? window.getComputedStyle(el) : null;
+    if (!computed || !computed.fontSize) return candidate;
+    var size = parseFloat(computed.fontSize);
+    if (!size || Number.isNaN(size)) return candidate;
+    return Math.round(size);
+  }
+
+  function syncToolbarFontSizeFromSelection(range) {
+    var value = getSelectionFontSizeValue(range || (window.getSelection && window.getSelection().rangeCount ? window.getSelection().getRangeAt(0) : null));
+    if (!value) return;
+    var $fontSize = $("#toolbarFontSize");
+    if (!$fontSize.length) return;
+    $fontSize.val(String(value));
+  }
+
+  var richTextSelectionSyncTimer = null;
+  function scheduleRichTextSelectionSync() {
+    if (richTextSelectionSyncTimer) clearTimeout(richTextSelectionSyncTimer);
+    richTextSelectionSyncTimer = setTimeout(function () {
+      richTextSelectionSyncTimer = null;
+      if (Date.now() < toolbarSelectionHoldUntil) return;
+      syncToolbarFontSizeFromSelection();
+    }, 0);
+  }
+
+  document.addEventListener("selectionchange", function () {
+    var active = document.activeElement;
+    if (!active) return;
+    if (!$(active).closest(".slide-rich-text-preview").length && !$(active).is(".slide-rich-text-preview")) return;
+    scheduleRichTextSelectionSync();
+  });
+
   function restoreRichTextSelection() {
     if (!lastFocusedRichText || !savedRichTextRange || !document.body.contains(lastFocusedRichText)) return false;
     if (!selectionInsideElement(lastFocusedRichText, savedRichTextRange)) return false;
@@ -630,11 +1078,469 @@
     return $scope.length ? $scope : $("#slideCanvas");
   }
 
-  function updateContentPreview() {
-    renderMathText($("#contentPreview"), $("#content").val() || "", {
-      emptyText: "暂无内容。",
-      displayMode: false,
+  function renderMarkdownPreview($target, text, options) {
+    var source = repairPptLatexArtifacts(text);
+    var opts = options || {};
+    $target.empty();
+    $target.toggleClass("muted", !source.trim());
+    if (!source.trim()) {
+      $target.text(opts.emptyText || "暂无内容。");
+      return;
+    }
+
+    var blocks = source.replace(/\r\n/g, "\n").split(/\n{2,}/);
+    blocks.forEach(function (block) {
+      var raw = String(block || "");
+      if (!raw.trim()) return;
+      var lines = raw.split("\n");
+      var first = String(lines[0] || "").trim();
+      var heading = first.match(/^(#{1,6})\s+(.+)$/);
+      if (heading) {
+        var level = Math.min(6, heading[1].length);
+        var $heading = $("<h" + level + ' class="markdown-preview-heading"></h' + level + ">");
+        renderMathText($heading, heading[2], { displayMode: false, boxedMath: true });
+        $target.append($heading);
+        if (lines.length > 1) {
+          renderMarkdownPreview($target, lines.slice(1).join("\n"), { emptyText: "" });
+        }
+        return;
+      }
+
+      var imageMatch = first.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+      if (imageMatch) {
+        var $figure = $('<figure class="markdown-preview-figure"></figure>');
+        var $img = $('<img class="markdown-preview-image" />')
+          .attr("src", imageMatch[2])
+          .attr("alt", imageMatch[1] || "image");
+        $figure.append($img);
+        if (imageMatch[1]) {
+          var $caption = $('<figcaption class="markdown-preview-caption"></figcaption>');
+          renderMathText($caption, imageMatch[1], { displayMode: false, boxedMath: true });
+          $figure.append($caption);
+        }
+        $target.append($figure);
+        return;
+      }
+
+      var isList = lines.every(function (line) {
+        return !String(line || "").trim() || /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(line);
+      });
+      if (isList) {
+        var ordered = lines.some(function (line) { return /^\s*\d+[.)]\s+/.test(line); });
+        var $list = $(ordered ? '<ol class="markdown-preview-list"></ol>' : '<ul class="markdown-preview-list"></ul>');
+        lines.forEach(function (line) {
+          var text = String(line || "").replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/, "").trim();
+          if (!text) return;
+          var $li = $("<li></li>");
+          renderMathText($li, text, { displayMode: false, boxedMath: true });
+          $list.append($li);
+        });
+        $target.append($list);
+        return;
+      }
+
+      var $para = $('<div class="markdown-preview-paragraph"></div>');
+      renderMathText($para, raw, { displayMode: false, boxedMath: true });
+      $target.append($para);
     });
+  }
+
+  function activeMarkdownPreviewSource() {
+    if (activeMarkdownPreviewIndex !== null) {
+      var item = importedMarkdownFiles[activeMarkdownPreviewIndex];
+      if (item && item.content && !item.error) {
+        var title = item.path || item.name || ("知识图谱 " + (activeMarkdownPreviewIndex + 1));
+        return "# " + title + "\n\n" + item.content;
+      }
+    }
+    return $("#content").val() || "";
+  }
+
+  function setMarkdownPreviewSource(text) {
+    renderMarkdownPreview($("#contentPreview"), text, {
+      emptyText: "导入 .md/.markdown 知识图谱文件后，内容会显示在这里。",
+    });
+  }
+
+  function updateContentPreview() {
+    setMarkdownPreviewSource(activeMarkdownPreviewSource());
+  }
+
+  function markdownFileDisplayPath(file) {
+    return (file && (file.webkitRelativePath || file.name)) || "未命名 Markdown";
+  }
+
+  function markdownSectionId(fileIndex, sectionIndex) {
+    return "md-section-" + fileIndex + "-" + sectionIndex;
+  }
+
+  function isTextbookSectionHeading(title) {
+    return /^chapter\d+_\d+\s*[·.-]/i.test(String(title || "").trim());
+  }
+
+  function normalizeMarkdownSectionTitle(rawTitle, fallback) {
+    var title = String(rawTitle || "").trim() || fallback || "未命名小节";
+    var textbook = title.match(/^(chapter\d+_\d+)\s*[·.-]\s*(.+)$/i);
+    if (textbook) {
+      var block = textbook[1];
+      var rest = textbook[2].trim();
+      return block + " · " + rest;
+    }
+    return title;
+  }
+
+  function parseMarkdownSections(content, fileTitle) {
+    var source = String(content || "").replace(/\r\n/g, "\n");
+    var lines = source.split("\n");
+    var headings = [];
+    for (var i = 0; i < lines.length; i++) {
+      var match = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[i] || "");
+      if (!match) continue;
+      var level = match[1].length;
+      var title = match[2].replace(/\s+#+\s*$/, "").trim();
+      headings.push({
+        level: level,
+        title: title,
+        line: i,
+        textbook: isTextbookSectionHeading(title),
+      });
+    }
+
+    var candidates = headings.filter(function (heading) {
+      return heading.textbook;
+    });
+    if (!candidates.length) {
+      var lowestUsefulLevel = null;
+      headings.forEach(function (heading) {
+        if (heading.level <= 1) return;
+        lowestUsefulLevel = lowestUsefulLevel === null ? heading.level : Math.min(lowestUsefulLevel, heading.level);
+      });
+      if (lowestUsefulLevel !== null) {
+        candidates = headings.filter(function (heading) {
+          return heading.level === lowestUsefulLevel;
+        });
+      }
+    }
+
+    if (!candidates.length && source.trim()) {
+      return [{
+        title: fileTitle || "全文",
+        level: 1,
+        startLine: 1,
+        endLine: lines.length,
+        content: source.trim(),
+        expanded: false,
+      }];
+    }
+
+    return candidates.map(function (heading, index) {
+      var endLine = lines.length;
+      for (var j = heading.line + 1; j < lines.length; j++) {
+        var next = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[j] || "");
+        if (next && next[1].length <= heading.level) {
+          endLine = j;
+          break;
+        }
+      }
+      var sectionContent = lines.slice(heading.line, endLine).join("\n").trim();
+      return {
+        title: normalizeMarkdownSectionTitle(heading.title, "小节 " + (index + 1)),
+        level: heading.level,
+        startLine: heading.line + 1,
+        endLine: endLine,
+        content: sectionContent,
+        expanded: false,
+      };
+    });
+  }
+
+  function normalizeSupplementChapterTitle(number, rawTitle) {
+    var title = String(rawTitle || "").replace(/\s+#+\s*$/, "").trim();
+    return number + (title ? " " + title : "");
+  }
+
+  function findSupplementChapterHeadings(lines) {
+    var headings = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = String(lines[i] || "").trim();
+      if (!line) continue;
+      var match = /^(?:#{1,6}\s*)?((?:\d{3})(?:\.\d{3})*)\s*(?:[\.、:：\-]\s*)?(.+?)?\s*$/.exec(line);
+      if (!match) continue;
+      headings.push({
+        number: match[1],
+        title: normalizeSupplementChapterTitle(match[1], match[2] || ""),
+        line: i,
+      });
+    }
+    return headings;
+  }
+
+  function extractSupplementChapterCatalog(sourceText, fileName) {
+    var source = String(sourceText || "").replace(/\r\n/g, "\n");
+    var lines = source.split("\n");
+    var headings = findSupplementChapterHeadings(lines);
+    var sections = [];
+    if (headings.length) {
+      sections = headings.map(function (heading, index) {
+        var endLine = index + 1 < headings.length ? headings[index + 1].line : lines.length;
+        var content = lines.slice(heading.line, endLine).join("\n").trim();
+        return {
+          id: "supplement-section-" + index,
+          number: heading.number,
+          title: heading.title || ("补充章节 " + heading.number),
+          fileName: fileName || "补充章节",
+          startLine: heading.line + 1,
+          endLine: endLine,
+          content: content,
+        };
+      });
+    } else {
+      sections = parseMarkdownSections(source, fileName || "补充章节").map(function (section, index) {
+        return {
+          id: "supplement-fallback-" + index,
+          number: String(index + 1).padStart(3, "0"),
+          title: section.title || ("补充章节 " + (index + 1)),
+          fileName: fileName || "补充章节",
+          startLine: section.startLine || 1,
+          endLine: section.endLine || lines.length,
+          content: section.content || "",
+        };
+      });
+    }
+    return sections.filter(function (section) {
+      return String(section.content || "").trim();
+    });
+  }
+
+  function getSelectedMarkdownSections() {
+    var selected = [];
+    importedMarkdownFiles.forEach(function (item, fileIndex) {
+      if (!item || !item.content || item.error) return;
+      (item.sections || []).forEach(function (section, sectionIndex) {
+        var id = section.id || markdownSectionId(fileIndex, sectionIndex);
+        if (!selectedMarkdownSectionIds[id]) return;
+        selected.push({
+          id: id,
+          fileIndex: fileIndex,
+          sectionIndex: sectionIndex,
+          fileTitle: item.path || item.name || ("知识图谱 " + (fileIndex + 1)),
+          title: section.title || ("小节 " + (sectionIndex + 1)),
+          content: section.content || "",
+        });
+      });
+    });
+    return selected;
+  }
+
+  function renderMarkdownSelectionSummary() {
+    var $summary = $("#markdownSelectionSummary");
+    if (!$summary.length) return;
+    var selected = getSelectedMarkdownSections();
+    if (!selected.length) {
+      $summary
+        .removeClass("has-selection")
+        .text(validImportedMarkdownItems().length ? "未引用小节时，生成会使用全部已导入 Markdown 内容。" : "");
+      return;
+    }
+    var labels = selected.slice(0, 3).map(function (section) {
+      return section.title;
+    }).join("；");
+    if (selected.length > 3) labels += " 等";
+    $summary
+      .addClass("has-selection")
+      .text("已引用 " + selected.length + " 个小节：" + labels + "。生成 LaTeX 时只使用这些小节。");
+  }
+
+  function renderMarkdownImportList() {
+    var $list = $("#markdownImportList");
+    if (!$list.length) return;
+    $list.empty();
+    if (!importedMarkdownFiles.length) {
+      $list.removeClass("has-files");
+      return;
+    }
+    $list.addClass("has-files");
+    $list.append('<div class="markdown-import-list-title">已导入知识图谱文件</div>');
+    importedMarkdownFiles.forEach(function (item, index) {
+      if (item && item.sections) {
+        item.sections.forEach(function (section, sectionIndex) {
+          section.id = section.id || markdownSectionId(index, sectionIndex);
+        });
+      }
+      var meta = item.error
+        ? ("导入失败：" + item.error)
+        : ((item.charCount || 0) + " 字符" + ((item.sections || []).length ? " · " + item.sections.length + " 个小节" : ""));
+      var canExpand = !!(item.content && !item.error);
+      var expanded = !!item.expanded && canExpand;
+      var sectionHtml = "";
+      if (expanded && (item.sections || []).length) {
+        sectionHtml += '<div class="markdown-section-tree">';
+        (item.sections || []).forEach(function (section, sectionIndex) {
+          var id = section.id || markdownSectionId(index, sectionIndex);
+          var selected = !!selectedMarkdownSectionIds[id];
+          var sectionExpanded = !!section.expanded;
+          var lineMeta = "L" + (section.startLine || "?") + "-L" + (section.endLine || "?");
+          sectionHtml +=
+            '<div class="markdown-section-item' + (selected ? " selected" : "") + '">' +
+              '<div class="markdown-section-row">' +
+                '<button type="button" class="markdown-section-toggle" data-markdown-index="' + index + '" data-section-index="' + sectionIndex + '" aria-expanded="' + (sectionExpanded ? "true" : "false") + '">' +
+                  (sectionExpanded ? "收起" : "展开") +
+                '</button>' +
+                '<button type="button" class="markdown-section-title" data-markdown-index="' + index + '" data-section-index="' + sectionIndex + '" title="' + escAttr(section.title || "") + '">' +
+                  escHtml(section.title || ("小节 " + (sectionIndex + 1))) +
+                '</button>' +
+                '<div class="markdown-section-meta">' + escHtml(lineMeta) + '</div>' +
+                '<button type="button" class="markdown-section-quote' + (selected ? " active" : "") + '" data-markdown-index="' + index + '" data-section-index="' + sectionIndex + '">' +
+                  (selected ? "已引用" : "引用") +
+                '</button>' +
+              '</div>' +
+              (sectionExpanded
+                ? '<div class="markdown-section-preview">已在下方 Markdown 预览中显示该小节内容。</div>'
+                : '') +
+            '</div>';
+        });
+        sectionHtml += '</div>';
+      }
+      $list.append(
+        '<div class="markdown-import-file' + (item.error ? " error" : "") + (activeMarkdownPreviewIndex === index ? " active" : "") + '">' +
+          '<div class="markdown-import-file-row">' +
+            '<button type="button" class="markdown-import-toggle" data-markdown-index="' + index + '" ' +
+              (canExpand ? "" : "disabled ") +
+              'aria-expanded="' + (expanded ? "true" : "false") + '">' +
+              (expanded ? "收起" : "展开") +
+            '</button>' +
+            '<div class="markdown-import-path" title="' + escAttr(item.path || item.name || "") + '">' +
+              escHtml(item.path || item.name || "") +
+            '</div>' +
+            '<div class="markdown-import-meta">' + escHtml(meta) + '</div>' +
+            '<button type="button" class="markdown-import-remove" data-markdown-index="' + index + '" title="删除该 MD 文件" aria-label="删除 ' + escAttr(item.path || item.name || "MD 文件") + '">&times;</button>' +
+          '</div>' +
+          (expanded
+            ? '<div class="markdown-import-content">点击小节标题可预览，点击“引用”则只用该小节生成 LaTeX。</div>' + sectionHtml
+            : '') +
+        '</div>'
+      );
+    });
+    renderMarkdownSelectionSummary();
+  }
+
+  function toggleMarkdownImportItem(index) {
+    if (Number.isNaN(index) || !importedMarkdownFiles[index] || importedMarkdownFiles[index].error) return;
+    var nextExpanded = !importedMarkdownFiles[index].expanded;
+    importedMarkdownFiles.forEach(function (item, i) {
+      item.expanded = i === index ? nextExpanded : false;
+    });
+    activeMarkdownPreviewIndex = nextExpanded ? index : null;
+    renderMarkdownImportList();
+    updateContentPreview();
+  }
+
+  function previewMarkdownSection(fileIndex, sectionIndex) {
+    var item = importedMarkdownFiles[fileIndex];
+    if (!item || item.error) return;
+    var section = (item.sections || [])[sectionIndex];
+    if (!section) return;
+    importedMarkdownFiles.forEach(function (fileItem, i) {
+      (fileItem.sections || []).forEach(function (candidate, j) {
+        candidate.expanded = i === fileIndex && j === sectionIndex ? !candidate.expanded : false;
+      });
+    });
+    activeMarkdownPreviewIndex = null;
+    renderMarkdownImportList();
+    var fileTitle = item.path || item.name || ("知识图谱 " + (fileIndex + 1));
+    setMarkdownPreviewSource("# " + fileTitle + "\n\n" + (section.content || ""));
+  }
+
+  function toggleMarkdownSectionSelection(fileIndex, sectionIndex) {
+    var item = importedMarkdownFiles[fileIndex];
+    if (!item || item.error) return;
+    var section = (item.sections || [])[sectionIndex];
+    if (!section) return;
+    section.id = section.id || markdownSectionId(fileIndex, sectionIndex);
+    if (selectedMarkdownSectionIds[section.id]) {
+      delete selectedMarkdownSectionIds[section.id];
+    } else {
+      selectedMarkdownSectionIds[section.id] = true;
+    }
+    activeMarkdownPreviewIndex = null;
+    renderMarkdownImportList();
+    refreshMergedMarkdownContent();
+  }
+
+  function removeMarkdownImportItem(index) {
+    if (Number.isNaN(index) || !importedMarkdownFiles[index]) return;
+    var removed = importedMarkdownFiles[index];
+    (removed.sections || []).forEach(function (section, sectionIndex) {
+      var id = section.id || markdownSectionId(index, sectionIndex);
+      delete selectedMarkdownSectionIds[id];
+    });
+    importedMarkdownFiles.splice(index, 1);
+    selectedMarkdownSectionIds = {};
+    if (activeMarkdownPreviewIndex === index) {
+      activeMarkdownPreviewIndex = null;
+    } else if (activeMarkdownPreviewIndex !== null && activeMarkdownPreviewIndex > index) {
+      activeMarkdownPreviewIndex -= 1;
+    }
+    renderMarkdownImportList();
+    refreshMergedMarkdownContent();
+    var remaining = validImportedMarkdownItems().length;
+    setStatus("已删除导入文件：" + (removed.path || removed.name || "MD 文件") + "，剩余 " + remaining + " 个", "success");
+  }
+
+  function importMarkdownFile(file) {
+    var formData = new FormData();
+    formData.append("file", file);
+    return $.ajax({
+      url: "/beamer-generator/api/import-markdown-source",
+      method: "POST",
+      data: formData,
+      processData: false,
+      contentType: false,
+    }).then(function (data) {
+      if (data && data.error) throw new Error(data.error);
+      var content = (data && data.content) || "";
+      return {
+        name: (data && data.filename) || file.name || "知识图谱",
+        path: markdownFileDisplayPath(file),
+        content: content,
+        charCount: (data && data.char_count) || content.length,
+        sections: parseMarkdownSections(content, markdownFileDisplayPath(file)),
+      };
+    });
+  }
+
+  function mergeMarkdownImportContents(items) {
+    var selected = getSelectedMarkdownSections();
+    if (selected.length) {
+      return selected.map(function (section) {
+        return [
+          "# 引用小节：" + section.fileTitle + " / " + section.title,
+          "",
+          section.content || ""
+        ].join("\n");
+      }).join("\n\n---\n\n");
+    }
+    return items.map(function (item, index) {
+      var title = item.path || item.name || ("知识图谱 " + (index + 1));
+      return [
+        "# 导入知识图谱：" + title,
+        "",
+        item.content || ""
+      ].join("\n");
+    }).join("\n\n---\n\n");
+  }
+
+  function validImportedMarkdownItems() {
+    return importedMarkdownFiles.filter(function (item) {
+      return item && item.content && !item.error;
+    });
+  }
+
+  function refreshMergedMarkdownContent() {
+    var imported = validImportedMarkdownItems();
+    rawMarkdownContent = imported.length ? mergeMarkdownImportContents(imported) : "";
+    applyMarkdownAssets();
+    renderMarkdownSelectionSummary();
   }
 
   function rewriteMarkdownImageLinks(text, assetUrls) {
@@ -664,6 +1570,7 @@
     var source = rawMarkdownContent || "";
     buildFigurePreviewMap();
     if (!source) {
+      $("#content").val("");
       updateContentPreview();
       return;
     }
@@ -760,6 +1667,65 @@
     $("#packageImageViewerImage").attr("src", "");
     $("#packageImageViewerCaption").text("");
     $("body").removeClass("modal-open");
+  }
+
+  function renderedPagesToPreviewImages(renderedPages, prefix) {
+    return (Array.isArray(renderedPages) ? renderedPages : []).map(function (page, idx) {
+      return {
+        url: page.image || "",
+        name: (prefix || "页面") + " " + (idx + 1),
+      };
+    }).filter(function (item) {
+      return !!item.url;
+    });
+  }
+
+  function figureAssetsToPreviewImages(figureAssets) {
+    return (Array.isArray(figureAssets) ? figureAssets : []).map(function (item, idx) {
+      return {
+        url: item.url || "",
+        name: (item.label || ("Figure " + (idx + 1))) + (item.path ? " · " + item.path : ""),
+      };
+    }).filter(function (item) {
+      return !!item.url;
+    });
+  }
+
+  function setImportedPreviewImages(items, title) {
+    importedPreviewImages = (Array.isArray(items) ? items : []).filter(function (item) {
+      return item && item.url;
+    });
+    importPreviewTitle = title || "导入内容预览";
+    if (!importedPreviewImages.length) {
+      importPreviewPanelOpen = false;
+    }
+    renderImportPreviewPanel();
+  }
+
+  function renderImportPreviewPanel() {
+    var $panel = $("#importPreviewPanel");
+    var $grid = $("#importPreviewGrid").empty();
+    $("#importPreviewTitle").text(importPreviewTitle + (importedPreviewImages.length ? "（" + importedPreviewImages.length + "）" : ""));
+    $("#btnToggleImportPreview")
+      .prop("disabled", !importedPreviewImages.length)
+      .text(importPreviewPanelOpen ? "收起预览" : "预览导入内容");
+
+    if (!importedPreviewImages.length) {
+      $panel.hide();
+      return;
+    }
+
+    importedPreviewImages.forEach(function (img, index) {
+      $grid.append(
+        '<button type="button" class="import-preview-item" data-import-preview-index="' + index + '">' +
+          '<span class="import-preview-number">' + (index + 1) + '</span>' +
+          '<img class="import-preview-thumb" src="' + escAttr(img.url) + '" alt="' + escAttr(img.name || "") + '" loading="lazy" />' +
+          '<span class="import-preview-caption">' + escHtml(img.name || ("预览 " + (index + 1))) + '</span>' +
+        '</button>'
+      );
+    });
+
+    $panel.toggle(importPreviewPanelOpen);
   }
 
   function positionFigureHoverPreview($ref) {
@@ -864,6 +1830,22 @@
       if (!$input.length) $input = $boxes.prevAll(selector).first();
       renderFormulaBoxes($boxes, $input.val() || "");
     });
+    $scope.find(".slide-callout").each(function () {
+      var $box = $(this);
+      var $content = $box.find(".slide-callout-content").first();
+      var $preview = $box.find(".slide-callout-preview").first();
+      if ($content.length && $preview.length) {
+        renderMathText($preview, $content.val() || "", {
+          displayMode: false,
+          boxedMath: false,
+          emptyText: "",
+        });
+        $preview.css({
+          fontSize: $content.css("font-size"),
+          textAlign: $content.css("text-align"),
+        });
+      }
+    });
   }
 
   function enterMathEdit($row) {
@@ -942,7 +1924,7 @@
   function applyLectureSource(title, content) {
     $("#content").val(content || "");
     updateContentPreview();
-    if (title) {
+    if (title && !$("#customRequirements").val().trim()) {
       $("#customRequirements").val("Title: " + title);
     }
   }
@@ -951,9 +1933,19 @@
     var files = data.files || [];
     var content = data.content || "";
     var title = data.filename || (files[0] || "knowledge_graph");
-    $("#content").val(content);
-    updateContentPreview();
-    if (title) {
+    selectedMarkdownSectionIds = {};
+    activeMarkdownPreviewIndex = 0;
+    importedMarkdownFiles = [{
+      name: title,
+      path: title,
+      content: content,
+      charCount: data.char_count || content.length,
+      sections: parseMarkdownSections(content, title),
+      expanded: true,
+    }];
+    refreshMergedMarkdownContent();
+    renderMarkdownImportList();
+    if (title && !$("#customRequirements").val().trim()) {
       $("#customRequirements").val("Title: " + title.replace(/\.(zip|md|markdown|txt)$/i, ""));
     }
     setStatus("Imported " + files.length + " file(s), " + (data.char_count || content.length) + " chars", "success");
@@ -977,42 +1969,560 @@
       slides: slidesData.slides,
       figure_assets: buildFigureAssetPayload(),
       latex: fullLatex || "",
+      missing_equations: Array.isArray(slidesData.missing_equations) ? slidesData.missing_equations : [],
     };
   }
 
-  function renderSavedPptProjects() {
-    var $chapter = $("#savedPptChapterSelect");
-    var $slide = $("#savedPptSlideSelect");
-    $chapter.empty().append('<option value="">选择章节</option>');
-    for (var i = 0; i < savedPptProjects.length; i++) {
-      var project = savedPptProjects[i] || {};
-      var label = project.chapter_title || project.title || project.chapter_id || ("章节 " + (i + 1));
-      $chapter.append('<option value="' + i + '">' + escHtml(label) + '</option>');
+  function renderEquationSourcePanel() {
+    var $panel = $("#equationSourcePanel");
+    var $missingList = $("#equationMissingList");
+    var $list = $("#equationSourceList");
+    var $extraList = $("#equationSourceExtraList");
+    refreshMissingEquationCatalog();
+    $missingList.empty();
+    $list.empty();
+    $extraList.empty();
+
+    if (!missingEquationCatalog.length) {
+      $missingList.append('<div class="equation-source-empty">当前未识别到缺失公式。若页面中有“缺失公式”提示，请先解析或同步 LaTeX。</div>');
+    } else {
+      missingEquationCatalog.forEach(function (eq) {
+        var number = eq.number ? ("(" + eq.number + ")") : (eq.label || eq.key || "缺失公式");
+        var hint = eq.chapterHint ? '<div class="equation-source-section">' + escHtml(eq.chapterHint) + '</div>' : "";
+        var context = eq.context ? '<div class="equation-source-section">来源：' + escHtml(eq.context) + '</div>' : "";
+        $missingList.append(
+          '<div class="equation-source-item equation-source-missing-item">' +
+            '<div class="equation-source-main">' +
+              '<div class="equation-source-meta">' +
+                '<span class="equation-source-number">' + escHtml(number) + '</span>' +
+              '</div>' +
+              '<div class="equation-source-preview">' + escHtml(eq.label || eq.key || number) + '</div>' +
+              hint +
+              context +
+            '</div>' +
+          '</div>'
+        );
+      });
     }
-    $slide.empty().append('<option value="">选择页面</option>').prop("disabled", true);
-    $("#btnLoadSavedSlide").prop("disabled", true);
+
+    if (!importedEquationCatalog.length) {
+      $("#equationSourceSummary").text(
+        "当前缺失 " + missingEquationCatalog.length + " 个公式；请选择包含对应编号的公式章节文件。"
+      );
+      $list.append('<div class="equation-source-empty">未在文件中识别到编号公式。</div>');
+    } else {
+      $("#equationSourceSummary").text("当前缺失 " + missingEquationCatalog.length + " 个公式；识别到 " + (importedEquationCatalog.length + extraEquationCatalog.length) + " 个公式；当前章节可引用 " + importedEquationCatalog.length + " 个，非本章缺失 " + extraEquationCatalog.length + " 个");
+      importedEquationCatalog.forEach(function (eq, idx) {
+        var $row = $(
+          '<label class="equation-source-item">' +
+            '<input type="checkbox" class="equation-source-check" data-equation-index="' + idx + '" />' +
+            '<div class="equation-source-main">' +
+              '<div class="equation-source-meta">' +
+                '<span class="equation-source-number">(' + escHtml(eq.number || String(idx + 1)) + ')</span>' +
+                '<span class="equation-source-section">' + escHtml(eq.section || "") + '</span>' +
+              '</div>' +
+              '<div class="equation-source-preview"></div>' +
+            '</div>' +
+          '</label>'
+        );
+        appendKatexNode($row.find(".equation-source-preview"), eq.formula, true, eq.formula);
+        $list.append($row);
+      });
+    }
+    if (!extraEquationCatalog.length) {
+      $extraList.append('<div class="equation-source-empty">没有识别到非本章缺失公式。</div>');
+    } else {
+      extraEquationCatalog.forEach(function (eq, idx) {
+        var $row = $(
+          '<div class="equation-source-item equation-source-extra-item">' +
+            '<div class="equation-source-main">' +
+              '<div class="equation-source-meta">' +
+                '<span class="equation-source-number">(' + escHtml(eq.number || String(idx + 1)) + ')</span>' +
+                '<span class="equation-source-section">' + escHtml(eq.section || "") + '</span>' +
+              '</div>' +
+              '<div class="equation-source-preview"></div>' +
+            '</div>' +
+          '</div>'
+        );
+        appendKatexNode($row.find(".equation-source-preview"), eq.formula, true, eq.formula);
+        $extraList.append($row);
+      });
+    }
+    $panel.css("display", "flex");
+  }
+
+  function renderSupplementChapterPanel() {
+    var $panel = $("#supplementChapterPanel");
+    var $list = $("#supplementChapterList");
+    $list.empty();
+    if (!supplementChapterCatalog.length) {
+      $("#supplementChapterSummary").text("未识别到可添加的补充章节");
+      $list.append('<div class="equation-source-empty">未在文件中识别到 001 / 001.002 编号章节。</div>');
+    } else {
+      var files = {};
+      supplementChapterCatalog.forEach(function (chapter) {
+        files[chapter.fileName || "补充章节"] = true;
+      });
+      $("#supplementChapterSummary").text(
+        "识别到 " + supplementChapterCatalog.length + " 个补充章节，来自 " + Object.keys(files).length + " 个文件"
+      );
+      supplementChapterCatalog.forEach(function (chapter, idx) {
+        var preview = chapter.expanded
+          ? '<div class="supplement-chapter-preview">' + escHtml((chapter.content || "").slice(0, 900)) + ((chapter.content || "").length > 900 ? "..." : "") + '</div>'
+          : "";
+        $list.append(
+          '<label class="equation-source-item supplement-chapter-item">' +
+            '<input type="checkbox" class="supplement-chapter-check" data-supplement-index="' + idx + '" />' +
+            '<div class="equation-source-main">' +
+              '<div class="supplement-chapter-row">' +
+                '<button type="button" class="supplement-chapter-toggle" data-supplement-index="' + idx + '" aria-expanded="' + (chapter.expanded ? "true" : "false") + '">' +
+                  (chapter.expanded ? "收起" : "展开") +
+                '</button>' +
+                '<div class="equation-source-meta">' +
+                  '<span class="equation-source-number">' + escHtml(chapter.number || String(idx + 1)) + '</span>' +
+                  '<span class="equation-source-section">' + escHtml(chapter.title || "") + '</span>' +
+                  '<span class="supplement-chapter-file">' + escHtml(chapter.fileName || "") + '</span>' +
+                '</div>' +
+              '</div>' +
+              preview +
+            '</div>' +
+          '</label>'
+        );
+      });
+    }
+    $panel.css("display", "flex");
+  }
+
+  function addSupplementChaptersToMarkdown(selected) {
+    selected = selected || [];
+    if (!selected.length) {
+      setStatus("请先勾选要添加的补充章节", "error");
+      return;
+    }
+    var hadExplicitSelection = getSelectedMarkdownSections().length > 0;
+    var newFileIndex = importedMarkdownFiles.length;
+    var titleParts = {};
+    selected.forEach(function (chapter) {
+      titleParts[chapter.fileName || "补充章节"] = true;
+    });
+    var sourceTitle = "补充章节：" + Object.keys(titleParts).join("、");
+    var sections = selected.map(function (chapter, sectionIndex) {
+      return {
+        id: markdownSectionId(newFileIndex, sectionIndex),
+        title: chapter.title || ("补充章节 " + (sectionIndex + 1)),
+        level: 2,
+        startLine: chapter.startLine || 1,
+        endLine: chapter.endLine || 1,
+        content: chapter.content || "",
+        expanded: false,
+      };
+    });
+    var content = sections.map(function (section) {
+      return section.content || "";
+    }).join("\n\n---\n\n");
+    importedMarkdownFiles.push({
+      name: sourceTitle,
+      path: sourceTitle,
+      content: content,
+      charCount: content.length,
+      sections: sections,
+      expanded: true,
+      sourceType: "supplement",
+    });
+    if (hadExplicitSelection) {
+      sections.forEach(function (section) {
+        selectedMarkdownSectionIds[section.id] = true;
+      });
+    }
+    activeMarkdownPreviewIndex = newFileIndex;
+    refreshMergedMarkdownContent();
+    renderMarkdownImportList();
+    $("#supplementChapterPanel").hide();
+    setStatus("已添加 " + sections.length + " 个补充章节到 Markdown 生成内容", "success");
+  }
+
+  function insertFormulaBoxesFromCatalog(selected) {
+    if (!slidesData || currentSlideIdx < 0 || !slidesData.slides[currentSlideIdx]) {
+      setStatus("请先生成或打开一个可编辑 PPT 页面", "error");
+      return;
+    }
+    selected = selected || [];
+    if (!selected.length) {
+      setStatus("请先勾选要引用的公式", "error");
+      return;
+    }
+    saveCurrentSlide();
+    var slide = slidesData.slides[currentSlideIdx];
+    if (!Array.isArray(slide.formulaBoxes)) slide.formulaBoxes = [];
+    selected.forEach(function (eq, offset) {
+      var idx = slide.formulaBoxes.length;
+      slide.formulaBoxes.push({
+        formula: latexMathDisplaySource(eq.formula || ""),
+        number: eq.number || "",
+        label: eq.label || "",
+        x: 120 + (idx + offset) * 18,
+        y: 178 + (idx + offset) * 18,
+        width: 520,
+        height: 96,
+        fontSize: 18,
+      });
+    });
+    renderSlideEditor(slide);
+    renderSlideList();
+    commitHistorySnapshot(false);
+    scheduleLatexSync();
+    setActiveTab("ppt");
+    setStatus("已引用 " + selected.length + " 个公式到当前 PPT 页", "success");
+  }
+
+  function waitForSlideImages($root) {
+    var images = $root.find("img").toArray();
+    if (!images.length) return Promise.resolve();
+    var waits = images.map(function (img) {
+      if (!img || img.complete) return Promise.resolve();
+      return new Promise(function (resolve) {
+        var done = function () {
+          img.onload = null;
+          img.onerror = null;
+          resolve();
+        };
+        img.onload = done;
+        img.onerror = done;
+        setTimeout(done, 3000);
+      });
+    });
+    return Promise.all(waits).then(function () {});
+  }
+
+  function waitForBrowserPaint($root) {
+    return new Promise(function (resolve) {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          var fontReady = document.fonts && document.fonts.ready ? document.fonts.ready.catch(function () {}) : Promise.resolve();
+          waitForSlideImages($root).then(function () {
+            return fontReady;
+          }).then(function () {
+            setTimeout(resolve, 80);
+          });
+        });
+      });
+    });
+  }
+
+  function captureRenderedSlideImage(pageIndex) {
+    if (!window.html2canvas) {
+      return Promise.reject(new Error("网页截图组件未加载，请刷新页面后重试"));
+    }
+    var $render = $("#slideCanvas .slide-render").first();
+    if (!$render.length) return Promise.reject(new Error("未找到当前 PPT 页面"));
+    $render.find("[data-math-row]").removeClass("is-editing");
+    updateScopedMathPreviews($render);
+    clearPptSyncHighlights();
+    return waitForBrowserPaint($render).then(function () {
+      var node = $render[0];
+      return window.html2canvas(node, {
+        backgroundColor: "#ffffff",
+        scale: 2,
+        useCORS: true,
+        allowTaint: false,
+        logging: false,
+        width: node.offsetWidth,
+        height: node.offsetHeight,
+        scrollX: 0,
+        scrollY: 0,
+      });
+    }).then(function (canvas) {
+      return {
+        page_index: pageIndex,
+        image: canvas.toDataURL("image/png"),
+        width: canvas.width,
+        height: canvas.height,
+      };
+    });
+  }
+
+  function buildRenderedSlideSnapshots() {
+    if (!slidesData || !Array.isArray(slidesData.slides) || !slidesData.slides.length) {
+      return Promise.resolve([]);
+    }
+    var originalIndex = currentSlideIdx;
+    var snapshots = [];
+    saveCurrentSlide();
+    $("body").addClass("ppt-exporting");
+
+    function restoreEditor() {
+      $("body").removeClass("ppt-exporting");
+      if (originalIndex >= 0 && originalIndex < slidesData.slides.length) {
+        currentSlideIdx = originalIndex;
+        renderSlideList();
+        renderSlideEditor(slidesData.slides[currentSlideIdx]);
+        selectLatexSyncForSlide(currentSlideIdx);
+      }
+    }
+
+    var chain = Promise.resolve();
+    slidesData.slides.forEach(function (slide, index) {
+      chain = chain.then(function () {
+        currentSlideIdx = index;
+        $(".slide-thumb").removeClass("active").eq(index).addClass("active");
+        renderSlideEditor(slide);
+        return captureRenderedSlideImage(index).then(function (snapshot) {
+          snapshots.push(snapshot);
+          setStatus("正在捕获 PPT 页面 " + (index + 1) + " / " + slidesData.slides.length + "...", "info");
+        });
+      });
+    });
+
+    return chain.then(function () {
+      restoreEditor();
+      return snapshots;
+    }, function (err) {
+      restoreEditor();
+      throw err;
+    });
+  }
+
+  function removeLegacySavedPptLoadButton() {
+    $("#btnLoadSavedSlide").remove();
+    $("#savedPptSlideSelect").remove();
+    $(".saved-ppt-tools button").filter(function () {
+      return ($(this).text() || "").trim() === "调用此页";
+    }).remove();
+  }
+
+  function renderSavedPptProjects() {
+    removeLegacySavedPptLoadButton();
+    var $chapter = $("#savedPptChapterSelect");
+    var $chapterList = $("#savedPptChapterList");
+    var $chapterToggle = $("#btnSavedPptChapterToggle");
+    var selectedId = null;
+    if (selectedSavedPptProjectIndex !== null && !savedPptProjects[selectedSavedPptProjectIndex]) {
+      selectedSavedPptProjectIndex = null;
+    }
+    if ($chapterList.length) {
+      $chapterList.empty();
+    }
+    if ($chapter.length) {
+      selectedId = selectedSavedPptProjectIndex !== null && savedPptProjects[selectedSavedPptProjectIndex]
+        ? savedPptProjects[selectedSavedPptProjectIndex].chapter_id
+        : "";
+      $chapter.empty().append('<option value="">选择章节</option>');
+      for (var i = 0; i < savedPptProjects.length; i++) {
+        var project = savedPptProjects[i] || {};
+        var label = project.chapter_title || project.title || project.chapter_id || ("章节 " + (i + 1));
+        var count = parseInt(project.slide_count, 10);
+        if (Number.isNaN(count) && Array.isArray(project.slides)) count = project.slides.length;
+        var suffix = Number.isNaN(count) ? "" : ("（" + count + "页）");
+        $chapter.append('<option value="' + i + '">' + escHtml(label + suffix) + '</option>');
+        if ($chapterList.length) {
+          $chapterList.append(
+            '<div class="saved-ppt-chapter-row' + (selectedSavedPptProjectIndex === i ? " active" : "") + '" data-project-index="' + i + '">' +
+              '<button type="button" class="saved-ppt-chapter-open" title="' + escAttr(label + suffix) + '">' + escHtml(label + suffix) + '</button>' +
+              '<button type="button" class="saved-ppt-chapter-remove" title="删除该章节 PPT" aria-label="删除' + escAttr(label) + '" data-project-index="' + i + '">&times;<span>删除</span></button>' +
+            '</div>'
+          );
+        }
+      }
+      if (selectedId) {
+        for (var j = 0; j < savedPptProjects.length; j++) {
+          if ((savedPptProjects[j] || {}).chapter_id === selectedId) {
+            selectedSavedPptProjectIndex = j;
+            $chapter.val(String(j));
+            break;
+          }
+        }
+      }
+      $chapter.prop("disabled", !savedPptProjects.length);
+    }
+    if ($chapterToggle.length) {
+      var countText = savedPptProjects.length ? "（" + savedPptProjects.length + "）" : "";
+      $chapterToggle.text("选择已保存章节" + countText);
+      $chapterToggle.prop("disabled", false);
+    }
+    if ($chapterList.length && !savedPptProjects.length) {
+      $chapterList.html(
+        '<div class="saved-ppt-chapter-empty">' +
+          escHtml(savedPptLoadError || "暂无已保存章节，点击“刷新”重新读取。") +
+        '</div>'
+      );
+    }
     $("#savedPptSlideGallery").empty().hide();
   }
 
-  function loadSavedPptProjects() {
-    $("#btnRefreshSavedPpt").prop("disabled", true).text("读取中...");
-    return fetch("/beamer-generator/api/saved-projects", { headers: { "Accept": "application/json" } })
-      .then(function (resp) {
-        if (!resp.ok) throw new Error("HTTP " + resp.status);
+  function fetchSavedPptProjectsJson() {
+    var paths = ["/beamer-generator/api/saved-projects", "/beamer-generator/api/saved-projects/", "/api/saved-projects"];
+    var index = 0;
+    function tryNext(lastErr) {
+      if (index >= paths.length) return Promise.reject(lastErr || new Error("未找到已保存 PPT 接口"));
+      var separator = paths[index].indexOf("?") >= 0 ? "&" : "?";
+      var url = paths[index++] + separator + "_=" + Date.now();
+      return fetch(url, {
+        cache: "no-store",
+        headers: {
+          "Accept": "application/json",
+          "Cache-Control": "no-cache"
+        }
+      }).then(function (resp) {
+        if (!resp.ok) {
+          var err = new Error("HTTP " + resp.status);
+          if ((resp.status === 404 || resp.status === 405) && index < paths.length) return tryNext(err);
+          throw err;
+        }
         return resp.json();
-      })
+      }).catch(function (err) {
+        if (index < paths.length) return tryNext(err);
+        throw err;
+      });
+    }
+    return tryNext();
+  }
+
+  function upsertSavedPptProject(project) {
+    if (!project || !project.chapter_id) return;
+    var next = {
+      chapter_id: project.chapter_id,
+      chapter_title: project.chapter_title || project.title || project.chapter_id,
+      title: project.title || project.chapter_title || project.chapter_id,
+      updated_at: project.updated_at || new Date().toISOString(),
+      slide_count: parseInt(project.slide_count, 10) || 0,
+      slides: Array.isArray(project.slides) ? project.slides : []
+    };
+    var found = -1;
+    for (var i = 0; i < savedPptProjects.length; i++) {
+      if ((savedPptProjects[i] || {}).chapter_id === next.chapter_id) {
+        found = i;
+        break;
+      }
+    }
+    if (found >= 0) {
+      savedPptProjects.splice(found, 1);
+    }
+    savedPptProjects.unshift(next);
+    selectedSavedPptProjectIndex = 0;
+    renderSavedPptProjects();
+  }
+
+  function loadSavedPptProjects(options) {
+    options = options || {};
+    var selectedChapterId = options.selectedChapterId || "";
+    $("#savedPptChapterSelect").prop("disabled", true);
+    $("#btnSavedPptChapterToggle").prop("disabled", false).text("选择已保存章节");
+    $("#btnRefreshSavedPpt").prop("disabled", true).text("刷新中...");
+    return fetchSavedPptProjectsJson()
       .then(function (data) {
+        savedPptLoadError = "";
         savedPptProjects = Array.isArray(data.projects) ? data.projects : [];
+        if (selectedChapterId) {
+          for (var i = 0; i < savedPptProjects.length; i++) {
+            if ((savedPptProjects[i] || {}).chapter_id === selectedChapterId) {
+              selectedSavedPptProjectIndex = i;
+              break;
+            }
+          }
+        }
         renderSavedPptProjects();
         setStatus("已读取保存内容，共 " + savedPptProjects.length + " 个章节", "success");
       })
       .catch(function (err) {
+        savedPptLoadError = "读取保存章节失败：" + err.message;
         savedPptProjects = [];
         renderSavedPptProjects();
         setStatus("读取保存内容失败: " + err.message, "error");
       })
       .finally(function () {
-        $("#btnRefreshSavedPpt").prop("disabled", false).text("查找已保存内容");
+        $("#btnRefreshSavedPpt").prop("disabled", false).text("刷新");
+        renderSavedPptProjects();
+        if (options.openAfterLoad) {
+          setSavedPptChapterListOpen(true);
+        }
+        if (selectedChapterId && selectedSavedPptProjectIndex !== null && savedPptProjects[selectedSavedPptProjectIndex]) {
+          $("#savedPptChapterSelect").val(String(selectedSavedPptProjectIndex));
+          selectSavedPptProject(selectedSavedPptProjectIndex);
+        }
+      });
+  }
+
+  function deleteSavedPptProject(projectIndex) {
+    var project = savedPptProjects[projectIndex];
+    if (!project || !project.chapter_id) return Promise.reject(new Error("未选择保存章节"));
+    var paths = [
+      "/beamer-generator/api/saved-projects/" + encodeURIComponent(project.chapter_id),
+      "/api/saved-projects/" + encodeURIComponent(project.chapter_id)
+    ];
+    var index = 0;
+    function tryNext(lastErr) {
+      if (index >= paths.length) return Promise.reject(lastErr || new Error("未找到删除接口"));
+      var url = paths[index++];
+      return fetch(url, {
+        method: "DELETE",
+        cache: "no-store",
+        headers: { "Accept": "application/json" }
+      }).then(function (resp) {
+        if (!resp.ok) {
+          var err = new Error("HTTP " + resp.status);
+          if ((resp.status === 404 || resp.status === 405) && index < paths.length) return tryNext(err);
+          throw err;
+        }
+        return resp.json();
+      }).catch(function (err) {
+        if (index < paths.length) return tryNext(err);
+        throw err;
+      });
+    }
+    return tryNext();
+  }
+
+  function setSavedPptChapterListOpen(open) {
+    $("#savedPptChapterList").toggleClass("open", !!open);
+    $("#btnSavedPptChapterToggle").attr("aria-expanded", open ? "true" : "false");
+  }
+
+  function confirmAndDeleteSavedPpt(projectIndex) {
+    var project = savedPptProjects[projectIndex];
+    if (Number.isNaN(projectIndex) || !project) {
+      setStatus("请先选择要删除的 PPT 章节", "error");
+      return;
+    }
+    var label = project.chapter_title || project.title || project.chapter_id || "该章节";
+    if (!window.confirm("是否确认删除该章节 PPT？\n\n" + label)) return;
+    setStatus("正在删除已保存 PPT：" + label, "info");
+    deleteSavedPptProject(projectIndex)
+      .then(function () {
+        savedPptProjects.splice(projectIndex, 1);
+        selectedSavedPptProjectIndex = null;
+        $("#savedPptSlideGallery").empty().hide();
+        renderSavedPptProjects();
+        return loadSavedPptProjects({ openAfterLoad: true }).then(function () {
+          setSavedPptChapterListOpen(true);
+        });
+      })
+      .then(function () {
+        setStatus("已删除已保存 PPT：" + label, "success");
+      })
+      .catch(function (err) {
+        setStatus("删除已保存 PPT 失败: " + err.message, "error");
+        renderSavedPptProjects();
+      });
+  }
+
+  function selectSavedPptProject(projectIndex) {
+    if (Number.isNaN(projectIndex) || !savedPptProjects[projectIndex]) {
+      selectedSavedPptProjectIndex = null;
+      $("#savedPptSlideGallery").empty().hide();
+      renderSavedPptProjects();
+      return;
+    }
+    selectedSavedPptProjectIndex = projectIndex;
+    renderSavedPptProjects();
+    renderSavedPptSlides(projectIndex);
+    showSavedPptGalleryMessage("正在加载页面...", "已保存章节页面");
+    savedPptProjectData(projectIndex)
+      .then(function (projectData) {
+        renderSavedPptSlides(projectIndex);
+        renderSavedPptGallery(projectIndex, projectData);
+      })
+      .catch(function (err) {
+        showSavedPptGalleryMessage("加载页面失败：" + err.message, "已保存章节页面");
       });
   }
 
@@ -1020,13 +2530,34 @@
     var project = savedPptProjects[projectIndex];
     if (!project || !project.chapter_id) return Promise.reject(new Error("未选择保存章节"));
     if (project.fullData && Array.isArray(project.fullData.slides)) return Promise.resolve(project.fullData);
-    return fetch("/beamer-generator/api/saved-projects/" + encodeURIComponent(project.chapter_id), {
-      headers: { "Accept": "application/json" },
-    })
-      .then(function (resp) {
-        if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var paths = [
+      "/beamer-generator/api/saved-projects/" + encodeURIComponent(project.chapter_id),
+      "/api/saved-projects/" + encodeURIComponent(project.chapter_id)
+    ];
+    var index = 0;
+    function tryNext(lastErr) {
+      if (index >= paths.length) return Promise.reject(lastErr || new Error("未找到保存章节"));
+      var separator = paths[index].indexOf("?") >= 0 ? "&" : "?";
+      var url = paths[index++] + separator + "_=" + Date.now();
+      return fetch(url, {
+        cache: "no-store",
+        headers: {
+          "Accept": "application/json",
+          "Cache-Control": "no-cache"
+        },
+      }).then(function (resp) {
+        if (!resp.ok) {
+          var err = new Error("HTTP " + resp.status);
+          if ((resp.status === 404 || resp.status === 405) && index < paths.length) return tryNext(err);
+          throw err;
+        }
         return resp.json();
-      })
+      }).catch(function (err) {
+        if (index < paths.length) return tryNext(err);
+        throw err;
+      });
+    }
+    return tryNext()
       .then(function (data) {
         project.fullData = data || {};
         project.slides = Array.isArray(project.fullData.slides)
@@ -1042,83 +2573,207 @@
       });
   }
 
-  function renderSavedSlideMini(slide, pageIndex, className) {
+  function miniPct(value, total, fallback) {
+    var n = Number(value);
+    if (Number.isNaN(n)) n = Number(fallback) || 0;
+    return (Math.max(0, Math.min(total, n)) / total * 100).toFixed(2) + "%";
+  }
+
+  function miniBoxStyle(box, fallback) {
+    box = box || {};
+    fallback = fallback || {};
+    var width = clampNumber(Number(box.width), 24, SLIDE_DESIGN_WIDTH, Number(fallback.width) || 220);
+    var height = clampNumber(Number(box.height), 18, SLIDE_DESIGN_HEIGHT, Number(fallback.height) || 120);
+    var x = clampNumber(Number(box.x), 0, Math.max(0, SLIDE_DESIGN_WIDTH - width), Number(fallback.x) || 0);
+    var y = clampNumber(Number(box.y), 0, Math.max(0, SLIDE_DESIGN_HEIGHT - height), Number(fallback.y) || 0);
+    return [
+      "left:" + miniPct(x, SLIDE_DESIGN_WIDTH, 0),
+      "top:" + miniPct(y, SLIDE_DESIGN_HEIGHT, 0),
+      "width:" + miniPct(width, SLIDE_DESIGN_WIDTH, 100),
+      "height:" + miniPct(height, SLIDE_DESIGN_HEIGHT, 60)
+    ].join(";");
+  }
+
+  function miniMathText(text, className, richHtml, attrs) {
+    return '<div class="kg-mini-math-text ' + (className || "") + '"' +
+      ' data-mini-text="' + escAttr(repairPptLatexArtifacts(text || "")) + '"' +
+      ' data-rich-html="' + escAttr(richHtml || "") + '"' +
+      (attrs || "") + '></div>';
+  }
+
+  function renderSlideMiniature(slide, pageIndex, className) {
     slide = slide || {};
-    var items = Array.isArray(slide.items) ? slide.items.slice(0, 4) : [];
-    var equations = Array.isArray(slide.equations) ? slide.equations.slice(0, 2) : [];
-    var callouts = Array.isArray(slide.callouts) ? slide.callouts.slice(0, 3) : [];
-    var images = [];
-    (slide.images || []).forEach(function (img) {
-      var url = (img && (img.url || img.path || img.src)) || "";
-      if (url) images.push(url);
+    var renderedBg = slide.renderedBackground || "";
+    var items = Array.isArray(slide.items) ? slide.items : [];
+    var itemRichHtml = Array.isArray(slide.itemRichHtml) ? slide.itemRichHtml : [];
+    var equations = Array.isArray(slide.equations) ? slide.equations : [];
+    var missingEquations = Array.isArray(slide.missing_equations) ? slide.missing_equations : [];
+    var placeholders = normalizePlaceholders(slide.placeholders || []);
+    var images = Array.isArray(slide.images) ? slide.images : [];
+    var textboxes = Array.isArray(slide.textboxes) ? slide.textboxes : [];
+    var callouts = Array.isArray(slide.callouts) ? slide.callouts : [];
+    var formulaBoxes = Array.isArray(slide.formulaBoxes) ? slide.formulaBoxes : [];
+    var hasRightPlaceholder = placeholders.some(function (ph) {
+      return (parseFloat(ph && ph.x) || 0) >= 430;
     });
-    (slide.placeholders || []).forEach(function (ph) {
-      var url = (ph && (ph.asset || ph.url || ph.path)) || "";
-      if (url) images.push(url);
-    });
-    var html = '<div class="saved-slide-mini ' + (slide.reviewBackground ? "review-background " : "") + (className || "") + '">' +
-      '<div class="saved-slide-mini-page">第 ' + (pageIndex + 1) + ' 页</div>' +
-      '<div class="saved-slide-mini-title">' + escHtml(slide.title || "未命名页面") + '</div>' +
-      '<div class="saved-slide-mini-body">';
-    if (images.length) {
-      html += '<div class="saved-slide-mini-images">';
-      images.slice(0, 2).forEach(function (url) {
-        html += '<img src="' + escAttr(url) + '" alt="" />';
-      });
-      html += '</div>';
-    }
+    var hasVisibleContent = (slide.title || slide.subtitle || items.length || equations.length || formulaBoxes.length || missingEquations.length ||
+      placeholders.length || images.length || textboxes.length || callouts.length ||
+      (slide.table && slide.table.headers));
+
+    var html = '<div class="kg-slide-miniature ' + (className || "") + (slide.reviewBackground ? " review-background" : "") + (renderedBg ? " has-rendered-background" : "") + '">' +
+      '<div class="kg-mini-stage">' +
+        (renderedBg ? '<img class="kg-mini-rendered-background" src="' + escAttr(renderedBg) + '" alt="" />' : '') +
+        '<div class="kg-mini-topline"></div>' +
+        '<div class="kg-mini-page">第 ' + (pageIndex + 1) + ' 页</div>' +
+        '<div class="kg-mini-title-zone">' +
+          miniMathText(slide.title || "未命名页面", "kg-mini-title", slide.titleRichHtml || "") +
+        '</div>' +
+        '<div class="kg-mini-subtitle-zone">' +
+          miniMathText(slide.subtitle || "", "kg-mini-subtitle", slide.subtitleRichHtml || "") +
+        '</div>' +
+        (slide.type === "title" && slide.titleCredit
+          ? '<div class="kg-mini-title-credit">' + miniMathText(slide.titleCredit || "", "kg-mini-credit-text", "") + '</div>'
+          : '') +
+        '<div class="kg-mini-body' + (hasRightPlaceholder ? " has-right-figure" : "") + (slide.hideParsedContent ? " is-hidden" : "") + '">';
+
     if (items.length) {
-      html += '<ul>';
-      items.forEach(function (item) {
-        html += '<li>' + escHtml(String(item || "").replace(/\s+/g, " ").slice(0, 80)) + '</li>';
+      html += '<ul class="kg-mini-items">';
+      items.forEach(function (item, idx) {
+        html += '<li><span class="kg-mini-bullet">•</span>' +
+          miniMathText(item || "", "kg-mini-item-text", itemRichHtml[idx] || "") +
+          '</li>';
       });
       html += '</ul>';
     }
+
     if (equations.length) {
-      html += '<div class="saved-slide-mini-equations">';
+      html += '<div class="kg-mini-equations">';
       equations.forEach(function (eq) {
-        html += '<div class="saved-slide-mini-equation" data-math-source="' + escAttr(String(eq || "")) + '">' +
-          escHtml(String(eq || "").slice(0, 80)) + '</div>';
+        html += miniMathText(eq || "", "kg-mini-equation", "", ' data-display-math="true"');
       });
       html += '</div>';
     }
-    callouts.forEach(function (callout) {
-      callout = callout || {};
-      var x = Math.max(0, Math.min(100, (Number(callout.x) || 130) / SLIDE_DESIGN_WIDTH * 100));
-      var y = Math.max(0, Math.min(100, (Number(callout.y) || 178) / SLIDE_DESIGN_HEIGHT * 100));
-      var w = Math.max(14, Math.min(70, (Number(callout.width) || 250) / SLIDE_DESIGN_WIDTH * 100));
-      var h = Math.max(8, Math.min(35, (Number(callout.height) || 92) / SLIDE_DESIGN_HEIGHT * 100));
-      html += '<div class="saved-slide-mini-callout" style="left:' + x.toFixed(2) + '%;top:' + y.toFixed(2) + '%;width:' + w.toFixed(2) + '%;height:' + h.toFixed(2) + '%;">' +
-        escHtml(String(callout.text || "").slice(0, 40)) + '</div>';
-    });
-    if (!images.length && !items.length && !equations.length && !callouts.length) {
-      html += '<div class="saved-slide-mini-empty">空白页</div>';
+
+    if (formulaBoxes.length) {
+      html += '<div class="kg-mini-formula-boxes">';
+      formulaBoxes.forEach(function (box) {
+        html += '<div class="kg-mini-free-formula" style="' + miniBoxStyle(box, { width: 360, height: 80 }) + '">' +
+          miniMathText((box && box.formula) || "", "kg-mini-equation", "", ' data-display-math="true"') +
+          '</div>';
+      });
+      html += '</div>';
     }
-    html += '</div></div>';
+
+    if (missingEquations.length) {
+      html += '<div class="kg-mini-missing-equations">';
+      missingEquations.forEach(function (eq) {
+        var label = (eq && (eq.label || eq.key)) || "Unknown equation";
+        html += '<div class="kg-mini-missing-equation">缺失公式：' + escHtml(label) + '</div>';
+      });
+      html += '</div>';
+    }
+
+    if (slide.table && slide.table.headers) {
+      var table = normalizeTable(slide.table);
+      html += '<table class="kg-mini-table"><thead><tr>';
+      (table.headers || []).forEach(function (header, idx) {
+        html += '<th>' + miniMathText(header || "", "kg-mini-table-text", (table.headerRichHtml || [])[idx] || "") + '</th>';
+      });
+      html += '</tr></thead><tbody>';
+      (table.rows || []).forEach(function (row, rowIdx) {
+        html += '<tr>';
+        row.forEach(function (cell, cellIdx) {
+          html += '<td>' + miniMathText(cell || "", "kg-mini-table-text", ((table.rowRichHtml || [])[rowIdx] || [])[cellIdx] || "") + '</td>';
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    if (!hasVisibleContent) {
+      html += '<div class="kg-mini-empty">空白页</div>';
+    }
+    html += '</div>';
+
+    html += '<div class="kg-mini-free-layer">';
+    placeholders.forEach(function (ph, idx) {
+      var phUrl = ph.asset || ph.url || ph.path || "";
+      var phStyle = miniBoxStyle(ph, { x: 500 + idx * 12, y: 120 + idx * 12, width: 235, height: 165 });
+      if (phUrl) {
+        html += '<img class="kg-mini-placeholder-image" style="' + phStyle + '" src="' + escAttr(phUrl) + '" alt="" />';
+      } else {
+        html += '<div class="kg-mini-placeholder" style="' + phStyle + '">' +
+          escHtml(String(ph.label || ph.figure || "图片占位").slice(0, 40)) + '</div>';
+      }
+    });
+
+    images.forEach(function (img, idx) {
+      img = img || {};
+      var imgUrl = img.url || img.path || img.src || "";
+      if (!imgUrl) return;
+      html += '<img class="kg-mini-image" style="' + miniBoxStyle(img, { x: 40 + idx * 16, y: 170 + idx * 12, width: 220, height: 150 }) +
+        '" src="' + escAttr(imgUrl) + '" alt="" />';
+    });
+
+    textboxes.forEach(function (tb, idx) {
+      tb = tb || {};
+      var tbStyle = miniBoxStyle(tb, { x: 56 + idx * 18, y: 190 + idx * 22, width: 260, height: 96 });
+      var tbColor = toCssColor(tb.color, "#333333");
+      var tbBg = toCssColor(tb.bg, "#ffffff");
+      var tbFontSize = parseInt(tb.fontSize, 10) || 14;
+      html += '<div class="kg-mini-textbox" style="' + tbStyle + ';background:' + escAttr(tbBg) + ';color:' + escAttr(tbColor) +
+        ';--mini-text-size-small:' + (tbFontSize * 0.42).toFixed(1) + 'px;--mini-text-size-large:' + tbFontSize + 'px;text-align:' + escAttr(tb.align || "left") + ';">' +
+        miniMathText(tb.text || "", "kg-mini-textbox-text", tb.richHtml || "") +
+        '</div>';
+    });
+
+    callouts.forEach(function (callout, idx) {
+      callout = callout || {};
+      var calloutFontSize = parseInt(callout.fontSize, 10) || 12;
+      html += '<div class="kg-mini-callout" style="' + miniBoxStyle(callout, { x: 130 + idx * 18, y: 178 + idx * 18, width: 250, height: 92 }) +
+        ';--mini-text-size-small:' + (calloutFontSize * 0.42).toFixed(1) + 'px;--mini-text-size-large:' + calloutFontSize + 'px;text-align:' + escAttr(callout.align || "center") + ';">' +
+        miniMathText(callout.text || "", "kg-mini-callout-text") +
+        '</div>';
+    });
+    html += '</div></div></div>';
     return html;
   }
 
-  function renderSavedSlideMiniMath($root) {
+  function renderSlideMiniatureMath($root) {
     if (!$root || !$root.length) return;
-    $root.find(".saved-slide-mini-equation").each(function () {
-      var $eq = $(this);
-      var source = $eq.data("math-source") || $eq.text() || "";
-      renderMathText($eq, source, {
-        displayMode: true,
+    $root.find(".kg-mini-math-text").each(function () {
+      var $target = $(this);
+      var text = $target.attr("data-mini-text") || "";
+      var richHtml = $target.attr("data-rich-html") || "";
+      if (richHtml) {
+        restoreRichTextHtml($target, richHtml, text);
+        return;
+      }
+      renderMathText($target, text, {
+        displayMode: String($target.attr("data-display-math") || "") === "true",
         boxedMath: false,
-        emptyText: source,
+        emptyText: "",
       });
     });
+  }
+
+  function renderSavedSlideMini(slide, pageIndex, className) {
+    return renderSlideMiniature(slide, pageIndex, "saved-slide-mini " + (className || ""));
+  }
+
+  function renderSavedSlideMiniMath($root) {
+    renderSlideMiniatureMath($root);
   }
 
   function renderSavedPptGalleryShell($gallery, title) {
     $gallery.empty().append(
+      '<button type="button" class="saved-ppt-gallery-close saved-ppt-gallery-floating-close" data-action="close-saved-ppt-gallery" title="关闭已保存 PPT 缩略图" aria-label="关闭已保存 PPT 缩略图">×</button>' +
       '<div class="saved-ppt-gallery-header">' +
         '<div class="saved-ppt-gallery-title-wrap">' +
           '<span class="saved-ppt-gallery-title">' + escHtml(title || "已保存章节页面") + '</span>' +
           '<span class="saved-ppt-gallery-hint">按住缩略图拖到当前 PPT 左侧列表，即可插入到本章节</span>' +
         '</div>' +
-        '<button type="button" class="saved-ppt-gallery-close" data-action="close-saved-ppt-gallery" title="关闭">×</button>' +
+        '<button type="button" class="saved-ppt-gallery-close saved-ppt-gallery-inline-close" data-action="close-saved-ppt-gallery" title="关闭预览框" aria-label="关闭已保存章节预览框">×</button>' +
       '</div>' +
       '<div class="saved-ppt-gallery-content"></div>'
     );
@@ -1144,15 +2799,27 @@
       positionSavedPptGallery();
       return;
     }
+    var $actions = $(
+      '<div class="saved-ppt-gallery-actions">' +
+        '<button type="button" class="btn-primary saved-ppt-use-all" data-action="use-saved-ppt-all">调用整章</button>' +
+      '</div>'
+    );
+    $actions.find("[data-action='use-saved-ppt-all']").on("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      replaceCurrentProjectWithSavedProject(projectData);
+    });
+    $content.append($actions);
     slides.forEach(function (slide, idx) {
       var $card = $(
         '<button type="button" class="saved-ppt-slide-card" draggable="true" data-page-index="' + idx + '">' +
           renderSavedSlideMini(slide, idx, "") +
+          '<span class="saved-ppt-slide-use">调用此页</span>' +
         '</button>'
       );
       renderSavedSlideMiniMath($card);
       $card.on("click", function () {
-        openSavedSlidePreview(slide, idx);
+        insertSavedSlideIntoCurrentProject(slide);
       });
       $card.on("dragstart", function (e) {
         savedSlideDragPayload = { projectIndex: projectIndex, pageIndex: idx };
@@ -1194,7 +2861,12 @@
   function positionSavedPptGallery() {
     var $gallery = $("#savedPptSlideGallery");
     if (!$gallery.length || !$gallery.is(":visible") || !$gallery.children().length) return;
-    var anchor = $("#btnSaveProject")[0] || $("#savedPptChapterSelect")[0];
+    if ($gallery.closest(".saved-ppt-section").length) {
+      $gallery.css({ left: "", top: "", width: "", maxHeight: "" });
+      savedPptGalleryManualPosition = null;
+      return;
+    }
+    var anchor = $("#savedPptChapterSelect")[0] || $("#btnSaveProject")[0];
     if (!anchor) return;
     var rect = anchor.getBoundingClientRect();
     var editor = $("#viewPpt:visible .ppt-editor")[0] || $("#viewPpt:visible")[0];
@@ -1237,21 +2909,10 @@
   }
 
   function renderSavedPptSlides(projectIndex) {
-    var $slide = $("#savedPptSlideSelect");
-    $slide.empty().append('<option value="">选择页面</option>');
     var project = savedPptProjects[projectIndex];
     if (!project || !Array.isArray(project.slides) || !project.slides.length) {
-      $slide.prop("disabled", true);
-      $("#btnLoadSavedSlide").prop("disabled", true);
       $("#savedPptSlideGallery").empty().hide();
-      return;
     }
-    project.slides.forEach(function (slide) {
-      var label = slide.title || ("页面 " + (slide.page_index + 1));
-      $slide.append('<option value="' + slide.page_index + '">' + escHtml((slide.page_index + 1) + ". " + label) + '</option>');
-    });
-    $slide.prop("disabled", false);
-    $("#btnLoadSavedSlide").prop("disabled", false);
   }
 
   function loadSavedSlideFromProject(projectIndex, pageIndex) {
@@ -1262,6 +2923,45 @@
     });
   }
 
+  function replaceCurrentProjectWithSavedProject(projectData) {
+    if (!projectData || !Array.isArray(projectData.slides) || !projectData.slides.length) {
+      setStatus("已保存章节没有可调用页面", "error");
+      return;
+    }
+    saveCurrentSlide();
+    slidesData = deepClone(projectData);
+    if (!Array.isArray(slidesData.slides)) slidesData.slides = [];
+    for (var i = 0; i < slidesData.slides.length; i++) {
+      slidesData.slides[i].id = i;
+      if (!slidesData.slides[i].images) slidesData.slides[i].images = [];
+      if (!slidesData.slides[i].textboxes) slidesData.slides[i].textboxes = [];
+      if (!slidesData.slides[i].formulaBoxes) slidesData.slides[i].formulaBoxes = [];
+      if (!slidesData.slides[i].callouts) slidesData.slides[i].callouts = [];
+      slidesData.slides[i].placeholders = normalizePlaceholders(slidesData.slides[i].placeholders);
+      if (slidesData.slides[i].table) slidesData.slides[i].table = normalizeTable(slidesData.slides[i].table);
+    }
+    fullLatex = slidesData.latex || fullLatex || "";
+    sourceLatex = fullLatex;
+    if (fullLatex) updateLatexEditor(fullLatex);
+    currentSlideIdx = slidesData.slides.length ? 0 : -1;
+    resetHistory();
+    $("#pptChapterTitleInput").val(slidesData.chapter_title || slidesData.title || "");
+    $("#tabPpt").prop("disabled", !slidesData.slides.length);
+    updateDownloadPptxButton();
+    if (hasRenderedLatexPages(slidesData)) {
+      inputCollapsed = true;
+      localStorage.setItem("bg_input_panel_collapsed", "1");
+      rebuildRenderedPageLocationMap(slidesData, fullLatex);
+    } else {
+      rebuildLatexSyncMapFromSource(slidesData, fullLatex);
+    }
+    setActiveTab("ppt");
+    applyInputCollapsedState();
+    renderSlideList();
+    if (currentSlideIdx >= 0) selectSlide(currentSlideIdx);
+    setStatus("已调用已保存章节：" + (slidesData.chapter_title || slidesData.title || "未命名章节"), "success");
+  }
+
   function insertSavedSlideIntoCurrentProject(slideData, insertIndex) {
     if (!slidesData || !slideData) return;
     if (!Array.isArray(slidesData.slides)) slidesData.slides = [];
@@ -1269,6 +2969,7 @@
     var slide = deepClone(slideData);
     if (!slide.images) slide.images = [];
     if (!slide.textboxes) slide.textboxes = [];
+    if (!slide.formulaBoxes) slide.formulaBoxes = [];
     if (!slide.callouts) slide.callouts = [];
     slide.placeholders = normalizePlaceholders(slide.placeholders);
     if (slide.table) slide.table = normalizeTable(slide.table);
@@ -1287,24 +2988,6 @@
     scheduleLatexSync();
     commitHistorySnapshot(false);
     setStatus("已插入保存页面", "success");
-  }
-
-  function replaceCurrentSlideWithSaved(slideData) {
-    if (!slidesData || currentSlideIdx < 0 || !slideData) return;
-    saveCurrentSlide();
-    var slide = deepClone(slideData);
-    if (!slide.images) slide.images = [];
-    if (!slide.textboxes) slide.textboxes = [];
-    if (!slide.callouts) slide.callouts = [];
-    slide.placeholders = normalizePlaceholders(slide.placeholders);
-    if (slide.table) slide.table = normalizeTable(slide.table);
-    slidesData.slides[currentSlideIdx] = slide;
-    renderSlideEditor(slide);
-    renderSlideList();
-    selectSlide(currentSlideIdx);
-    syncLatexFromSlides();
-    scheduleLatexSync();
-    setStatus("已替换当前页面", "success");
   }
 
   function renderSavedLectureOptions() {
@@ -1350,7 +3033,11 @@
 
   function setStatus(msg, type) {
     var $s = $("#status");
-    if (type === "info" && isGenerating) {
+    if (isGenerating && !(arguments[2] && arguments[2].generation)) {
+      queuedStatusMessage = { msg: msg, type: type };
+      return;
+    }
+    if (isGenerating && (arguments[2] && arguments[2].generation)) {
       var progress = Math.max(0, Math.min(100, Math.round(latexGenerateProgress || 0)));
       $s.attr("class", "status info").html(
         msg +
@@ -1366,25 +3053,136 @@
 
   function updateLatexGenerateProgress(value, msg) {
     latexGenerateProgress = Math.max(0, Math.min(100, Number(value) || 0));
-    if (msg) setStatus(msg, "info");
+    if (msg) latexGenerateStatusMessage = msg;
+    setStatus(msg, "info", { generation: true });
+  }
+
+  function setOutlineProgress(value, message, state) {
+    outlineGenerateProgress = Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+    $("#outlineProgressPanel")
+      .removeClass("success error")
+      .addClass(state === "success" ? "success" : (state === "error" ? "error" : ""))
+      .show();
+    $("#outlineProgressMessage").text(message || "正在生成纪要...");
+    $("#outlineProgressPercent").text(outlineGenerateProgress + "%");
+    $("#outlineProgressFill").css("width", outlineGenerateProgress + "%");
+  }
+
+  function startOutlineProgress(message) {
+    if (outlineProgressTimer) clearInterval(outlineProgressTimer);
+    setOutlineProgress(4, message || "正在准备纪要生成请求...");
+    outlineProgressTimer = setInterval(function () {
+      var next = outlineGenerateProgress;
+      if (next < 25) next += 3;
+      else if (next < 65) next += 2;
+      else if (next < 90) next += 1;
+      else next = 90;
+      setOutlineProgress(next, "GPT 正在生成大节与每页 frame 纪要...");
+      if (next >= 90 && outlineProgressTimer) {
+        clearInterval(outlineProgressTimer);
+        outlineProgressTimer = null;
+      }
+    }, 900);
+  }
+
+  function finishOutlineProgress(message, state) {
+    if (outlineProgressTimer) {
+      clearInterval(outlineProgressTimer);
+      outlineProgressTimer = null;
+    }
+    setOutlineProgress(state === "error" ? Math.max(outlineGenerateProgress, 1) : 100, message, state);
   }
 
   function updateDownloadPptxButton() {
     $("#btnDownloadPptx").prop("disabled", !slidesData || !slidesData.slides || !slidesData.slides.length);
   }
 
+  function updateLatexImportMeta(message) {
+    if (!isLatexImportMode) return;
+    $("#latexImportMeta").text(message || "导入 LaTeX、PDF 或 Overleaf ZIP 后，将按编译 PDF 页面渲染为 PPT；若源码引用图片或样式文件，请使用项目目录导入。");
+  }
+
+  function hasRenderedLatexPages(data) {
+    return !!(data && Array.isArray(data.slides) && data.slides.some(function (slide) {
+      return slide && slide.latexRenderedPage;
+    }));
+  }
+
+  function ajaxErrorMessage(xhr, fallback) {
+    fallback = fallback || "请求失败";
+    if (!xhr) return fallback;
+    if (xhr.responseJSON) {
+      if (xhr.responseJSON.error) return String(xhr.responseJSON.error);
+      if (xhr.responseJSON.detail) {
+        if (Array.isArray(xhr.responseJSON.detail)) {
+          return xhr.responseJSON.detail.map(function (item) {
+            return item && item.msg ? item.msg : JSON.stringify(item);
+          }).join("; ");
+        }
+        return String(xhr.responseJSON.detail);
+      }
+    }
+    var text = String(xhr.responseText || "").trim();
+    if (text) {
+      try {
+        var parsed = JSON.parse(text);
+        if (parsed.error) return String(parsed.error);
+        if (parsed.detail) return typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
+      } catch (err) {
+        var compact = text.replace(/\s+/g, " ");
+        if (compact.length > 180) compact = compact.slice(0, 180) + "...";
+        if (compact) return compact;
+      }
+    }
+    if (xhr.status === 404) return "渲染接口不存在，请重启 render_app.py 对应的网站服务后再试";
+    if (xhr.status === 413) return "上传/提交内容过大，请改用对应 PDF 文件导入";
+    if (xhr.status === 0) return "无法连接后端服务，请确认网站后端已启动";
+    if (xhr.status) return "HTTP " + xhr.status;
+    return fallback;
+  }
+
+  function titleFromLatexFileName(fileName) {
+    return String(fileName || "")
+      .replace(/\.(tex|latex|txt|pdf)$/i, "")
+      .replace(/[_-]+/g, " ")
+      .trim();
+  }
+
+  function applyLatexImportMode() {
+    if (!isLatexImportMode) return;
+    $(".panel-input").find(".form-row, #customRequirements, #customRequirements + small, .form-group").hide();
+    $("#btnGenerate, #btnGenerateOutline, #outlinePanel, #viewOutline, .api-config-panel, .generate-actions").hide();
+    $("#latexImportPanel").addClass("latex-import-panel-inline").insertAfter(".tab-bar").show();
+    $("#btnConvertPpt").hide().prop("disabled", true);
+    $("#btnDownloadPptx").hide().prop("disabled", true);
+    $("#tabPpt").prop("disabled", true);
+    $("#tabOutline").prop("disabled", true);
+    $(".tab-btn[data-tab='latex']").text("LaTeX 代码");
+    $("#slideCanvas").html('<div class="slide-placeholder">导入 PPTX 后，左侧显示转换后的 LaTeX 代码。</div>');
+    inputCollapsed = true;
+    localStorage.setItem("bg_input_panel_collapsed", "1");
+    updateLatexImportMeta();
+  }
+
   function setGenerating(state) {
     isGenerating = state;
     if (state) latexGenerateProgress = 0;
     $("#btnGenerate").prop("disabled", state)
-      .text(state ? "生成中..." : "生成演示文稿");
+      .text(state ? "生成中..." : "生成 LaTeX");
+    $("#btnGenerateOutline").prop("disabled", state)
+      .text(state ? "生成中..." : "生成纪要");
     if (!state) {
       var has = !!fullLatex;
-      $("#btnCopy, #btnDownloadTex, #btnConvertPpt").prop("disabled", !has);
+      $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt").prop("disabled", !has);
       updateDownloadPptxButton();
       updateHistoryButtons();
+      if (queuedStatusMessage) {
+        var queued = queuedStatusMessage;
+        queuedStatusMessage = null;
+        setStatus(queued.msg, queued.type);
+      }
     } else {
-      $("#btnCopy, #btnDownloadTex, #btnConvertPpt, #btnDownloadPptx").prop("disabled", true);
+      $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt, #btnDownloadPptx").prop("disabled", true);
       $("#btnUndoPpt, #btnRedoPpt").prop("disabled", true);
     }
   }
@@ -1403,49 +3201,52 @@
     loadSavedLectureChapters();
   });
 
-  $("#btnRefreshSavedPpt").on("click", function () {
-    loadSavedPptProjects();
-  });
-
   $("#savedPptChapterSelect").on("change", function () {
     var index = parseInt($(this).val(), 10);
     if (Number.isNaN(index) || !savedPptProjects[index]) {
-      $("#savedPptSlideSelect").empty().append('<option value="">选择页面</option>').prop("disabled", true);
-      $("#btnLoadSavedSlide").prop("disabled", true);
+      selectedSavedPptProjectIndex = null;
       $("#savedPptSlideGallery").empty().hide();
+      renderSavedPptProjects();
       return;
     }
-    renderSavedPptSlides(index);
-    showSavedPptGalleryMessage("正在加载页面...", "已保存章节页面");
-    savedPptProjectData(index)
-      .then(function (projectData) {
-        renderSavedPptSlides(index);
-        renderSavedPptGallery(index, projectData);
-      })
-      .catch(function (err) {
-        showSavedPptGalleryMessage("加载页面失败：" + err.message, "已保存章节页面");
-      });
+    selectSavedPptProject(index);
   });
 
-  $("#btnLoadSavedSlide").on("click", function () {
-    var chapterIndex = parseInt($("#savedPptChapterSelect").val(), 10);
-    var slideIndex = parseInt($("#savedPptSlideSelect").val(), 10);
-    if (Number.isNaN(chapterIndex) || Number.isNaN(slideIndex)) return;
-    var project = savedPptProjects[chapterIndex];
-    if (!project || !project.chapter_id) return;
-    var $button = $(this);
-    $button.prop("disabled", true).text("读取中...");
-    loadSavedSlideFromProject(chapterIndex, slideIndex)
-      .then(function (slide) {
-        if (!slidesData) throw new Error("当前没有可编辑的 PPT");
-        replaceCurrentSlideWithSaved(slide);
-      })
-      .catch(function (err) {
-        setStatus("调用保存页面失败: " + err.message, "error");
-      })
-      .finally(function () {
-        $button.prop("disabled", false).text("调用此页");
-      });
+  $("#btnSavedPptChapterToggle").on("click", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    setSavedPptChapterListOpen(!$("#savedPptChapterList").hasClass("open"));
+  });
+
+  $("#savedPptChapterList").on("click", ".saved-ppt-chapter-open", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var index = parseInt($(this).closest(".saved-ppt-chapter-row").attr("data-project-index"), 10);
+    if (Number.isNaN(index) || !savedPptProjects[index]) return;
+    $("#savedPptChapterSelect").val(String(index));
+    setSavedPptChapterListOpen(false);
+    selectSavedPptProject(index);
+  });
+
+  $("#savedPptChapterList").on("click", ".saved-ppt-chapter-remove", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var index = parseInt($(this).attr("data-project-index"), 10);
+    if (Number.isNaN(index)) {
+      index = parseInt($(this).closest(".saved-ppt-chapter-row").attr("data-project-index"), 10);
+    }
+    confirmAndDeleteSavedPpt(index);
+  });
+
+  $(document).on("click.savedPptChapterList", function (e) {
+    if ($(e.target).closest(".saved-ppt-section").length) return;
+    setSavedPptChapterListOpen(false);
+  });
+
+  $("#btnRefreshSavedPpt").on("click", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    loadSavedPptProjects({ openAfterLoad: true });
   });
 
   $("#savedSlidePreviewModal").on("click", "[data-action='close-saved-slide-preview']", function () {
@@ -1459,6 +3260,7 @@
   });
 
   $("#savedPptSlideGallery").on("mousedown", function (e) {
+    if ($(this).closest(".saved-ppt-section").length) return;
     if (e.button !== 0) return;
     var $target = $(e.target);
     if ($target.closest(".saved-ppt-slide-card, .saved-ppt-gallery-close, button, select, input, textarea, a").length) return;
@@ -1515,14 +3317,105 @@
     $("#markdownImporter").val("").trigger("click");
   });
 
+  $("#btnImportSupplementMarkdown").on("click", function () {
+    $("#supplementMarkdownImporter").val("").trigger("click");
+  });
+
   $("#btnImportGraphPackage").on("click", function () {
     $("#graphPackageImporter").val("").trigger("click");
   });
+
+  function setLatexImportLoading(state) {
+    $("#btnImportPptInLatexPanel").prop("disabled", state).text(state ? "导入中..." : "导入 PPTX 转 LaTeX");
+  }
+
+  $("#btnImportEquationSource").on("click", function () {
+    renderEquationSourcePanel();
+    setStatus("已列出当前缺失公式目录，请按编号选择并导入对应公式章节。", missingEquationCatalog.length ? "success" : "error");
+  });
+
+  $("#btnChooseEquationSourceFile").on("click", function () {
+    $("#equationSourceImporter").val("").trigger("click");
+  });
+
+  $("#btnImportPptLatex").on("click", function () {
+    $("#pptLatexImporter").val("").trigger("click");
+  });
+
+  $("#btnImportPptInLatexPanel").on("click", function () {
+    $("#pptLatexImporter").val("").trigger("click");
+  });
+
+  $("#btnCloseEquationSourcePanel").on("click", function () {
+    $("#equationSourcePanel").hide();
+  });
+
+  $("#btnCloseSupplementChapterPanel").on("click", function () {
+    $("#supplementChapterPanel").hide();
+  });
+
+  $("#btnReferenceSelectedEquations").on("click", function () {
+    var selected = [];
+    $("#equationSourceList .equation-source-check:checked").each(function () {
+      var idx = parseInt($(this).data("equation-index"), 10);
+      if (!Number.isNaN(idx) && importedEquationCatalog[idx]) selected.push(importedEquationCatalog[idx]);
+    });
+    insertFormulaBoxesFromCatalog(selected);
+  });
+
+  $("#supplementChapterList").on("click", ".supplement-chapter-toggle", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var idx = parseInt($(this).data("supplement-index"), 10);
+    if (Number.isNaN(idx) || !supplementChapterCatalog[idx]) return;
+    supplementChapterCatalog[idx].expanded = !supplementChapterCatalog[idx].expanded;
+    renderSupplementChapterPanel();
+  });
+
+  $("#btnAddSelectedSupplementChapters").on("click", function () {
+    var selected = [];
+    $("#supplementChapterList .supplement-chapter-check:checked").each(function () {
+      var idx = parseInt($(this).data("supplement-index"), 10);
+      if (!Number.isNaN(idx) && supplementChapterCatalog[idx]) selected.push(supplementChapterCatalog[idx]);
+    });
+    addSupplementChaptersToMarkdown(selected);
+  });
+
+  function resolveMissingEquationsFromSource(sourceText, fileName) {
+    var split = splitEquationCatalogForCurrentChapter(extractEquationCatalog(sourceText || "", fileName || ""));
+    importedEquationCatalog = split.matched;
+    extraEquationCatalog = split.extra;
+    renderEquationSourcePanel();
+    $("#equationSourceImporter").val("");
+    if (importedEquationCatalog.length || extraEquationCatalog.length) {
+      setStatus("公式章节识别完成：当前章节可引用 " + importedEquationCatalog.length + " 个，非本章缺失 " + extraEquationCatalog.length + " 个。未修改 LaTeX 代码。", "success");
+    } else {
+      setStatus("未在公式章节中识别到公式，LaTeX 代码未改变", "error");
+    }
+  }
 
   $("#btnTogglePackageImages").on("click", function () {
     if (!importedPackageImages.length) return;
     packageImagePanelOpen = !packageImagePanelOpen;
     renderPackageImages();
+  });
+
+  $("#btnToggleImportPreview").on("click", function () {
+    if (!importedPreviewImages.length) return;
+    importPreviewPanelOpen = !importPreviewPanelOpen;
+    renderImportPreviewPanel();
+  });
+
+  $("#importPreviewPanel").on("click", "[data-action='close-import-preview']", function (e) {
+    e.preventDefault();
+    importPreviewPanelOpen = false;
+    renderImportPreviewPanel();
+  });
+
+  $("#importPreviewGrid").on("click", ".import-preview-item", function () {
+    var index = parseInt($(this).data("import-preview-index"), 10);
+    if (Number.isNaN(index) || !importedPreviewImages[index]) return;
+    openPackageImageViewer(importedPreviewImages[index], index);
   });
 
   $("#packageImagePanel").on("click", "[data-action='close-package-image-panel']", function (e) {
@@ -1567,41 +3460,171 @@
   });
 
   $("#markdownImporter").on("change", function () {
-    var file = this.files[0];
-    if (!file) return;
+    var files = Array.prototype.slice.call(this.files || []);
+    if (!files.length) return;
 
-    var formData = new FormData();
-    formData.append("file", file);
+    var markdownFiles = files.filter(function (file) {
+      return /\.(md|markdown)$/i.test(file.name || "") ||
+        /markdown/i.test(file.type || "");
+    });
+    if (!markdownFiles.length) {
+      setStatus("请选择 .md 或 .markdown 知识图谱文件", "error");
+      $(this).val("");
+      return;
+    }
+
     $("#btnImportMarkdown").prop("disabled", true).text("导入中...");
-    setStatus("正在导入知识图谱文件...", "info");
+    var startIndex = importedMarkdownFiles.length;
+    markdownFiles.map(function (file) {
+      return {
+        name: file.name || "知识图谱",
+        path: markdownFileDisplayPath(file),
+        content: "",
+        charCount: 0,
+        sections: [],
+        expanded: false,
+      };
+    }).forEach(function (item) {
+      importedMarkdownFiles.push(item);
+    });
+    renderMarkdownImportList();
+    setStatus("正在导入 " + markdownFiles.length + " 个知识图谱文件...", "info");
 
-    $.ajax({
-      url: "/beamer-generator/api/import-markdown-source",
-      method: "POST",
-      data: formData,
-      processData: false,
-      contentType: false,
-      success: function (data) {
-        if (data.error) {
-          setStatus("导入失败: " + data.error, "error");
+    Promise.all(markdownFiles.map(function (file, index) {
+      var targetIndex = startIndex + index;
+      return importMarkdownFile(file)
+        .then(function (item) {
+          importedMarkdownFiles[targetIndex] = item;
+          renderMarkdownImportList();
+          return item;
+        })
+        .catch(function (err) {
+          importedMarkdownFiles[targetIndex] = {
+            name: file.name || "知识图谱",
+            path: markdownFileDisplayPath(file),
+            content: "",
+            charCount: 0,
+            sections: [],
+            expanded: false,
+            error: err.message || "请求失败",
+          };
+          renderMarkdownImportList();
+          return null;
+        });
+    }))
+      .then(function (items) {
+        var imported = items.filter(function (item) { return item && item.content; });
+        if (!imported.length && !validImportedMarkdownItems().length) {
+          activeMarkdownPreviewIndex = null;
+          refreshMergedMarkdownContent();
+          setStatus("导入失败：未读取到有效 Markdown 内容", "error");
           return;
         }
-        var content = data.content || "";
-        var title = data.filename || file.name || "知识图谱";
-        rawMarkdownContent = content;
-        applyMarkdownAssets();
-        $("#customRequirements").val("Title: " + title.replace(/\.(md|markdown|zip|txt)$/i, ""));
-        setStatus("已导入 Markdown 知识图谱，共 " + (data.char_count || content.length) + " 字符", "success");
-      },
-      error: function (xhr) {
-        var msg = "请求失败";
-        if (xhr.responseJSON && xhr.responseJSON.error) msg = xhr.responseJSON.error;
-        setStatus("导入请求失败: " + msg, "error");
-      },
-      complete: function () {
+        refreshMergedMarkdownContent();
+        var titleBase = imported.length === 1
+          ? imported[0].name
+          : (imported[0] ? imported[0].name + " 等 " + imported.length + " 个知识图谱" : "知识图谱");
+        if (imported.length && !$("#customRequirements").val().trim()) {
+          $("#customRequirements").val("Title: " + titleBase.replace(/\.(md|markdown|zip|txt)$/i, ""));
+        }
+        var allImported = validImportedMarkdownItems();
+        var totalChars = allImported.reduce(function (sum, item) {
+          return sum + (item.charCount || (item.content || "").length);
+        }, 0);
+        setStatus("已累计导入 " + allImported.length + " 个 Markdown 知识图谱，共 " + totalChars + " 字符", "success");
+      })
+      .catch(function (err) {
+        setStatus("导入请求失败: " + err.message, "error");
+      })
+      .finally(function () {
         $("#btnImportMarkdown").prop("disabled", false).text("导入 MD 知识图谱");
-      },
+        $("#markdownImporter").val("");
+      });
+  });
+
+  $("#supplementMarkdownImporter").on("change", function () {
+    var files = Array.prototype.slice.call(this.files || []);
+    if (!files.length) return;
+
+    var markdownFiles = files.filter(function (file) {
+      return /\.(md|markdown)$/i.test(file.name || "") ||
+        /markdown/i.test(file.type || "");
     });
+    if (!markdownFiles.length) {
+      setStatus("请选择 .md 或 .markdown 补充章节文件", "error");
+      $(this).val("");
+      return;
+    }
+
+    $("#btnImportSupplementMarkdown").prop("disabled", true).text("导入中...");
+    setStatus("正在识别补充章节目录...", "info");
+    Promise.all(markdownFiles.map(function (file) {
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () {
+          resolve({
+            fileName: markdownFileDisplayPath(file),
+            content: String(reader.result || ""),
+          });
+        };
+        reader.onerror = function () {
+          reject(new Error("读取补充章节失败：" + (file.name || "未命名文件")));
+        };
+        reader.readAsText(file);
+      });
+    }))
+      .then(function (items) {
+        supplementChapterCatalog = [];
+        items.forEach(function (item) {
+          extractSupplementChapterCatalog(item.content, item.fileName).forEach(function (chapter) {
+            chapter.id = "supplement-" + supplementChapterCatalog.length;
+            chapter.expanded = false;
+            supplementChapterCatalog.push(chapter);
+          });
+        });
+        renderSupplementChapterPanel();
+        if (supplementChapterCatalog.length) {
+          setStatus("补充章节识别完成：共 " + supplementChapterCatalog.length + " 个，可勾选后添加", "success");
+        } else {
+          setStatus("未识别到 001 / 001.002 编号补充章节", "error");
+        }
+      })
+      .catch(function (err) {
+        setStatus(err.message || "读取补充章节失败", "error");
+      })
+      .finally(function () {
+        $("#btnImportSupplementMarkdown").prop("disabled", false).text("导入补充章节");
+        $("#supplementMarkdownImporter").val("");
+      });
+  });
+
+  $("#markdownImportList").on("click", ".markdown-import-toggle", function (e) {
+    e.preventDefault();
+    var index = parseInt($(this).attr("data-markdown-index"), 10);
+    toggleMarkdownImportItem(index);
+  });
+
+  $("#markdownImportList").on("click", ".markdown-import-remove", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var index = parseInt($(this).attr("data-markdown-index"), 10);
+    removeMarkdownImportItem(index);
+  });
+
+  $("#markdownImportList").on("click", ".markdown-section-toggle, .markdown-section-title", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var fileIndex = parseInt($(this).attr("data-markdown-index"), 10);
+    var sectionIndex = parseInt($(this).attr("data-section-index"), 10);
+    previewMarkdownSection(fileIndex, sectionIndex);
+  });
+
+  $("#markdownImportList").on("click", ".markdown-section-quote", function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var fileIndex = parseInt($(this).attr("data-markdown-index"), 10);
+    var sectionIndex = parseInt($(this).attr("data-section-index"), 10);
+    toggleMarkdownSectionSelection(fileIndex, sectionIndex);
   });
 
   $("#graphPackageImporter").on("change", function () {
@@ -1665,15 +3688,133 @@
     hideFigureHoverPreview();
   });
 
+  $("#latexImporter").on("change", function () {
+    var file = this.files && this.files[0];
+    if (!file) return;
+    if (/\.pdf$/i.test(file.name || "") || /pdf/i.test(file.type || "")) {
+      setLatexImportLoading(true);
+      loadPdfIntoEditablePpt(file, {
+        chapterTitle: titleFromLatexFileName(file.name || ""),
+      });
+      setLatexImportLoading(false);
+      $(this).val("");
+      return;
+    }
+    if (/\.zip$/i.test(file.name || "") || /zip/i.test(file.type || "")) {
+      setLatexImportLoading(true);
+      loadOverleafZipIntoEditablePpt(file, {
+        chapterTitle: titleFromLatexFileName(file.name || ""),
+      }).always(function () {
+        setLatexImportLoading(false);
+        $("#latexImporter").val("");
+      });
+      return;
+    }
+    if (/\.(pptx|ppt)$/i.test(file.name || "") || /presentation|powerpoint/i.test(file.type || "")) {
+      setLatexImportLoading(true);
+      loadPptIntoLatexFromFile(file, {
+        chapterTitle: titleFromLatexFileName(file.name || ""),
+      }).always(function () {
+        setLatexImportLoading(false);
+        $("#latexImporter").val("");
+      });
+      return;
+    }
+    if (!/\.(tex|latex|txt)$/i.test(file.name || "") && !/tex|plain|text/i.test(file.type || "")) {
+      setStatus("请选择 .tex / .pdf / .zip / .pptx / .ppt 文件", "error");
+      $(this).val("");
+      return;
+    }
+    importedLatexFileName = file.name || "";
+    importedPdfFileName = "";
+    setLatexImportLoading(true);
+    setStatus("正在读取 LaTeX 文件...", "info");
+    var reader = new FileReader();
+    reader.onload = function () {
+      var tex = String(reader.result || "");
+      fullLatex = tex;
+      sourceLatex = tex;
+      updateLatexEditor(tex);
+      $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt").prop("disabled", !tex.trim());
+      updateLatexImportMeta("已导入：" + (importedLatexFileName || "LaTeX 文件"));
+      loadLatexIntoEditablePpt(tex, {
+        updateEditor: false,
+        chapterTitle: titleFromLatexFileName(importedLatexFileName),
+      });
+    };
+    reader.onerror = function () {
+      setStatus("读取 LaTeX 文件失败", "error");
+    };
+    reader.onloadend = function () {
+      setLatexImportLoading(false);
+      $("#latexImporter").val("");
+    };
+    reader.readAsText(file);
+  });
+
+  $("#latexProjectImporter").on("change", function () {
+    var files = Array.prototype.slice.call(this.files || []);
+    if (!files.length) return;
+    setLatexImportLoading(true);
+    var request = loadLatexProjectIntoEditablePpt(files, {
+      chapterTitle: titleFromLatexFileName((files.find(function (file) {
+        return /\.(tex|latex)$/i.test(file.name || "") || /\.(tex|latex)$/i.test(file.webkitRelativePath || "");
+      }) || {}).name || ""),
+    });
+    if (request && request.always) {
+      request.always(function () {
+        setLatexImportLoading(false);
+        $("#latexProjectImporter").val("");
+      });
+    } else {
+      setLatexImportLoading(false);
+      $(this).val("");
+    }
+  });
+
+  $("#equationSourceImporter").on("change", function () {
+    var file = this.files && this.files[0];
+    if (!file) return;
+    if (!/\.(tex|latex|md|markdown|txt)$/i.test(file.name || "") && !/tex|markdown|plain|text/i.test(file.type || "")) {
+      setStatus("请选择包含公式的 .tex / .md / .txt 章节文件", "error");
+      $(this).val("");
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function () {
+      resolveMissingEquationsFromSource(String(reader.result || ""), file.name || "");
+    };
+    reader.onerror = function () {
+      setStatus("读取公式章节失败", "error");
+      $("#equationSourceImporter").val("");
+    };
+    reader.readAsText(file);
+  });
+  document.addEventListener("wheel", containNestedWheelScroll, { passive: false, capture: true });
+
   editor.on("cursorActivity", scheduleLatexSelectionSync);
-  editor.on("change", scheduleLatexManualSync);
+  editor.on("change", function () {
+    scheduleLatexManualSync();
+    if (!latexProgrammaticUpdate && !syncSelectionLock) {
+      schedulePageChecklistUpdate(null, 260);
+    }
+  });
+  editor.on("mousedown", clearLatexSyncSelectionOnEditorInput);
+  editor.on("touchstart", clearLatexSyncSelectionOnEditorInput);
+  var slideCanvasNode = document.getElementById("slideCanvas");
+  if (slideCanvasNode) {
+    slideCanvasNode.addEventListener("mousedown", clearPptSyncHighlightsOnEditorInput, true);
+    slideCanvasNode.addEventListener("touchstart", clearPptSyncHighlightsOnEditorInput, true);
+  }
 
   function today() {
     return new Date().toISOString().slice(0, 10);
   }
 
   function downloadFile(content, filename, mime) {
-    var blob = (typeof content === "string")
+    var blob = content instanceof Blob
+      ? content
+      : (typeof content === "string")
       ? new Blob([content], { type: mime + ";charset=utf-8" })
       : new Blob([content], { type: mime });
     var url = URL.createObjectURL(blob);
@@ -1685,6 +3826,17 @@
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
+
+  $("#btnTogglePageChecklist").on("click", function () {
+    var currentLatex = editor && editor.getValue ? editor.getValue() : fullLatex;
+    updatePageChecklist(currentLatex || "");
+    $("#pageChecklistPanel").toggle();
+  });
+
+  $("#btnDownloadPageChecklist").on("click", function () {
+    if (!pageChecklistText) return;
+    downloadFile(pageChecklistText, "page_checklist_" + today() + ".txt", "text/plain");
+  });
 
   function escHtml(s) {
     return $("<span>").text(s || "").html();
@@ -1748,6 +3900,7 @@
     if (!slide) return;
     slide.title = repairPptLatexArtifacts(slide.title || "");
     slide.subtitle = repairPptLatexArtifacts(slide.subtitle || "");
+    slide.titleCredit = repairPptLatexArtifacts(slide.titleCredit || "");
     slide.notes = repairPptLatexArtifacts(slide.notes || "");
     if (Array.isArray(slide.items)) {
       slide.items = slide.items.map(function (item) { return repairPptLatexArtifacts(item); });
@@ -1767,6 +3920,10 @@
         if (tb) tb.text = repairPptLatexArtifacts(tb.text || "");
       });
     }
+    if (!Array.isArray(slide.formulaBoxes)) slide.formulaBoxes = [];
+    slide.formulaBoxes.forEach(function (box) {
+      if (box) box.formula = latexMathDisplaySource(box.formula || "");
+    });
     if (!Array.isArray(slide.callouts)) slide.callouts = [];
     slide.callouts.forEach(function (callout) {
       if (callout) callout.text = repairPptLatexArtifacts(callout.text || "");
@@ -1787,12 +3944,42 @@
     latexSyncMarks = [];
   }
 
+  function clearLatexSelectionTimer() {
+    if (latexSelectionTimer) {
+      clearTimeout(latexSelectionTimer);
+      latexSelectionTimer = null;
+    }
+  }
+
+  function clearLatexSyncSelectionOnEditorInput() {
+    if (!latexSyncMarks.length) return;
+    suppressLatexSelectionSyncUntil = Date.now() + 250;
+    clearLatexSyncMarks();
+    if (!editor || !editor.somethingSelected || !editor.somethingSelected()) return;
+    runWithSyncSelectionLock(function () {
+      var cursor = editor.getCursor ? editor.getCursor("head") : null;
+      if (cursor && editor.setSelection) {
+        editor.setSelection(cursor, cursor);
+      } else if (cursor && editor.setCursor) {
+        editor.setCursor(cursor);
+      }
+    });
+  }
+
   function clearPptSyncHighlights() {
     $("#slideCanvas").find(".sync-highlight").removeClass("sync-highlight");
     if (pptSyncHighlightTimer) {
       clearTimeout(pptSyncHighlightTimer);
       pptSyncHighlightTimer = null;
     }
+  }
+
+  function clearPptSyncHighlightsOnEditorInput() {
+    if (syncSelectionLock) return;
+    if ($("#slideCanvas").find(".sync-highlight").length) {
+      suppressPptSelectionSyncUntil = Date.now() + 250;
+    }
+    clearPptSyncHighlights();
   }
 
   function runWithSyncSelectionLock(fn) {
@@ -1957,17 +4144,12 @@
       var panelWidth = $panel.width() || 0;
       var handleWidth = $handle.outerWidth() || 18;
       var usable = Math.max(0, panelWidth - handleWidth);
-      var minLeftPane = 320;
-      var minRightPane = 520;
-      if (usable < minLeftPane + minRightPane) {
-        minLeftPane = Math.max(220, Math.floor(usable * 0.38));
-        minRightPane = Math.max(260, usable - minLeftPane);
-      }
-      var maxLeft = Math.max(minLeftPane, usable - minRightPane);
-      var nextLeft = Math.round(Math.max(minLeftPane, Math.min(maxLeft, usable * ratio)));
-      var nextRight = Math.max(minRightPane, usable - nextLeft);
+      var minPane = 260;
+      var maxLeft = Math.max(minPane, usable - minPane);
+      var nextLeft = Math.round(Math.max(minPane, Math.min(maxLeft, usable * ratio)));
+      var nextRight = Math.max(minPane, usable - nextLeft);
       if (nextLeft + nextRight > usable) {
-        nextRight = Math.max(minRightPane, usable - nextLeft);
+        nextRight = Math.max(minPane, usable - nextLeft);
       }
       $panel.css("grid-template-columns", nextLeft + "px " + handleWidth + "px " + nextRight + "px");
       if (usable > 0) {
@@ -1986,13 +4168,8 @@
       var usable = Math.max(0, panelWidth - handleWidth);
       if (!usable) return;
       var left = pageX - rect.left - paddingLeft;
-      var minLeftPane = 320;
-      var minRightPane = 520;
-      if (usable < minLeftPane + minRightPane) {
-        minLeftPane = Math.max(220, Math.floor(usable * 0.38));
-        minRightPane = Math.max(260, usable - minLeftPane);
-      }
-      left = Math.max(minLeftPane, Math.min(usable - minRightPane, left));
+      var minPane = 260;
+      left = Math.max(minPane, Math.min(usable - minPane, left));
       applySplit(left / usable);
     }
 
@@ -2033,6 +4210,8 @@
     if (source === "latex") {
       selectPptSyncTarget(key);
     } else if (source === "ppt" && latexSyncMap[key]) {
+      if (Date.now() < suppressPptSelectionSyncUntil) return;
+      clearLatexSelectionTimer();
       selectLatexSyncRange(key);
     }
   }
@@ -2047,45 +4226,66 @@
       to = tmp;
     }
     if (from === to) {
-      var bestCursorKey = "";
-      var bestCursorScore = Infinity;
+      var containingFrameKey = "";
+      var containingFrameSize = Infinity;
+      var bestContainingKey = "";
+      var bestContainingSize = Infinity;
       Object.keys(latexSyncMap).forEach(function (key) {
         var range = latexSyncMap[key];
         if (!range) return;
-        var distance = 0;
-        if (from < range.start) distance = range.start - from;
-        else if (from > range.end) distance = from - range.end;
-        else distance = Math.max(0, range.end - range.start);
-        if (from >= range.start && from <= range.end) {
-          distance = Math.max(0, range.end - range.start);
+        if (from < range.start || from > range.end) return;
+        var size = Math.max(0, range.end - range.start);
+        if (/:frame$/.test(key)) {
+          if (size < containingFrameSize) {
+            containingFrameSize = size;
+            containingFrameKey = key;
+          }
+          return;
         }
-        if (distance < bestCursorScore) {
-          bestCursorScore = distance;
-          bestCursorKey = key;
+        if (size < bestContainingSize) {
+          bestContainingSize = size;
+          bestContainingKey = key;
         }
       });
-      return bestCursorKey;
+      return bestContainingKey || containingFrameKey;
     }
     var bestKey = "";
     var bestOverlap = 0;
+    var bestSize = Infinity;
+    var frameKey = "";
+    var frameOverlap = 0;
+    var frameSize = Infinity;
     Object.keys(latexSyncMap).forEach(function (key) {
       var range = latexSyncMap[key];
       if (!range) return;
       var overlap = Math.max(0, Math.min(to, range.end) - Math.max(from, range.start));
-      if (overlap > bestOverlap) {
+      if (!overlap) return;
+      var size = Math.max(0, range.end - range.start);
+      if (/:frame$/.test(key)) {
+        if (overlap > frameOverlap || (overlap === frameOverlap && size < frameSize)) {
+          frameOverlap = overlap;
+          frameSize = size;
+          frameKey = key;
+        }
+        return;
+      }
+      if (overlap > bestOverlap || (overlap === bestOverlap && size < bestSize)) {
         bestOverlap = overlap;
+        bestSize = size;
         bestKey = key;
       }
     });
-    return bestKey;
+    return bestKey || frameKey;
   }
 
   function scheduleLatexSelectionSync() {
     if (syncSelectionLock || latexProgrammaticUpdate || suppressNextLatexManualSync) return;
+    if (Date.now() < suppressLatexSelectionSyncUntil) return;
     if (latexSelectionTimer) clearTimeout(latexSelectionTimer);
     latexSelectionTimer = setTimeout(function () {
       latexSelectionTimer = null;
       if (syncSelectionLock || latexProgrammaticUpdate || suppressNextLatexManualSync) return;
+      if (Date.now() < suppressLatexSelectionSyncUntil) return;
       var key = findLatexSyncKeyAtSelection();
       if (key) applyCrossSync(key, "latex");
     }, 80);
@@ -2135,6 +4335,7 @@
           ["", "", ""],
           ["", "", ""],
         ],
+        columnSpec: "",
       };
     }
     var headers = table.headers.slice();
@@ -2145,20 +4346,42 @@
       return next;
     });
     if (!rows.length) rows.push(headers.map(function () { return ""; }));
-    return { headers: headers, rows: rows };
+    return {
+      headers: headers,
+      rows: rows,
+      headerRichHtml: table.headerRichHtml || [],
+      rowRichHtml: table.rowRichHtml || [],
+      columnSpec: table.columnSpec || "",
+    };
+  }
+
+  function latexTableColumnWidths(columnSpec, count) {
+    var widths = [];
+    String(columnSpec || "").replace(/p\s*\{\s*([0-9.]+)\s*\\textwidth\s*\}/g, function (match, value) {
+      widths.push(Math.max(4, Math.min(90, parseFloat(value) * 100)));
+      return match;
+    });
+    if (widths.length !== count) return [];
+    var total = widths.reduce(function (sum, value) { return sum + value; }, 0);
+    if (!total) return [];
+    return widths.map(function (value) {
+      return (value / total * 100).toFixed(2) + "%";
+    });
   }
 
   function normalizePlaceholders(placeholders) {
     return (placeholders || []).map(function (ph, idx) {
       ph = ph || {};
       var figure = extractFigureReference(ph.figure || ph.label || "");
+      var key = normalizeFigureLabel(figure || ph.label || "");
+      var figurePreview = key ? figurePreviewMap[key] : null;
       var width = clampNumber(ph.width, 80, 760, 270);
       var height = clampNumber(ph.height, 60, 380, 190);
       return {
         type: ph.type || "image",
         label: ph.label || figure || "图片占位",
         figure: figure,
-        asset: ph.asset || ph.url || ph.path || "",
+        asset: ph.asset || ph.url || ph.path || (figurePreview && figurePreview.url) || pickPackageImageForFigure(figure || ph.label || "") || "",
         position: ph.position || "",
         x: clampNumber(ph.x, 0, SLIDE_DESIGN_WIDTH - width, 500 + idx * 12),
         y: clampNumber(ph.y, 0, SLIDE_DESIGN_HEIGHT - height, 120 + idx * 12),
@@ -2595,6 +4818,10 @@
     return preamble + "\n\\newcommand{\\kgimageplaceholder}[2][]{\\begin{center}\\fbox{\\parbox[c][0.28\\textheight][c]{0.34\\textwidth}{\\centering #2}}\\end{center}}\n";
   }
 
+  function ensureMissingEquationMacro(preamble, slides) {
+    return preamble;
+  }
+
   function syncTitleMetaFromSlides() {
     if (!slidesData || !slidesData.slides || !slidesData.slides.length) return;
     var first = slidesData.slides[0];
@@ -2747,16 +4974,85 @@
       escapeLatexText(ph.label || figureRef || "图片占位") + "}";
   }
 
-  function buildImageLatex(img) {
+  function imagePathForLatex(img) {
     img = img || {};
     var imgPath = String(img.path || "").replace(/^\/+/, "");
+    return imgPath;
+  }
+
+  function buildImageLatex(img, widthSpec) {
+    var imgPath = imagePathForLatex(img);
     if (!imgPath) return "";
-    var width = Math.round(clampNumber(img.width, 60, SLIDE_DESIGN_WIDTH, 220));
-    var height = Math.round(clampNumber(img.height, 45, SLIDE_DESIGN_HEIGHT, 150));
-    var x = Math.round(clampNumber(img.x, 0, SLIDE_DESIGN_WIDTH, 40));
-    var y = Math.round(clampNumber(img.y, 0, SLIDE_DESIGN_HEIGHT, 170));
-    return "    \\includegraphics[width=" + width + "px,height=" + height +
-      "px,keepaspectratio,x=" + x + ",y=" + y + "]{" + imgPath + "}";
+    return "  \\includegraphics[width=" + (widthSpec || "0.7\\textwidth") + "]{" + imgPath + "}";
+  }
+
+  function imageLatexForFrame(img, widthSpec) {
+    var imgPath = imagePathForLatex(img);
+    if (!imgPath) return "";
+    var macro = String((img && img.latexMacro) || "").trim();
+    if (/^safe(?:content|vertical|logo)image$/.test(macro)) {
+      return "\\" + macro + "{" + imgPath + "}";
+    }
+    return "\\includegraphics[width=" + (widthSpec || "0.7\\textwidth") + "]{" + imgPath + "}";
+  }
+
+  function figureFrameTitle(slide, img, fallback) {
+    slide = slide || {};
+    var title = String(slide.title || "").trim();
+    if (/^figure\s+\d+(?:\.\d+)?/i.test(title)) return title;
+    var imgPath = imagePathForLatex(img || {});
+    var match = imgPath.match(/(?:^|\/)(\d+(?:\.\d+)*)\.(?:png|jpe?g|pdf|eps|svg)$/i);
+    if (match) return "Figure " + match[1];
+    return title || fallback || "图片";
+  }
+
+  function isPortraitImage(img) {
+    img = img || {};
+    var w = parseFloat(img.naturalWidth || img.width || 0);
+    var h = parseFloat(img.naturalHeight || img.height || 0);
+    return h > w && w > 0;
+  }
+
+  function imageCaptionText(slide) {
+    slide = slide || {};
+    var parts = [];
+    (slide.items || []).forEach(function (item) {
+      if (item) parts.push(item);
+    });
+    if (slide.notes) parts.push(slide.notes);
+    return repairPptLatexArtifacts(parts.join(" "));
+  }
+
+  function buildTopImageBottomTextLatex(slide) {
+    slide = slide || {};
+    var img = (slide.images && slide.images[0]) || null;
+    var imgPath = imagePathForLatex(img);
+    if (!imgPath) return "";
+    var caption = imageCaptionText(slide) || slide.subtitle || slide.title || "图片说明待补充。";
+    var out = [];
+    if (isPortraitImage(img)) {
+      out.push("\\begin{frame}{" + richHtmlToLatex("", figureFrameTitle(slide, img, "图片")) + "}");
+      out.push("  \\begin{columns}[T]");
+      out.push("    \\begin{column}{0.45\\textwidth}");
+      out.push("      \\scriptsize " + richHtmlToLatex("", caption));
+      out.push("    \\end{column}");
+      out.push("    \\begin{column}{0.45\\textwidth}");
+      out.push("      \\centering");
+      out.push("      " + imageLatexForFrame(img, "\\textwidth"));
+      out.push("    \\end{column}");
+      out.push("  \\end{columns}");
+      out.push("\\end{frame}");
+      return out.join("\n");
+    }
+    out.push("\\begin{frame}{" + richHtmlToLatex("", figureFrameTitle(slide, img, "图片")) + "}");
+    out.push("  \\centering");
+    out.push("  " + imageLatexForFrame(img, "0.7\\textwidth"));
+    out.push("  \\vspace{0.3cm}");
+    out.push("  \\begin{center}");
+    out.push("    \\parbox{0.95\\textwidth}{\\scriptsize " + richHtmlToLatex("", caption) + "}");
+    out.push("  \\end{center}");
+    out.push("\\end{frame}");
+    return out.join("\n");
   }
 
   function slidePxToCm(value, totalPx, totalCm) {
@@ -2901,9 +5197,9 @@
     out.push("      \\begin{itemize}");
     out.push("        \\setlength{\\itemsep}{0.3\\baselineskip}");
     for (var i = 0; i < items.length; i++) {
+      var itemText = String(items[i] || "").replace(/\s*\[\d+\.\]\s*$/, "");
       out.push(
-        "        \\item[\\textcolor{black}{\\textbf{" + (i + 1) + ".}}] " +
-        "\\textcolor{black}{" + escapeLatexTextPreservingMath(items[i] || "") + "}"
+        "        \\item \\textcolor{black}{" + escapeLatexTextPreservingMath(itemText) + "}"
       );
     }
     out.push("      \\end{itemize}");
@@ -2947,8 +5243,9 @@
     addLine("      \\begin{itemize}");
     addLine("        \\setlength{\\itemsep}{0.3\\baselineskip}");
     for (var i = 0; i < items.length; i++) {
-      var prefix = "        \\item[\\textcolor{black}{\\textbf{" + (i + 1) + ".}}] \\textcolor{black}{";
-      addTrackedLine(prefix, items[i] || "", "}", syncKey(slideIdx, "item", i));
+      var prefix = "        \\item \\textcolor{black}{";
+      var itemText = String(items[i] || "").replace(/\s*\[\d+\.\]\s*$/, "");
+      addTrackedLine(prefix, itemText, "}", syncKey(slideIdx, "item", i));
     }
     addLine("      \\end{itemize}");
     addLine("    \\end{minipage}");
@@ -2971,6 +5268,9 @@
   }
 
   function buildContentSlideLatex(slide) {
+    if (slide && slide.images && slide.images.length) {
+      return buildTopImageBottomTextLatex(slide);
+    }
     var out = [];
     out.push("\\begin{frame}{" + richHtmlToLatex(slide.titleRichHtml || "", slide.title || "") + "}");
 
@@ -3009,6 +5309,7 @@
       for (var k = 0; k < slide.textboxes.length; k++) {
         var tb = slide.textboxes[k] || {};
         if (!tb.text) continue;
+        if (tb.type === "formula") continue;
         var boxText = richHtmlToLatex(tb.richHtml || "", tb.text);
         if (tb.fontSize) {
           boxText = "{\\fontsize{" + tb.fontSize + "}{" + Math.round(tb.fontSize * 1.2) + "}\\selectfont " + boxText + "}";
@@ -3034,6 +5335,17 @@
       for (var c = 0; c < slide.callouts.length; c++) {
         var calloutLatex = buildCalloutLatex(slide.callouts[c]);
         if (calloutLatex) out.push(calloutLatex);
+      }
+    }
+
+    if (slide.formulaBoxes && slide.formulaBoxes.length) {
+      for (var fb = 0; fb < slide.formulaBoxes.length; fb++) {
+        var formulaBox = slide.formulaBoxes[fb] || {};
+        var formula = latexMathDisplaySource(formulaBox.formula || "");
+        if (!formula) continue;
+        out.push("  \\begin{center}");
+        out.push("    \\[" + formula + "\\]");
+        out.push("  \\end{center}");
       }
     }
 
@@ -3070,15 +5382,59 @@
       addLine(line, lineMap);
     }
 
+    function addTrackedLatexLine(prefix, latexText, suffix, key) {
+      var content = latexText || "";
+      var lineMap = {};
+      lineMap[key] = {
+        start: prefix.length,
+        end: prefix.length + content.length,
+        slideIdx: slideIdx,
+      };
+      addLine(prefix + content + (suffix || ""), lineMap);
+    }
+
+    if (slide && slide.images && slide.images.length) {
+      var topImg = slide.images[0] || {};
+      var topImgPath = imagePathForLatex(topImg);
+      if (topImgPath) {
+        var topCaption = imageCaptionText(slide) || slide.subtitle || slide.title || "图片说明待补充。";
+        if (isPortraitImage(topImg)) {
+          addLine("\\begin{frame}{" + richHtmlToLatex("", figureFrameTitle(slide, topImg, "图片")) + "}");
+          addLine("  \\begin{columns}[T]");
+          addLine("    \\begin{column}{0.45\\textwidth}");
+          addLine("      \\centering");
+          addLine("      " + imageLatexForFrame(topImg, "\\textwidth"));
+          addLine("    \\end{column}");
+          addLine("    \\begin{column}{0.45\\textwidth}");
+          addTrackedLine("      \\scriptsize ", topCaption, "", syncKey(slideIdx, "notes"));
+          addLine("    \\end{column}");
+          addLine("  \\end{columns}");
+          addLine("\\end{frame}");
+          Object.assign(map, localMap);
+          return out.join("\n");
+        }
+        addLine("\\begin{frame}{" + richHtmlToLatex("", figureFrameTitle(slide, topImg, "图片")) + "}");
+        addLine("  \\centering");
+        addLine("  " + imageLatexForFrame(topImg, "0.7\\textwidth"));
+        addLine("  \\vspace{0.3cm}");
+        addLine("  \\begin{center}");
+        addTrackedLine("    \\parbox{0.95\\textwidth}{\\scriptsize ", topCaption, "}", syncKey(slideIdx, "notes"));
+        addLine("  \\end{center}");
+        addLine("\\end{frame}");
+        Object.assign(map, localMap);
+        return out.join("\n");
+      }
+    }
+
     if (slide.titleRichHtml) {
-      addLine("\\begin{frame}{" + richHtmlToLatex(slide.titleRichHtml, slide.title || "") + "}");
+      addTrackedLatexLine("\\begin{frame}{", richHtmlToLatex(slide.titleRichHtml, slide.title || ""), "}", syncKey(slideIdx, "title"));
     } else {
       addTrackedLine("\\begin{frame}{", slide.title || "", "}", syncKey(slideIdx, "title"));
     }
 
     if (slide.subtitle) {
       if (slide.subtitleRichHtml) {
-        addLine("  \\textit{" + richHtmlToLatex(slide.subtitleRichHtml, slide.subtitle) + "}");
+        addTrackedLatexLine("  \\textit{", richHtmlToLatex(slide.subtitleRichHtml, slide.subtitle), "}", syncKey(slideIdx, "subtitle"));
       } else {
         addTrackedLine("  \\textit{", slide.subtitle, "}", syncKey(slideIdx, "subtitle"));
       }
@@ -3121,7 +5477,7 @@
       for (var i = 0; i < slide.items.length; i++) {
         var itemRich = (slide.itemRichHtml || [])[i] || "";
         if (itemRich) {
-          addLine("    \\item " + richHtmlToLatex(itemRich, slide.items[i] || ""));
+          addTrackedLatexLine("    \\item ", richHtmlToLatex(itemRich, slide.items[i] || ""), "", syncKey(slideIdx, "item", i));
         } else {
           addTrackedLine("    \\item ", slide.items[i] || "", "", syncKey(slideIdx, "item", i));
         }
@@ -3148,6 +5504,7 @@
       for (var k = 0; k < slide.textboxes.length; k++) {
         var tb = slide.textboxes[k] || {};
         if (!tb.text) continue;
+        if (tb.type === "formula") continue;
         var tbPrefix = "    \\fbox{\\parbox{0.92\\linewidth}{";
         var tbSuffix = "}}";
         if (tb.fontSize) {
@@ -3156,7 +5513,7 @@
         }
         addLine("  \\begin{center}");
         if (tb.richHtml) {
-          addLine(tbPrefix + richHtmlToLatex(tb.richHtml, tb.text) + tbSuffix);
+          addTrackedLatexLine(tbPrefix, richHtmlToLatex(tb.richHtml, tb.text), tbSuffix, syncKey(slideIdx, "textbox", k));
         } else {
           addTrackedLine(tbPrefix, tb.text, tbSuffix, syncKey(slideIdx, "textbox", k));
         }
@@ -3193,6 +5550,26 @@
         addLine("    \\node[rectangle callout, callout relative pointer={(-0.45cm,-0.35cm)}, draw=blue, fill=white, rounded corners, text width=" + textWidth.toFixed(2) + "cm, align=" + align + ", font=\\fontsize{" + fontSize + "}{" + Math.round(fontSize * 1.2) + "}\\selectfont] at ([xshift=" + centerX.toFixed(2) + "cm,yshift=-" + centerY.toFixed(2) + "cm] current page.north west)");
         addTrackedLine("      {", text, "};", syncKey(slideIdx, "callout", c));
         addLine("  \\end{tikzpicture}");
+      }
+    }
+
+    if (slide.formulaBoxes && slide.formulaBoxes.length) {
+      for (var fb = 0; fb < slide.formulaBoxes.length; fb++) {
+        var formulaBox = slide.formulaBoxes[fb] || {};
+        var formula = latexMathDisplaySource(formulaBox.formula || "");
+        if (!formula) continue;
+        addLine("  \\begin{center}");
+        var formulaLine = "    \\[" + formula + "\\]";
+        addLine(formulaLine, (function () {
+          var m = {};
+          m[syncKey(slideIdx, "formulaBox", fb)] = {
+            start: 6,
+            end: Math.max(6, formulaLine.length - 2),
+            slideIdx: slideIdx,
+          };
+          return m;
+        })());
+        addLine("  \\end{center}");
       }
     }
 
@@ -3252,6 +5629,7 @@
     preamble = upsertLatexCommand(preamble, "author", escapeLatexText(data.author || ""));
     preamble = upsertLatexCommand(preamble, "date", escapeLatexText(data.date || ""));
     preamble = ensurePlaceholderMacro(preamble, data.slides || []);
+    preamble = ensureMissingEquationMacro(preamble, data.slides || []);
     preamble = ensureReviewBackgroundPreamble(preamble, data.slides || []);
 
     var preambleTitleRange = findLatexCommandValueRange(preamble, "title");
@@ -3348,6 +5726,26 @@
       suppressNextLatexManualSync = false;
     }, 120);
     editor.scrollTo(scrollInfo.left, scrollInfo.top);
+    schedulePageChecklistUpdate(tex || "", 160);
+  }
+
+  function rebuildRenderedPageLocationMap(data, tex) {
+    var map = {};
+    var source = String(tex || "");
+    if (!data || !Array.isArray(data.slides) || !source) {
+      latexSyncMap = map;
+      return;
+    }
+    var frames = [];
+    var frameRe = /\\begin\{frame\}[\s\S]*?\\end\{frame\}/g;
+    var match;
+    while ((match = frameRe.exec(source)) !== null) {
+      frames.push({ start: match.index, end: frameRe.lastIndex });
+    }
+    for (var i = 0; i < data.slides.length && i < frames.length; i++) {
+      map[syncKey(i, "frame")] = { start: frames[i].start, end: frames[i].end, slideIdx: i };
+    }
+    latexSyncMap = map;
   }
 
   function rebuildLatexSyncMapFromSource(data, tex) {
@@ -3376,6 +5774,33 @@
       var close = findMatchingBrace(source, open);
       if (close === -1 || close > frame.end) return;
       addRange(key, open + 1, close, slideIdx);
+    }
+
+    function addCandidate(candidates, value) {
+      value = String(value || "").trim();
+      if (!value) return;
+      if (candidates.indexOf(value) === -1) candidates.push(value);
+    }
+
+    function latexTextCandidates(rawText, richHtml) {
+      var candidates = [];
+      if (richHtml) addCandidate(candidates, richHtmlToLatex(richHtml, rawText || ""));
+      addCandidate(candidates, escapeLatexTextPreservingMath(rawText || ""));
+      addCandidate(candidates, escapeLatexText(rawText || ""));
+      addCandidate(candidates, rawText || "");
+      return candidates;
+    }
+
+    function addRangeByText(frame, key, slideIdx, rawText, richHtml) {
+      if (map[key]) return;
+      var candidates = latexTextCandidates(rawText, richHtml);
+      for (var c = 0; c < candidates.length; c++) {
+        var idx = source.indexOf(candidates[c], frame.start);
+        if (idx !== -1 && idx + candidates[c].length <= frame.end) {
+          addRange(key, idx, idx + candidates[c].length, slideIdx);
+          return;
+        }
+      }
     }
 
     for (var i = 0; i < data.slides.length && i < frames.length; i++) {
@@ -3432,6 +5857,25 @@
         var noteIdx = source.indexOf("%", frame.start);
         if (noteIdx !== -1 && noteIdx < frame.end) addRange(syncKey(i, "notes"), noteIdx, frame.end, i);
       }
+
+      addRangeByText(frame, syncKey(i, "subtitle"), i, slide.subtitle || "", slide.subtitleRichHtml || "");
+      if (slide.table && slide.table.headers) {
+        var table = normalizeTable(slide.table);
+        (table.headers || []).forEach(function (header, h) {
+          addRangeByText(frame, syncKey(i, "th", h), i, header || "", (table.headerRichHtml || [])[h] || "");
+        });
+        (table.rows || []).forEach(function (row, r) {
+          (row || []).forEach(function (cell, c) {
+            addRangeByText(frame, syncKey(i, "td", r, c), i, cell || "", ((table.rowRichHtml || [])[r] || [])[c] || "");
+          });
+        });
+      }
+      (slide.textboxes || []).forEach(function (tb, tbIdx) {
+        addRangeByText(frame, syncKey(i, "textbox", tbIdx), i, (tb && tb.text) || "", (tb && tb.richHtml) || "");
+      });
+      (slide.callouts || []).forEach(function (callout, calloutIdx) {
+        addRangeByText(frame, syncKey(i, "callout", calloutIdx), i, (callout && callout.text) || "", "");
+      });
     }
 
     latexSyncMap = map;
@@ -3441,8 +5885,9 @@
     var tex = editor.getValue ? editor.getValue() : fullLatex;
     fullLatex = tex || "";
     sourceLatex = fullLatex;
-    $("#btnCopy, #btnDownloadTex, #btnConvertPpt").prop("disabled", !fullLatex);
+    $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt").prop("disabled", !fullLatex);
     updateDownloadPptxButton();
+    if (isLatexImportMode) return;
     if (!fullLatex.trim()) return;
 
     var seq = ++latexManualSyncSeq;
@@ -3453,6 +5898,11 @@
       data: JSON.stringify({ latex: fullLatex }),
       success: function (data) {
         if (seq !== latexManualSyncSeq || !data || data.error || !data.slides) return;
+        if (data.latex && data.latex !== fullLatex) {
+          fullLatex = data.latex;
+          sourceLatex = fullLatex;
+          updateLatexEditor(fullLatex);
+        }
         var previousSlidesData = slidesData ? deepClone(slidesData) : null;
         for (var i = 0; i < data.slides.length; i++) {
           if (!data.slides[i].images) data.slides[i].images = [];
@@ -3486,6 +5936,7 @@
   }
 
   function scheduleLatexManualSync() {
+    if (isLatexImportMode) return;
     if (latexProgrammaticUpdate || suppressNextLatexManualSync || syncSelectionLock) return;
     if (latexManualSyncTimer) clearTimeout(latexManualSyncTimer);
     latexManualSyncTimer = setTimeout(function () {
@@ -3497,12 +5948,24 @@
 
   function syncLatexFromSlides() {
     if (!slidesData) return;
+    if (isLatexImportMode || hasRenderedLatexPages(slidesData)) {
+      latexManualSyncSeq += 1;
+      var keepSlideIdxRendered = currentSlideIdx;
+      currentSlideIdx = keepSlideIdxRendered;
+      renderSlideList();
+      if (currentSlideIdx >= 0) {
+        $(".slide-thumb").removeClass("active").eq(currentSlideIdx).addClass("active");
+      }
+      return;
+    }
     latexManualSyncSeq += 1;
     var keepSlideIdx = currentSlideIdx;
     syncTitleMetaFromSlides();
     ensureAllSlideFigurePlaceholders(slidesData);
     fullLatex = buildLatexFromSlides(slidesData);
-    fullLatex = applyCustomRequirementOverrides(fullLatex, currentCustomRequirements);
+    if (!isLatexImportMode) {
+      fullLatex = applyCustomRequirementOverrides(fullLatex, currentCustomRequirements);
+    }
     sourceLatex = fullLatex;
     updateLatexEditor(fullLatex);
     rebuildLatexSyncMapFromSource(slidesData, fullLatex);
@@ -3523,6 +5986,7 @@
 
   function scheduleLatexSync() {
     if (!slidesData) return;
+    if (isLatexImportMode || hasRenderedLatexPages(slidesData)) return;
     if (latexSyncTimer) clearTimeout(latexSyncTimer);
     latexSyncTimer = setTimeout(function () {
       latexSyncTimer = null;
@@ -3532,6 +5996,7 @@
 
   function applyInputCollapsedState() {
     $(".container").toggleClass("input-collapsed", inputCollapsed);
+    if (!inputCollapsed) $(".container").removeClass("outline-only");
     $(".panel-input").prop("hidden", inputCollapsed);
     $("#btnToggleInputPanel")
       .text(inputCollapsed ? ">>" : "<<")
@@ -3540,11 +6005,7 @@
     $("#innerResizeHandle").toggle(inputCollapsed);
 
     if (inputCollapsed) {
-      $("#viewLatex, #viewPpt").addClass("active").show();
-      $(".latex-actions, .ppt-actions").show();
-      if (collapsedPaneResize) {
-        collapsedPaneResize.applySplit(latexPptSplitRatio);
-      }
+      setActiveTab(activeTab || "latex");
     } else {
       $(".panel-output").css("grid-template-columns", "");
       setActiveTab(activeTab || "latex");
@@ -3554,24 +6015,46 @@
   }
 
   function setActiveTab(tab) {
-    if (tab !== "latex" && tab !== "ppt") tab = "latex";
+    if (tab !== "latex" && tab !== "outline" && tab !== "ppt") tab = "latex";
     activeTab = tab;
     $(".tab-btn").removeClass("active");
     $('.tab-btn[data-tab="' + tab + '"]').addClass("active");
     if (inputCollapsed) {
-      $("#viewLatex, #viewPpt").addClass("active").show();
-      $(".latex-actions, .ppt-actions").show();
+      if (tab === "outline") {
+        $(".container").addClass("outline-only");
+        $(".panel-output").css("grid-template-columns", "1fr");
+        $("#viewOutline").addClass("active").show();
+        $("#viewLatex, #viewPpt").removeClass("active").hide();
+        $("#innerResizeHandle").hide();
+        $(".latex-actions, .ppt-actions").hide();
+      } else {
+        $(".container").removeClass("outline-only");
+        $("#viewLatex, #viewPpt").addClass("active").show();
+        $("#viewOutline").removeClass("active").hide();
+        $("#innerResizeHandle").show();
+        $(".latex-actions, .ppt-actions").show();
+        if (collapsedPaneResize) {
+          collapsedPaneResize.applySplit(latexPptSplitRatio);
+        }
+      }
       refreshEditorSize();
       return;
     }
     if (tab === "latex") {
       $("#viewLatex").addClass("active").show();
+      $("#viewOutline").removeClass("active").hide();
       $("#viewPpt").removeClass("active").hide();
       $(".latex-actions").show();
       $(".ppt-actions").hide();
+    } else if (tab === "outline") {
+      $("#viewOutline").addClass("active").show();
+      $("#viewLatex").removeClass("active").hide();
+      $("#viewPpt").removeClass("active").hide();
+      $(".latex-actions, .ppt-actions").hide();
     } else {
       $("#viewPpt").addClass("active").show();
       $("#viewLatex").removeClass("active").hide();
+      $("#viewOutline").removeClass("active").hide();
       $(".latex-actions").hide();
       $(".ppt-actions").show();
     }
@@ -3592,6 +6075,740 @@
     setActiveTab(tab);
   });
 
+  function htmlEscape(value) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function uniqueList(items) {
+    var seen = {};
+    var result = [];
+    (items || []).forEach(function (item) {
+      var text = String(item || "").trim();
+      if (!text || seen[text]) return;
+      seen[text] = true;
+      result.push(text);
+    });
+    return result;
+  }
+
+  function extractLatexFramesForChecklist(latex) {
+    var frames = [];
+    var re = /\\begin\{frame\}(?:\[[^\]]*\])?(?:\{([^}]*)\})?([\s\S]*?)\\end\{frame\}/g;
+    var match;
+    while ((match = re.exec(latex || "")) !== null) {
+      var body = match[2] || "";
+      var title = String(match[1] || "").trim();
+      if (!title) {
+        var titleMatch = /\\frametitle\{([^}]*)\}/.exec(body);
+        title = titleMatch ? titleMatch[1].trim() : "";
+      }
+      frames.push({ title: title || ("Frame " + (frames.length + 1)), body: body });
+    }
+    return frames;
+  }
+
+  function outlineSectionIdsByPage(outline) {
+    var ids = [];
+    ((outline && outline.sections) || []).forEach(function (section) {
+      var count = ((section.frames || []).length) || section.slide_count || 0;
+      for (var i = 0; i < count; i++) ids.push(section.id || "");
+    });
+    return ids;
+  }
+
+  function extractFormulaLabelsForChecklist(text) {
+    var items = [];
+    var patterns = [
+      /Equation\s*\(?(\d+(?:\.\d+)+)\)?/gi,
+      /Eq\.?\s*\(?(\d+(?:\.\d+)+)\)?/gi,
+      /\\tag\{([^}]+)\}/g,
+      /\\label\{([^}]*(?:eq|equation)[^}]*)\}/gi,
+      /\\eqref\{([^}]+)\}/g,
+      /\\kgmissingequation\{num:([^}]+)\}/g,
+      /\\kgmissingequation\{label:([^}]+)\}/g,
+    ];
+    patterns.forEach(function (pattern) {
+      var match;
+      while ((match = pattern.exec(text || "")) !== null) {
+        items.push(match[1]);
+      }
+    });
+    return uniqueList(items);
+  }
+
+  function extractImageNumbersForChecklist(text) {
+    var items = [];
+    var patterns = [
+      /Figure\s*(\d+(?:\.\d+)+)/gi,
+      /Fig\.?\s*(\d+(?:\.\d+)+)/gi,
+      /图\s*(\d+(?:[._]\d+)+)/g,
+      /fig\/(?:图)?(\d+(?:[._]\d+)+)[^}\s]*/gi,
+      /figures\/(?:图)?(\d+(?:[._]\d+)+)[^}\s]*/gi,
+    ];
+    patterns.forEach(function (pattern) {
+      var match;
+      while ((match = pattern.exec(text || "")) !== null) {
+        items.push(String(match[1] || "").replace(/_/g, "."));
+      }
+    });
+    return uniqueList(items.map(function (item) {
+      return item.indexOf("Figure ") === 0 ? item : "Figure " + item;
+    }));
+  }
+
+  function buildPageChecklistText(latex, outline) {
+    var frames = extractLatexFramesForChecklist(latex);
+    var sectionIds = outlineSectionIdsByPage(outline);
+    if (!frames.length) return "";
+    return frames.map(function (frame, index) {
+      var formulas = extractFormulaLabelsForChecklist(frame.body);
+      var images = extractImageNumbersForChecklist(frame.title + "\n" + frame.body);
+      return [
+        "Page " + (index + 1) + ": " + frame.title,
+        "大节标号: " + (sectionIds[index] || "未识别"),
+        "公式标号: " + (formulas.length ? formulas.join(", ") : "无"),
+        "图片编号: " + (images.length ? images.join(", ") : "无"),
+      ].join("\n");
+    }).join("\n\n");
+  }
+
+  function updatePageChecklist(latex) {
+    var source = latex || "";
+    pageChecklistText = buildPageChecklistText(source, generatedOutline);
+    $("#pageChecklistText").text(pageChecklistText || "暂无逐页清单。");
+    var hasLatex = !!String(source || fullLatex || "").trim();
+    $("#btnTogglePageChecklist")
+      .prop("disabled", !hasLatex)
+      .text(pageChecklistText ? "逐页清单" : "逐页清单");
+    $("#btnDownloadPageChecklist").prop("disabled", !pageChecklistText);
+  }
+
+  function schedulePageChecklistUpdate(latex, delayMs) {
+    var source = typeof latex === "string"
+      ? latex
+      : (editor && editor.getValue ? editor.getValue() : fullLatex);
+    if (pageChecklistTimer) clearTimeout(pageChecklistTimer);
+    pageChecklistTimer = setTimeout(function () {
+      pageChecklistTimer = null;
+      updatePageChecklist(source || "");
+    }, typeof delayMs === "number" ? delayMs : 160);
+  }
+
+  function readGptConfig() {
+    var apiKey = String($("#gptApiKey").val() || "").trim();
+    var apiBase = String($("#gptApiBase").val() || "").trim();
+    var model = String($("#gptModel").val() || "").trim();
+    if (!apiKey) {
+      setStatus("请输入本次生成使用的 GPT API Key", "error");
+      $("#gptApiKey").focus();
+      return null;
+    }
+    if (!apiBase) {
+      setStatus("请输入 GPT API Base URL", "error");
+      $("#gptApiBase").focus();
+      return null;
+    }
+    if (!model) {
+      setStatus("请输入 GPT 模型名称", "error");
+      $("#gptModel").focus();
+      return null;
+    }
+    activeGptConfig = { api_key: apiKey, base_url: apiBase, model: model };
+    return activeGptConfig;
+  }
+
+  function saveGptConfigToBrowser(config) {
+    localStorage.setItem(GPT_CONFIG_STORAGE_KEY, JSON.stringify({
+      api_key: config.api_key,
+      base_url: config.base_url,
+      model: config.model,
+    }));
+  }
+
+  function restoreGptConfigFromBrowser() {
+    try {
+      var raw = localStorage.getItem(GPT_CONFIG_STORAGE_KEY);
+      if (!raw) return;
+      var config = JSON.parse(raw);
+      if (config.api_key) $("#gptApiKey").val(config.api_key);
+      if (config.base_url) $("#gptApiBase").val(config.base_url);
+      if (config.model) $("#gptModel").val(config.model);
+      activeGptConfig = {
+        api_key: String(config.api_key || "").trim(),
+        base_url: String(config.base_url || "").trim(),
+        model: String(config.model || "").trim(),
+      };
+    } catch (err) {
+      localStorage.removeItem(GPT_CONFIG_STORAGE_KEY);
+    }
+  }
+
+  function outlineStorageTitle(outline) {
+    outline = outline || generatedOutline || {};
+    var base = String(outline.title || $("#customRequirements").val() || "saved_outline").trim();
+    base = base.replace(/^Title:\s*/i, "").replace(/[\\/:*?"<>|]+/g, "_").replace(/\s+/g, "_");
+    return base || "saved_outline";
+  }
+
+  function saveOutlineToBrowser(outline) {
+    localStorage.setItem(OUTLINE_STORAGE_KEY, JSON.stringify({
+      saved_at: new Date().toISOString(),
+      outline: outline,
+    }));
+  }
+
+  function loadOutlineFromBrowser() {
+    var raw = localStorage.getItem(OUTLINE_STORAGE_KEY);
+    if (!raw) return null;
+    var data = JSON.parse(raw);
+    return data && data.outline ? data.outline : null;
+  }
+
+  function selectedSectionsPayload() {
+    return getSelectedMarkdownSections().map(function (section) {
+      return {
+        file: section.fileTitle,
+        title: section.title,
+        id: section.id,
+      };
+    });
+  }
+
+  function applySelectedSectionsRequirement(requirements, selectedSections) {
+    var result = String(requirements || "").trim();
+    if (!selectedSections.length) return result;
+    var selectionRequirement = "本次只根据已引用的 Markdown 小节生成 PPT，不要使用未引用小节。已引用小节：" +
+      selectedSections.map(function (section) {
+        return section.file + " / " + section.title;
+      }).join("；");
+    return result ? result + "\n" + selectionRequirement : selectionRequirement;
+  }
+
+  function normalizeNumericText(value) {
+    return String(value || "").replace(/[０-９]/g, function (char) {
+      return String(char.charCodeAt(0) - 0xff10);
+    });
+  }
+
+  function readClampedInt(selector, fallback, minValue, maxValue) {
+    var raw = normalizeNumericText($(selector).val());
+    var match = raw.match(/\d+/);
+    var value = match ? parseInt(match[0], 10) : fallback;
+    if (Number.isNaN(value)) value = fallback;
+    value = Math.max(minValue, Math.min(maxValue, value));
+    $(selector).val(String(value));
+    return value;
+  }
+
+  function readSectionSlideRange() {
+    var minSlides = readClampedInt("#sectionSlideMin", 1, 1, 80);
+    var maxSlides = readClampedInt("#sectionSlideMax", 8, 1, 80);
+    if (maxSlides < minSlides) {
+      maxSlides = minSlides;
+      $("#sectionSlideMax").val(String(maxSlides));
+    }
+    return { min: minSlides, max: maxSlides };
+  }
+
+  $("#sectionSlideMin, #sectionSlideMax").on("input", function () {
+    var cleaned = normalizeNumericText($(this).val()).replace(/[^\d]/g, "");
+    if ($(this).val() !== cleaned) $(this).val(cleaned);
+  }).on("blur", function () {
+    readSectionSlideRange();
+  });
+
+  function buildBaseGenerationPayload(content) {
+    var config = readGptConfig();
+    if (!config) return null;
+    var selectedSections = selectedSectionsPayload();
+    var sectionSlideRange = readSectionSlideRange();
+    currentCustomRequirements = applySelectedSectionsRequirement(
+      $("#customRequirements").val().trim(),
+      selectedSections
+    );
+    return {
+      provider: "gpt",
+      content: content,
+      api_key: config.api_key,
+      base_url: config.base_url,
+      style: $("#style").val(),
+      custom_requirements: currentCustomRequirements,
+      slide_count: Math.max(1, Math.min(80, parseInt($("#slideCount").val(), 10) || 7)),
+      section_slide_min: sectionSlideRange.min,
+      section_slide_max: sectionSlideRange.max,
+      language: $("#language").val(),
+      model: config.model,
+      figure_assets: buildFigureAssetPayload(),
+      selected_sections: selectedSections,
+    };
+  }
+
+  $("#btnApplyGptConfig").on("click", function () {
+    var config = readGptConfig();
+    if (!config) return;
+    setStatus("GPT API 配置已提交，本次生成将使用该配置。", "success");
+  });
+
+  $("#btnSaveGptConfig").on("click", function () {
+    var config = readGptConfig();
+    if (!config) return;
+    saveGptConfigToBrowser(config);
+    setStatus("GPT API 配置已保存到本机浏览器。", "success");
+  });
+
+  function updateOutlineSummary() {
+    if (!generatedOutline || !generatedOutline.sections) {
+      $("#outlineSummary").text("");
+      return;
+    }
+    var sectionCount = generatedOutline.sections.length;
+    var frameCount = generatedOutline.sections.reduce(function (sum, section) {
+      return sum + ((section.frames && section.frames.length) || 0);
+    }, 0);
+    $("#outlineSummary").text(sectionCount + " 个大节，" + frameCount + " 个 frame");
+  }
+
+  function normalizeOutlineFrameCounts(outline) {
+    outline = outline || { title: "Presentation", target_slide_count: 0, sections: [] };
+    outline.sections = Array.isArray(outline.sections) ? outline.sections : [];
+    outline.target_slide_count = 0;
+    outline.sections.forEach(function (section) {
+      section.frames = Array.isArray(section.frames) ? section.frames : [];
+      section.slide_count = section.frames.length;
+      outline.target_slide_count += section.frames.length;
+    });
+    return outline;
+  }
+
+  function requireRenderableOutline(outline) {
+    var normalized = normalizeOutlineFrameCounts(outline);
+    if (!normalized.sections.length) {
+      throw new Error("后端返回的纪要为空，没有可展示的大节");
+    }
+    var frameCount = normalized.sections.reduce(function (sum, section) {
+      return sum + ((section.frames && section.frames.length) || 0);
+    }, 0);
+    if (!frameCount) {
+      throw new Error("后端返回的纪要没有 frame 页面");
+    }
+    return normalized;
+  }
+
+  function refreshOutlineMathPreviews($scope) {
+    var $root = $scope && $scope.length ? $scope : $("#outlineEditor");
+    $root.find(".outline-section").each(function () {
+      var $section = $(this);
+      renderMathText(
+        $section.find(".outline-section-summary-preview").first(),
+        $section.find(".outline-section-summary").val() || "",
+        { emptyText: "暂无大节概要预览。" }
+      );
+    });
+    $root.find(".outline-frame").each(function () {
+      var $frame = $(this);
+      renderMathText(
+        $frame.find(".outline-frame-points-preview").first(),
+        $frame.find(".outline-frame-points").val() || "",
+        { emptyText: "暂无要点预览。" }
+      );
+    });
+  }
+
+  function renderOutlineEditor(outline) {
+    generatedOutline = normalizeOutlineFrameCounts(outline);
+    var sections = generatedOutline.sections || [];
+    if (!sections.length) {
+      $("#outlineEditor").html("");
+      $("#outlinePanel").hide();
+      $("#outlinePlaceholder").show();
+      updateOutlineSummary();
+      schedulePageChecklistUpdate(fullLatex, 0);
+      return;
+    }
+    activeOutlineSectionIndex = Math.max(0, Math.min(activeOutlineSectionIndex, sections.length - 1));
+    var activeSection = sections[activeOutlineSectionIndex] || {};
+    var html = "";
+    html += '<div class="outline-workspace">';
+    html += '<div class="outline-section-nav" aria-label="纪要大节目录">';
+    var pageOffset = 0;
+    sections.forEach(function (section, sectionIndex) {
+      var frameCount = (section.frames || []).length;
+      html += '<div class="outline-section-nav-item' + (sectionIndex === activeOutlineSectionIndex ? " active" : "") + '" data-section="' + sectionIndex + '" role="button" tabindex="0">';
+      html += '<span class="outline-section-nav-id">' + htmlEscape(section.id || String(sectionIndex + 1).padStart(3, "0")) + '</span>';
+      html += '<span class="outline-section-nav-title">' + htmlEscape(section.title || ("大节 " + (sectionIndex + 1))) + '</span>';
+      html += '<span class="outline-section-nav-count">' + frameCount + ' 页</span>';
+      html += '<div class="outline-page-index-popover" aria-label="本大节页面索引">';
+      html += '<div class="outline-page-index-title">页面索引</div>';
+      if (!frameCount) {
+        html += '<div class="outline-page-index-empty">暂无页面</div>';
+      }
+      (section.frames || []).forEach(function (frame, frameIndex) {
+        var pageNumber = pageOffset + frameIndex + 1;
+        html += '<button type="button" class="outline-page-index-item" data-section="' + sectionIndex + '" data-frame="' + frameIndex + '">';
+        html += '<span class="outline-page-index-number">P' + pageNumber + '</span>';
+        html += '<span class="outline-page-index-text">' + htmlEscape(frame.title || ("Frame " + (frameIndex + 1))) + '</span>';
+        html += '</button>';
+      });
+      html += '</div>';
+      html += '</div>';
+      pageOffset += frameCount;
+    });
+    html += '</div>';
+    html += '<div class="outline-section-detail">';
+    html += '<div class="outline-section" data-section="' + activeOutlineSectionIndex + '">';
+    html += '<div class="outline-section-head">';
+    html += '<input class="outline-section-id" value="' + htmlEscape(activeSection.id || "") + '" placeholder="001" />';
+    html += '<input class="outline-section-title" value="' + htmlEscape(activeSection.title || "") + '" placeholder="大节标题" />';
+    html += '<input class="outline-section-count" type="number" min="1" value="' + ((activeSection.frames || []).length) + '" title="大节页数" />';
+    html += '<button type="button" class="btn-secondary outline-refresh-section">刷新本节</button>';
+    html += '<button type="button" class="btn-secondary outline-add-frame">新增 frame</button>';
+    html += '<button type="button" class="btn-secondary outline-save-section">保存本节</button>';
+    html += '</div>';
+    html += '<textarea class="outline-section-summary" placeholder="大节内容概要">' + htmlEscape(activeSection.summary || "") + '</textarea>';
+    html += '<div class="outline-math-preview-label">大节概要公式预览</div>';
+    html += '<div class="outline-math-preview outline-section-summary-preview"></div>';
+    html += '<div class="outline-frames">';
+    (activeSection.frames || []).forEach(function (frame, frameIndex) {
+      html += '<div class="outline-frame" data-frame="' + frameIndex + '" id="outline-frame-' + activeOutlineSectionIndex + '-' + frameIndex + '">';
+      html += '<div class="outline-frame-head">';
+      html += '<input class="outline-frame-title" value="' + htmlEscape(frame.title || "") + '" placeholder="frame 主题" />';
+      html += '<button type="button" class="btn-secondary outline-remove-frame">删除</button>';
+      html += '</div>';
+      html += '<textarea class="outline-frame-summary" placeholder="本页内容概要">' + htmlEscape(frame.summary || "") + '</textarea>';
+      html += '<textarea class="outline-frame-points" placeholder="每行一个要点">' + htmlEscape((frame.key_points || []).join("\n")) + '</textarea>';
+      html += '<div class="outline-math-preview-label">本页要点公式预览</div>';
+      html += '<div class="outline-math-preview outline-frame-points-preview"></div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<div class="outline-section-tools">';
+    html += '<button type="button" class="btn-secondary outline-add-frame">新增 frame</button>';
+    html += '<button type="button" class="btn-secondary outline-remove-section">删除大节</button>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+    $("#outlineEditor").html(html);
+    $("#outlinePanel").show();
+    $("#outlinePlaceholder").hide();
+    $("#tabOutline").prop("disabled", false);
+    setActiveTab("outline");
+    updateOutlineSummary();
+    refreshOutlineMathPreviews($("#outlineEditor"));
+    schedulePageChecklistUpdate(fullLatex, 0);
+  }
+
+  function collectOutlineFromEditor() {
+    var outline = {
+      title: (generatedOutline && generatedOutline.title) || "Presentation",
+      target_slide_count: 0,
+      sections: (generatedOutline && generatedOutline.sections ? generatedOutline.sections : []).map(function (section) {
+        return {
+          id: section.id || "",
+          title: section.title || "",
+          summary: section.summary || "",
+          slide_count: section.slide_count || ((section.frames || []).length),
+          frames: (section.frames || []).map(function (frame) {
+            return {
+              title: frame.title || "",
+              summary: frame.summary || "",
+              key_points: (frame.key_points || []).slice(),
+            };
+          }),
+        };
+      }),
+    };
+    $("#outlineEditor .outline-section").each(function () {
+      var $section = $(this);
+      var sectionIndex = parseInt($section.data("section"), 10);
+      var frames = [];
+      $section.find(".outline-frame").each(function () {
+        var $frame = $(this);
+        var points = String($frame.find(".outline-frame-points").val() || "")
+          .split(/\r?\n/)
+          .map(function (line) { return line.trim(); })
+          .filter(Boolean);
+        frames.push({
+          title: String($frame.find(".outline-frame-title").val() || "").trim(),
+          summary: String($frame.find(".outline-frame-summary").val() || "").trim(),
+          key_points: points,
+        });
+      });
+      if (Number.isNaN(sectionIndex)) sectionIndex = outline.sections.length;
+      outline.sections[sectionIndex] = {
+        id: String($section.find(".outline-section-id").val() || "").trim(),
+        title: String($section.find(".outline-section-title").val() || "").trim(),
+        summary: String($section.find(".outline-section-summary").val() || "").trim(),
+        slide_count: frames.length,
+        frames: frames,
+      };
+    });
+    outline.sections.forEach(function (section) {
+      outline.target_slide_count += ((section.frames && section.frames.length) || 0);
+    });
+    return outline;
+  }
+
+  $("#btnAddOutlineSection").on("click", function () {
+    var outline = collectOutlineFromEditor();
+    var nextIndex = outline.sections.length + 1;
+    outline.sections.push({
+      id: String(nextIndex).padStart(3, "0"),
+      title: "New Section",
+      summary: "",
+      slide_count: 1,
+      frames: [{ title: "New Frame", summary: "", key_points: [] }],
+    });
+    activeOutlineSectionIndex = outline.sections.length - 1;
+    renderOutlineEditor(outline);
+  });
+
+  $("#btnSaveOutline").on("click", function () {
+    if (!generatedOutline || !generatedOutline.sections || !generatedOutline.sections.length) {
+      setStatus("当前没有可保存的纪要。", "error");
+      return;
+    }
+    var outline = collectOutlineFromEditor();
+    saveOutlineToBrowser(outline);
+    generatedOutline = outline;
+    updateOutlineSummary();
+    setStatus("纪要已保存到本机浏览器。", "success");
+  });
+
+  $("#btnLoadSavedOutline").on("click", function () {
+    loadSavedOutlineIntoEditor();
+  });
+
+  $("#btnLoadSavedOutlineInput").on("click", function () {
+    loadSavedOutlineIntoEditor();
+  });
+
+  function loadSavedOutlineIntoEditor() {
+    try {
+      var outline = loadOutlineFromBrowser();
+      if (!outline) {
+        setStatus("本机浏览器中没有已保存纪要。", "error");
+        return;
+      }
+      activeOutlineSectionIndex = 0;
+      renderOutlineEditor(requireRenderableOutline(outline));
+      setStatus("已调用保存的纪要，可继续编辑或生成 LaTeX。", "success");
+    } catch (err) {
+      setStatus("调用纪要失败: " + err.message, "error");
+    }
+  }
+
+  $("#btnDownloadOutline").on("click", function () {
+    if (!generatedOutline || !generatedOutline.sections || !generatedOutline.sections.length) {
+      setStatus("当前没有可下载的纪要。", "error");
+      return;
+    }
+    var outline = collectOutlineFromEditor();
+    generatedOutline = outline;
+    var text = JSON.stringify(outline, null, 2);
+    downloadFile(text, outlineStorageTitle(outline) + "_" + today() + "_outline.json", "application/json");
+    setStatus("纪要 JSON 已下载。", "success");
+  });
+
+  $("#outlineEditor").on("click", ".outline-section-nav-item", function () {
+    generatedOutline = collectOutlineFromEditor();
+    activeOutlineSectionIndex = parseInt($(this).data("section"), 10) || 0;
+    renderOutlineEditor(generatedOutline);
+  });
+
+  $("#outlineEditor").on("keydown", ".outline-section-nav-item", function (event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    $(this).trigger("click");
+  });
+
+  $("#outlineEditor").on("click", ".outline-page-index-item", function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    var sectionIndex = parseInt($(this).data("section"), 10);
+    var frameIndex = parseInt($(this).data("frame"), 10);
+    if (Number.isNaN(sectionIndex) || Number.isNaN(frameIndex)) return;
+    generatedOutline = collectOutlineFromEditor();
+    activeOutlineSectionIndex = sectionIndex;
+    renderOutlineEditor(generatedOutline);
+    setTimeout(function () {
+      var $detail = $("#outlineEditor .outline-section-detail");
+      var $frame = $("#outline-frame-" + sectionIndex + "-" + frameIndex);
+      if (!$detail.length || !$frame.length) return;
+      var nextTop = $detail.scrollTop() + $frame.position().top - 10;
+      $detail.animate({ scrollTop: Math.max(0, nextTop) }, 160);
+      $frame.addClass("outline-frame-jump-highlight");
+      setTimeout(function () {
+        $frame.removeClass("outline-frame-jump-highlight");
+      }, 900);
+    }, 0);
+  });
+
+  $("#outlineEditor").on("click", ".outline-add-frame", function () {
+    var outline = collectOutlineFromEditor();
+    var sectionIndex = parseInt($(this).closest(".outline-section").data("section"), 10);
+    if (outline.sections[sectionIndex]) {
+      var nextFrame = outline.sections[sectionIndex].frames.length + 1;
+      outline.sections[sectionIndex].frames.push({
+        title: "User Added Frame " + nextFrame,
+        summary: "用户新增 frame：请根据本大节 Markdown 内容生成这一页。",
+        key_points: ["保留该新增 frame", "结合本大节知识点展开"],
+      });
+    }
+    renderOutlineEditor(outline);
+  });
+
+  $("#outlineEditor").on("click", ".outline-remove-frame", function () {
+    var outline = collectOutlineFromEditor();
+    var $section = $(this).closest(".outline-section");
+    var sectionIndex = parseInt($section.data("section"), 10);
+    var frameIndex = parseInt($(this).closest(".outline-frame").data("frame"), 10);
+    if (outline.sections[sectionIndex]) {
+      outline.sections[sectionIndex].frames.splice(frameIndex, 1);
+      if (!outline.sections[sectionIndex].frames.length) {
+        outline.sections[sectionIndex].frames.push({ title: "New Frame", summary: "", key_points: [] });
+      }
+    }
+    renderOutlineEditor(outline);
+  });
+
+  $("#outlineEditor").on("click", ".outline-remove-section", function () {
+    var outline = collectOutlineFromEditor();
+    var sectionIndex = parseInt($(this).closest(".outline-section").data("section"), 10);
+    outline.sections.splice(sectionIndex, 1);
+    activeOutlineSectionIndex = Math.max(0, Math.min(sectionIndex, outline.sections.length - 1));
+    renderOutlineEditor(outline);
+  });
+
+  $("#outlineEditor").on("click", ".outline-save-section", function () {
+    generatedOutline = collectOutlineFromEditor();
+    renderOutlineEditor(generatedOutline);
+    setStatus("本节纪要已保存。", "success");
+  });
+
+  $("#outlineEditor").on("change", ".outline-section-count", function (event) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    var sectionIndex = parseInt($(this).closest(".outline-section").data("section"), 10);
+    var nextCount = Math.max(1, Math.min(80, parseInt($(this).val(), 10) || 1));
+    var outline = collectOutlineFromEditor();
+    var section = outline.sections[sectionIndex];
+    if (!section) return;
+    section.frames = section.frames || [];
+    while (section.frames.length < nextCount) {
+      section.frames.push({
+        title: "New Frame " + (section.frames.length + 1),
+        summary: "",
+        key_points: [],
+      });
+    }
+    if (section.frames.length > nextCount) {
+      section.frames = section.frames.slice(0, nextCount);
+    }
+    section.slide_count = section.frames.length;
+    activeOutlineSectionIndex = sectionIndex;
+    renderOutlineEditor(outline);
+    setStatus("本节页数已调整为 " + nextCount + " 页。", "success");
+  });
+
+  $("#outlineEditor").on("click", ".outline-refresh-section", function () {
+    if (isGenerating) return;
+    var $button = $(this);
+    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+    var outline = collectOutlineFromEditor();
+    var section = outline.sections[sectionIndex];
+    if (!section) return;
+    var content = $("#content").val().trim();
+    if (!content) {
+      setStatus("请先导入 .md/.markdown 知识图谱文件", "error");
+      return;
+    }
+    var payload = buildBaseGenerationPayload(content);
+    if (!payload) return;
+    payload.section_id = section.id;
+    payload.slide_count = Math.max(1, Math.min(80, (section.frames && section.frames.length) || section.slide_count || 1));
+    setGenerating(true);
+    $button.prop("disabled", true).text("刷新中...");
+    setStatus("正在刷新大节 " + (section.id || sectionIndex + 1) + " 的纪要...", "info");
+    fetch("/beamer-generator/api/regenerate-outline-section", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(function (resp) {
+        return resp.json().then(function (data) {
+          if (!resp.ok || data.error || data.detail) throw new Error(data.detail || data.error || resp.statusText);
+          return data;
+        });
+      })
+      .then(function (data) {
+        outline.sections[sectionIndex] = data.section;
+        renderOutlineEditor(normalizeOutlineFrameCounts(outline));
+        setStatus("大节纪要已刷新。", "success");
+      })
+      .catch(function (err) {
+        setStatus("大节纪要刷新失败: " + err.message, "error");
+      })
+      .finally(function () {
+        setGenerating(false);
+      });
+  });
+
+  $("#outlineEditor").on("input change", "input, textarea", function () {
+    generatedOutline = collectOutlineFromEditor();
+    updateOutlineSummary();
+    refreshOutlineMathPreviews($(this).closest(".outline-section"));
+    schedulePageChecklistUpdate(fullLatex, 260);
+  });
+
+  $("#btnGenerateOutline").on("click", function () {
+    if (isGenerating) return;
+    var content = $("#content").val().trim();
+    if (!content) {
+      setStatus("请先导入 .md/.markdown 知识图谱文件", "error");
+      return;
+    }
+    var payload = buildBaseGenerationPayload(content);
+    if (!payload) return;
+    setGenerating(true);
+    $("#btnGenerateOutline").prop("disabled", true).text("生成纪要中...");
+    startOutlineProgress("正在提交纪要生成请求...");
+    fetch("/beamer-generator/api/generate-outline", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(function (resp) {
+        setOutlineProgress(Math.max(outlineGenerateProgress, 18), "已连接后端，正在等待 GPT 返回纪要...");
+        return resp.json().then(function (data) {
+          if (!resp.ok) throw new Error(data.detail || data.error || ("HTTP " + resp.status));
+          return data;
+        });
+      })
+      .then(function (data) {
+        setOutlineProgress(94, "已收到纪要，正在渲染可编辑目录...");
+        var outline = requireRenderableOutline(data && data.outline);
+        activeOutlineSectionIndex = 0;
+        renderOutlineEditor(outline);
+        $("#tabOutline").prop("disabled", false);
+        setActiveTab("outline");
+        finishOutlineProgress("纪要生成完成，请检查并修改后生成 LaTeX。", "success");
+        setStatus("纪要已生成，请检查并修改后点击右上角生成 LaTeX。", "success");
+      })
+      .catch(function (err) {
+        finishOutlineProgress("纪要生成失败：" + err.message, "error");
+        setStatus("纪要生成失败: " + err.message, "error");
+      })
+      .finally(function () {
+        setGenerating(false);
+        $("#btnGenerateOutline").prop("disabled", false).text("生成纪要");
+      });
+  });
+
   $("#btnGenerate").on("click", function () {
     if (isGenerating) return;
 
@@ -3600,30 +6817,29 @@
       setStatus("请先导入 .md/.markdown 知识图谱文件", "error");
       return;
     }
+    if (!generatedOutline || !generatedOutline.sections || !generatedOutline.sections.length) {
+      setStatus("请先点击“生成纪要”，确认或修改后再生成演示文稿。", "error");
+      $("#btnGenerateOutline").focus();
+      return;
+    }
 
     var previousLatex = fullLatex;
     var generatedLatex = "";
     var receivedFirstChunk = false;
-    currentCustomRequirements = $("#customRequirements").val().trim();
     $("#tabPpt").prop("disabled", true);
+    generatedOutline = collectOutlineFromEditor();
+    var payload = buildBaseGenerationPayload(content);
+    if (!payload) return;
+    payload.outline = generatedOutline;
     setGenerating(true);
-    updateLatexGenerateProgress(5, "正在使用网站统一 DeepSeek 配置生成 LaTeX...");
+    updateLatexGenerateProgress(5, "正在根据已确认纪要生成 LaTeX...");
 
-    var payload = {
-      content: content,
-      style: $("#style").val(),
-      custom_requirements: currentCustomRequirements,
-      slide_count: Math.max(25, parseInt($("#slideCount").val(), 10) || 25),
-      language: $("#language").val(),
-      figure_assets: buildFigureAssetPayload(),
-    };
-
-    var generateTimeoutMs = 300000;
+    var generateTimeoutMs = 900000;
     var abortCtrl = new AbortController();
     var timeoutId = setTimeout(function () {
       abortCtrl.abort();
       setGenerating(false);
-      setStatus("生成超时，5 分钟无新数据", "error");
+      setStatus("生成超时，15 分钟无后端数据。若页数较多，请减少页数或分章节生成。", "error");
     }, generateTimeoutMs);
 
     function resetTimeout() {
@@ -3631,7 +6847,7 @@
       timeoutId = setTimeout(function () {
         abortCtrl.abort();
         setGenerating(false);
-      setStatus("生成超时，5 分钟无新数据", "error");
+        setStatus("生成超时，15 分钟无后端数据。若页数较多，请减少页数或分章节生成。", "error");
       }, generateTimeoutMs);
     }
 
@@ -3644,7 +6860,7 @@
       .then(function (resp) {
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         resetTimeout();
-        updateLatexGenerateProgress(12, "已连接 DeepSeek，正在等待生成...");
+        updateLatexGenerateProgress(12, "已连接 GPT，正在等待生成...");
         var reader = resp.body.getReader();
         var decoder = new TextDecoder();
         var buffer = "";
@@ -3657,13 +6873,14 @@
                     setGenerating(false);
                     fullLatex = previousLatex;
                     updateLatexEditor(previousLatex);
-                    setStatus("DeepSeek 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
+                    setStatus("GPT 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
                   } else {
                     updateLatexGenerateProgress(100, "生成完成，共 " + fullLatex.length + " 字符");
                     setGenerating(false);
                     fullLatex = applyCustomRequirementOverrides(generatedLatex, currentCustomRequirements);
                     sourceLatex = fullLatex;
                     updateLatexEditor(fullLatex);
+                    setActiveTab("latex");
                     setStatus("生成完成，共 " + fullLatex.length + " 字符", "success");
                   }
                 }
@@ -3687,7 +6904,8 @@
               }
 
               if (d.type === "heartbeat") {
-                updateLatexGenerateProgress(Math.max(latexGenerateProgress, 18), "已连接，等待 DeepSeek 生成...");
+                var heartbeatProgress = Math.max(latexGenerateProgress, receivedFirstChunk ? latexGenerateProgress : 18);
+                updateLatexGenerateProgress(heartbeatProgress, d.content || "已连接，等待 GPT 生成...");
               } else if (d.type === "chunk") {
                 if (!receivedFirstChunk) {
                   receivedFirstChunk = true;
@@ -3707,12 +6925,13 @@
                   setGenerating(false);
                   fullLatex = previousLatex;
                   updateLatexEditor(previousLatex);
-                  setStatus("DeepSeek 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
+                  setStatus("GPT 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
                   return;
                 }
                 fullLatex = applyCustomRequirementOverrides(generatedLatex, currentCustomRequirements);
                 sourceLatex = fullLatex;
                 updateLatexEditor(fullLatex);
+                setActiveTab("latex");
                 updateLatexGenerateProgress(100, "生成完成，共 " + fullLatex.length + " 字符");
                 setGenerating(false);
                 setStatus("生成完成，共 " + fullLatex.length + " 字符", "success");
@@ -3769,8 +6988,95 @@
       fullLatex = editor.getValue();
       sourceLatex = fullLatex;
     }
+    if (latexHasExternalGraphicRefs(fullLatex) && Object.keys(buildFigureAssetPayload()).length) {
+      setStatus("当前 LaTeX 引用了 fig 图片，正在下载包含图片的 Overleaf ZIP...", "info");
+      postProjectJson(["/beamer-generator/api/overleaf-package", "/beamer-generator/api/overleaf-package/", "/api/overleaf-package"], buildOverleafPayload())
+        .then(function (data) {
+          if (!data || data.error || data.success === false || !data.snip_uri) {
+            throw new Error((data && data.error) || "未生成 ZIP");
+          }
+          return fetch(data.snip_uri).then(function (resp) { return resp.blob(); }).then(function (blob) {
+            downloadFile(blob, (data.filename || ("presentation_" + today() + "_overleaf.zip")), "application/zip");
+            setStatus("已下载包含 main.tex 和 fig 图片的 Overleaf ZIP", "success");
+          });
+        })
+        .catch(function (err) {
+          setStatus("下载 Overleaf ZIP 失败: " + (err && err.message ? err.message : err), "error");
+        });
+      return;
+    }
     downloadFile(fullLatex, "presentation_" + today() + ".tex", "application/x-tex");
     setStatus("操作完成", "success");
+  });
+
+  function buildOverleafPayload() {
+    if (editor && editor.getValue) {
+      fullLatex = editor.getValue();
+      sourceLatex = fullLatex;
+    }
+    if (slidesData && $("#slideCanvas").find(":focus").length) {
+      saveCurrentSlide();
+      syncLatexFromSlides();
+    }
+    var payload = buildProjectSavePayload();
+    if (!payload) {
+      payload = {
+        title: ($("#pptChapterTitleInput").val() || "Presentation"),
+        subtitle: "",
+        author: "",
+        date: "",
+        slides: [],
+        figure_assets: buildFigureAssetPayload(),
+        latex: fullLatex || "",
+      };
+    }
+    payload.latex = fullLatex || payload.latex || "";
+    payload.figure_assets = buildFigureAssetPayload();
+    return payload;
+  }
+
+  $("#btnOpenOverleaf").on("click", function () {
+    if (!fullLatex && editor && editor.getValue) {
+      fullLatex = editor.getValue();
+      sourceLatex = fullLatex;
+    }
+    if (!fullLatex || !fullLatex.trim()) {
+      setStatus("没有可发送到 Overleaf 的 LaTeX 内容", "error");
+      return;
+    }
+
+    var popupName = "kg_overleaf_" + Date.now();
+    var popup = null;
+    try {
+      popup = window.open("about:blank", popupName);
+      if (popup && popup.document) {
+        popup.document.write("<p>正在打开 Overleaf...</p>");
+        popup.document.close();
+      }
+    } catch (err) {
+      popup = null;
+    }
+
+    var $button = $(this);
+    var payload = buildOverleafPayload();
+    $button.prop("disabled", true).text("正在打开...");
+    setStatus("正在打包 Overleaf 项目...", "info");
+    postProjectJson(["/beamer-generator/api/overleaf-package", "/beamer-generator/api/overleaf-package/", "/api/overleaf-package"], payload)
+      .then(function (data) {
+        if (!data || data.error || data.success === false || !data.snip_uri) {
+          throw new Error((data && (data.error || data.detail)) || "Overleaf 项目包生成失败");
+        }
+        $("#overleafZipDataUri").val(data.snip_uri);
+        $("#openOverleafForm").attr("target", popup ? popupName : "_blank")[0].submit();
+        setStatus("已打开 Overleaf，请在新窗口继续编辑和编译", "success");
+      })
+      .catch(function (err) {
+        if (popup && !popup.closed) popup.close();
+        setStatus("打开 Overleaf 失败: " + err.message, "error");
+      })
+      .finally(function () {
+        $button.prop("disabled", !fullLatex).text("在 Overleaf 中编辑");
+      });
   });
 
   $(document).on("click", "#btnUndoPpt", function () {
@@ -3787,6 +7093,10 @@
       sourceLatex = fullLatex;
     }
     if (!fullLatex) return;
+    if (isLatexImportMode) {
+      setStatus("当前模式只保留 PPTX 转 LaTeX，不再执行高保真 PPT 渲染。", "info");
+      return;
+    }
     setStatus("正在解析 LaTeX 结构...", "info");
 
     $.ajax({
@@ -3812,8 +7122,8 @@
 
         slidesData = data;
         $("#pptChapterTitleInput").val("");
-        sourceLatex = fullLatex;
-        fullLatex = buildLatexFromSlides(slidesData);
+        sourceLatex = data.latex || fullLatex;
+        fullLatex = data.latex || buildLatexFromSlides(slidesData);
         sourceLatex = fullLatex;
         updateLatexEditor(fullLatex);
         currentSlideIdx = data.slides.length > 0 ? 0 : -1;
@@ -3847,74 +7157,7 @@
   }
 
   function renderSlideThumbPreview(slide, pageIndex) {
-    slide = slide || {};
-    var items = Array.isArray(slide.items) ? slide.items.slice(0, 4) : [];
-    var equations = Array.isArray(slide.equations) ? slide.equations.slice(0, 1) : [];
-    var placeholders = Array.isArray(slide.placeholders) ? slide.placeholders.slice(0, 4) : [];
-    var images = Array.isArray(slide.images) ? slide.images.slice(0, 4) : [];
-    var textboxes = Array.isArray(slide.textboxes) ? slide.textboxes.slice(0, 4) : [];
-    var callouts = Array.isArray(slide.callouts) ? slide.callouts.slice(0, 3) : [];
-    var hasVisibleContent = items.length || equations.length || placeholders.length || images.length ||
-      textboxes.length || callouts.length || (slide.table && slide.table.headers);
-    var html = '<div class="slide-thumb-preview' + (slide.reviewBackground ? " review-background" : "") + '">' +
-      '<div class="slide-thumb-preview-topline"></div>' +
-      '<div class="slide-thumb-preview-page">' + (pageIndex + 1) + '</div>' +
-      '<div class="slide-thumb-preview-title">' + escHtml(slide.title || "(Untitled)") + '</div>';
-    if (slide.subtitle) {
-      html += '<div class="slide-thumb-preview-subtitle">' + escHtml(String(slide.subtitle).slice(0, 80)) + '</div>';
-    }
-    html += '<div class="slide-thumb-preview-content">';
-    if (items.length) {
-      html += '<ul>';
-      items.forEach(function (item) {
-        html += '<li>' + escHtml(String(item || "").replace(/\s+/g, " ").slice(0, 90)) + '</li>';
-      });
-      html += '</ul>';
-    }
-    if (equations.length) {
-      html += '<div class="slide-thumb-preview-equation">' + escHtml(String(equations[0] || "").slice(0, 80)) + '</div>';
-    }
-    if (slide.table && slide.table.headers) {
-      html += '<div class="slide-thumb-preview-table"><span></span><span></span><span></span></div>';
-    }
-    if (!hasVisibleContent) {
-      html += '<div class="slide-thumb-preview-empty">空白页</div>';
-    }
-    html += '</div>';
-
-    placeholders.forEach(function (ph, phIdx) {
-      ph = ph || {};
-      var phUrl = ph.asset || ph.url || ph.path || "";
-      var phStyle = slideThumbBoxStyle(ph, { x: 500 + phIdx * 12, y: 120 + phIdx * 12, width: 235, height: 165 });
-      if (phUrl) {
-        html += '<img class="slide-thumb-preview-image" style="' + phStyle + '" src="' + escAttr(phUrl) + '" alt="" />';
-      } else {
-        html += '<div class="slide-thumb-preview-placeholder" style="' + phStyle + '">' +
-          escHtml(String(ph.label || ph.figure || "Figure").slice(0, 28)) + '</div>';
-      }
-    });
-    images.forEach(function (img, imgIdx) {
-      img = img || {};
-      var imgUrl = img.url || img.path || img.src || "";
-      if (!imgUrl) return;
-      var imgStyle = slideThumbBoxStyle(img, { x: 40 + imgIdx * 16, y: 170 + imgIdx * 12, width: 220, height: 150 });
-      html += '<img class="slide-thumb-preview-image" style="' + imgStyle + '" src="' + escAttr(imgUrl) + '" alt="" />';
-    });
-    textboxes.forEach(function (tb, tbIdx) {
-      tb = tb || {};
-      var tbStyle = slideThumbBoxStyle(tb, { x: 120 + tbIdx * 14, y: 210 + tbIdx * 12, width: 260, height: 70 });
-      var fontSize = Math.max(5, Math.min(9, (Number(tb.fontSize) || 14) * 0.45));
-      html += '<div class="slide-thumb-preview-textbox" style="' + tbStyle + ';font-size:' + fontSize.toFixed(1) + 'px">' +
-        escHtml(String(tb.text || "").replace(/\s+/g, " ").slice(0, 70)) + '</div>';
-    });
-    callouts.forEach(function (callout, calloutIdx) {
-      callout = callout || {};
-      var calloutStyle = slideThumbBoxStyle(callout, { x: 130 + calloutIdx * 18, y: 178 + calloutIdx * 18, width: 250, height: 92 });
-      html += '<div class="slide-thumb-preview-callout" style="' + calloutStyle + '">' +
-        escHtml(String(callout.text || "").replace(/\s+/g, " ").slice(0, 38)) + '</div>';
-    });
-    html += '</div>';
-    return html;
+    return renderSlideMiniature(slide, pageIndex, "slide-thumb-preview");
   }
 
   function renderSlideList() {
@@ -3968,7 +7211,7 @@
         var s = slidesData.slides[idx];
         var $thumb = $(
           '<div class="slide-thumb" draggable="true" data-idx="' + idx + '" title="按住拖动可调整页面顺序">' +
-            '<button class="slide-thumb-delete" title="Delete">&times;</button>' +
+            '<button type="button" class="slide-thumb-delete" title="删除该页" aria-label="删除第 ' + (idx + 1) + ' 页">&times;</button>' +
             renderSlideThumbPreview(s, idx) +
             '<div class="slide-thumb-meta">' +
               '<span class="slide-thumb-number">Page ' + (idx + 1) + '</span>' +
@@ -4027,6 +7270,7 @@
         });
 
         $list.append($thumb);
+        renderSlideMiniatureMath($thumb);
       })(i);
     }
     appendSavedSlideDropzone(slidesData.slides.length);
@@ -4087,7 +7331,12 @@
     if (slide.table) slide.table = normalizeTable(slide.table);
 
     var $left = $('<div class="slide-main-area"></div>');
-    var $render = $('<div class="slide-render' + (slide.reviewBackground ? " review-background" : "") + '" data-sync-key="' + escAttr(syncKey(currentSlideIdx, "frame")) + '"></div>');
+    var renderedBg = slide.renderedBackground || "";
+    var useRenderedBg = !!renderedBg && slide.backgroundMode !== "white";
+    var $render = $('<div class="slide-render' + (slide.reviewBackground ? " review-background" : "") + (useRenderedBg ? " has-rendered-background" : "") + '" data-sync-key="' + escAttr(syncKey(currentSlideIdx, "frame")) + '"></div>');
+    if (useRenderedBg) {
+      $render.append('<img class="slide-rendered-background" src="' + escAttr(renderedBg) + '" alt="" draggable="false" />');
+    }
     $render.append('<div class="slide-topline"></div>');
 
     $render.append(
@@ -4111,7 +7360,19 @@
       '<div class="slide-subtitle-input slide-subtitle-rich slide-rich-text-preview" contenteditable="true" spellcheck="false" data-sync-key="' + escAttr(syncKey(currentSlideIdx, "subtitle")) + '" data-math-source=".slide-subtitle-input" data-rich-html="' + escAttr(slide.subtitleRichHtml || "") + '"></div>'
     );
 
-    var $body = $('<div class="slide-body"></div>');
+    if (slide.type === "title") {
+      $render.append(
+        '<div class="slide-title-credit slide-formula-host">' +
+          '<textarea class="slide-title-credit-input slide-hidden-math-source" data-field="titleCredit" data-sync-key="' + escAttr(syncKey(currentSlideIdx, "titleCredit")) + '" placeholder="作者 / 日期">' +
+            escHtml(slide.titleCredit || "") +
+          '</textarea>' +
+          '<div class="slide-title-credit-rich slide-rich-text-preview" contenteditable="true" spellcheck="false" data-sync-key="' + escAttr(syncKey(currentSlideIdx, "titleCredit")) + '" data-math-source=".slide-title-credit-input"></div>' +
+          '<div class="slide-formula-boxes slide-title-credit-formulas" data-formula-source=".slide-title-credit-input"></div>' +
+        '</div>'
+      );
+    }
+
+    var $body = $('<div class="slide-body' + (slide.hideParsedContent ? " slide-parsed-content-hidden" : "") + '"></div>');
     var hasRightPlaceholder = (slide.placeholders || []).some(function (ph) {
       var x = parseFloat(ph && ph.x) || 0;
       return x >= 430;
@@ -4145,6 +7406,20 @@
       $body.append($eqs);
     }
 
+    if (slide.missing_equations && slide.missing_equations.length > 0) {
+      var $missing = $('<div class="slide-missing-equations"></div>');
+      $.each(slide.missing_equations, function (_j, eq) {
+        var label = (eq && (eq.label || eq.key)) || "Unknown equation";
+        $missing.append(
+          '<div class="slide-missing-equation">' +
+            '<strong>缺失公式：</strong>' + escHtml(label) +
+            '<span>请导入包含该公式的章节，系统会自动补全。</span>' +
+          '</div>'
+        );
+      });
+      $body.append($missing);
+    }
+
     if (slide.table && slide.table.headers) {
       $body.append(renderEditableTable(slide.table));
     }
@@ -4155,6 +7430,9 @@
     });
     $.each(slide.textboxes, function (j, tb) {
       $textboxes.append(createTextbox(j, tb));
+    });
+    $.each(slide.formulaBoxes || [], function (j, box) {
+      $textboxes.append(createFormulaBox(j, box));
     });
     $.each(slide.callouts, function (j, callout) {
       $textboxes.append(createCallout(j, callout));
@@ -4210,7 +7488,7 @@
         '<div class="toolbar-color">' +
           '<label>背景</label>' +
           '<input type="color" id="toolbarBgColor" value="#ffffff" />' +
-          '<button id="toolbarResetBgColor" class="toolbar-btn toolbar-mini toolbar-reset-btn" type="button" title="恢复白色背景">白底</button>' +
+          '<button id="toolbarResetBgColor" class="toolbar-btn toolbar-mini toolbar-reset-btn" type="button" title="恢复当前页面白色背景">白底</button>' +
         '</div>' +
         '<div class="toolbar-sep"></div>' +
         '<div class="toolbar-label">字号</div>' +
@@ -4238,9 +7516,6 @@
     bindSlideEvents($canvas);
     updateHistoryButtons();
     updateScopedMathPreviews($canvas);
-    setTimeout(function () {
-      syncAllTextboxHeights($canvas);
-    }, 0);
   }
 
   function createItemRow(idx, text) {
@@ -4462,9 +7737,6 @@
       '</div>'
     );
     $box.find(".slide-textbox-content").css("height", Math.max(30, height - 18) + "px");
-    setTimeout(function () {
-      syncTextboxHeight($box);
-    }, 0);
 
     $box.find(".slide-textbox-drag").on("mousedown", function (e) {
       e.preventDefault();
@@ -4533,11 +7805,17 @@
         '<div class="slide-callout-drag" title="拖动蓝色箭头框">::</div>' +
         '<textarea class="slide-callout-content" data-sync-key="' + escAttr(key) + '" data-callout-content="' + idx + '" style="font-size:' + fontSize + 'px;text-align:' + escAttr(align) + ';" placeholder="输入标注文字...">' +
           escHtml(repairPptLatexArtifacts(callout.text || "蓝色箭头框")) + '</textarea>' +
+        '<div class="slide-callout-preview" style="font-size:' + fontSize + 'px;text-align:' + escAttr(align) + ';"></div>' +
         '<button class="slide-callout-remove" data-action="remove-callout" data-callout="' + idx + '">&times;</button>' +
         '<div class="slide-callout-resize-handle"></div>' +
       '</div>'
     );
     $box.find(".slide-callout-content").css("height", Math.max(28, height - 18) + "px");
+    renderMathText($box.find(".slide-callout-preview"), repairPptLatexArtifacts(callout.text || "蓝色箭头框"), {
+      displayMode: false,
+      boxedMath: false,
+      emptyText: "",
+    });
 
     $box.find(".slide-callout-drag").on("mousedown", function (e) {
       e.preventDefault();
@@ -4583,9 +7861,105 @@
         var newH = Math.min(parentH - top, Math.max(50, origH + (e2.clientY - startY)));
         $box.css({ width: newW + "px", height: newH + "px" });
         $box.find(".slide-callout-content").css("height", (newH - 18) + "px");
+        $box.find(".slide-callout-preview").css("min-height", Math.max(28, newH - 18) + "px");
       });
       $(document).on("mouseup.calloutresize", function () {
         $(document).off("mousemove.calloutresize mouseup.calloutresize");
+        saveCurrentSlide();
+        commitHistorySnapshot(false);
+        scheduleLatexSync();
+      });
+    });
+
+    return $box;
+  }
+
+  function createFormulaBox(idx, box) {
+    box = box || {};
+    var key = syncKey(currentSlideIdx, "formulaBox", idx);
+    var width = clampNumber(box.width, 140, 780, 520);
+    var height = clampNumber(box.height, 50, 300, 96);
+    var x = clampNumber(box.x, 0, 800 - width, 120 + idx * 18);
+    var y = clampNumber(box.y, 0, 450 - height, 178 + idx * 18);
+    var fontSize = clampNumber(box.fontSize, 12, 36, 18);
+    var formula = latexMathDisplaySource(box.formula || "");
+    var $box = $(
+      '<div class="slide-free-formula-box" data-sync-key="' + escAttr(key) + '" data-formula-box="' + idx + '" data-number="' + escAttr(box.number || "") + '" data-label="' + escAttr(box.label || "") + '" style="left:' + x + 'px;top:' + y + 'px;width:' + width + 'px;height:' + height + 'px;font-size:' + fontSize + 'px;">' +
+        '<div class="slide-free-formula-drag" title="拖动公式框">::</div>' +
+        '<textarea class="slide-free-formula-source slide-hidden-math-source" data-sync-key="' + escAttr(key) + '" data-formula-box-source="' + idx + '">' + escHtml(formula) + '</textarea>' +
+        '<div class="slide-free-formula-preview" data-sync-key="' + escAttr(key) + '"></div>' +
+        '<button class="slide-free-formula-remove" data-action="remove-formula-box" data-formula-box="' + idx + '">&times;</button>' +
+        '<div class="slide-free-formula-resize-handle"></div>' +
+      '</div>'
+    );
+    appendKatexNode($box.find(".slide-free-formula-preview").empty(), formula, true, formula);
+
+    $box.on("dblclick", function (e) {
+      if ($(e.target).is("button, .slide-free-formula-resize-handle, .slide-free-formula-drag")) return;
+      e.stopPropagation();
+      $box.toggleClass("is-editing", true);
+      $box.find(".slide-free-formula-source").focus().select();
+    });
+
+    $box.find(".slide-free-formula-source").on("input", function () {
+      var next = latexMathDisplaySource($(this).val());
+      $box.find(".slide-free-formula-preview").empty();
+      appendKatexNode($box.find(".slide-free-formula-preview"), next, true, next);
+      saveCurrentSlide();
+      scheduleLatexSync();
+      scheduleHistoryCommit();
+    }).on("blur", function () {
+      setTimeout(function () {
+        if (!$box.find(":focus").length) $box.removeClass("is-editing");
+      }, 120);
+    });
+
+    $box.find(".slide-free-formula-drag").on("mousedown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var startX = e.clientX;
+      var startY = e.clientY;
+      var origX = parseFloat($box.css("left")) || 0;
+      var origY = parseFloat($box.css("top")) || 0;
+      $box.addClass("dragging");
+      $(document).on("mousemove.formuladrag", function (e2) {
+        var parentW = $box.parent().width() || 860;
+        var parentH = $box.parent().height() || 484;
+        var boxW = cssPx($box, "width", width);
+        var boxH = cssPx($box, "height", height);
+        $box.css({
+          left: clampNumber(origX + (e2.clientX - startX), 0, parentW - boxW, 0) + "px",
+          top: clampNumber(origY + (e2.clientY - startY), 0, parentH - boxH, 0) + "px",
+        });
+      });
+      $(document).on("mouseup.formuladrag", function () {
+        $box.removeClass("dragging");
+        $(document).off("mousemove.formuladrag mouseup.formuladrag");
+        saveCurrentSlide();
+        commitHistorySnapshot(false);
+        scheduleLatexSync();
+      });
+    });
+
+    $box.find(".slide-free-formula-resize-handle").on("mousedown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var startX = e.clientX;
+      var startY = e.clientY;
+      var origW = cssPx($box, "width", width);
+      var origH = cssPx($box, "height", height);
+      $(document).on("mousemove.formularesize", function (e2) {
+        var parentW = $box.parent().width() || 860;
+        var parentH = $box.parent().height() || 484;
+        var left = parseFloat($box.css("left")) || 0;
+        var top = parseFloat($box.css("top")) || 0;
+        $box.css({
+          width: Math.min(parentW - left, Math.max(140, origW + (e2.clientX - startX))) + "px",
+          height: Math.min(parentH - top, Math.max(50, origH + (e2.clientY - startY))) + "px",
+        });
+      });
+      $(document).on("mouseup.formularesize", function () {
+        $(document).off("mousemove.formularesize mouseup.formularesize");
         saveCurrentSlide();
         commitHistorySnapshot(false);
         scheduleLatexSync();
@@ -4673,6 +8047,7 @@
 
   function renderEditableTable(table) {
     table = normalizeTable(table);
+    var columnWidths = latexTableColumnWidths(table.columnSpec, (table.headers || []).length);
     var html = '<div class="slide-table-wrap">' +
       '<div class="slide-table-tools">' +
         '<button type="button" data-action="add-table-row" title="新增一行">+ 行</button>' +
@@ -4681,7 +8056,15 @@
         '<button type="button" data-action="remove-table-col" title="删除最后一列">- 列</button>' +
         '<button type="button" data-action="remove-table" title="删除当前表格">删除表格</button>' +
       '</div>' +
-      '<table class="slide-table"><thead><tr>';
+      '<table class="slide-table">';
+    if (columnWidths.length) {
+      html += '<colgroup>';
+      $.each(columnWidths, function (_idx, width) {
+        html += '<col style="width:' + escAttr(width) + '">';
+      });
+      html += '</colgroup>';
+    }
+    html += '<thead><tr>';
     $.each(table.headers || [], function (j, h) {
       var key = syncKey(currentSlideIdx, "th", j);
       html += '<th>' +
@@ -4708,7 +8091,7 @@
   function bindSlideEvents($ctx) {
     $ctx.off("click.slide dblclick.slide mousedown.slide focus.slide blur.slide input.slide change.slide select.sync mouseup.sync keyup.sync");
 
-    $ctx.on("focus.slide", ".slide-item-input, .slide-textbox-content, .slide-callout-content, .slide-eq-input, .slide-title-input, .slide-subtitle-input, .slide-notes-input", function () {
+    $ctx.on("focus.slide", ".slide-item-input, .slide-textbox-content, .slide-callout-content, .slide-free-formula-source, .slide-eq-input, .slide-title-input, .slide-subtitle-input, .slide-title-credit-input, .slide-notes-input", function () {
       lastFocusedInput = this;
       lastFocusedTextbox = $(this).closest(".slide-textbox, .slide-callout")[0] || null;
       $(this).closest("[data-math-row]").addClass("is-editing");
@@ -4728,11 +8111,11 @@
       rememberRichTextSelection(this);
     });
 
-    $ctx.on("mousedown.slide", ".slide-item-input, .slide-textbox-content, .slide-callout-content, .slide-eq-input, .slide-title-input, .slide-subtitle-input, .slide-notes-input, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function (e) {
+    $ctx.on("mousedown.slide", ".slide-item-input, .slide-textbox-content, .slide-callout-content, .slide-free-formula-source, .slide-eq-input, .slide-title-input, .slide-subtitle-input, .slide-title-credit-input, .slide-notes-input, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function (e) {
       e.stopPropagation();
     });
 
-    $ctx.on("blur.slide", ".slide-item-input, .slide-textbox-content, .slide-callout-content, .slide-eq-input", function () {
+    $ctx.on("blur.slide", ".slide-item-input, .slide-textbox-content, .slide-callout-content, .slide-free-formula-source, .slide-eq-input", function () {
       var $row = $(this).closest("[data-math-row]");
       setTimeout(function () {
         if (!$row.find(":focus").length) exitMathEdit($row);
@@ -4761,7 +8144,7 @@
       e.stopPropagation();
     });
 
-    $ctx.on("click.slide", ".slide-title-input, .slide-subtitle-input, .slide-item-input, .slide-eq-input, .slide-notes-input, .slide-textbox-content, .slide-callout-content, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function (e) {
+    $ctx.on("click.slide", ".slide-title-input, .slide-subtitle-input, .slide-title-credit-input, .slide-item-input, .slide-eq-input, .slide-notes-input, .slide-textbox-content, .slide-callout-content, .slide-free-formula-source, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function (e) {
       e.stopPropagation();
     });
 
@@ -4785,13 +8168,12 @@
       if (key) applyCrossSync(key, "ppt");
     });
 
-    $ctx.on("input.slide change.slide", ".slide-title-input, .slide-subtitle-input, .slide-item-input, .slide-eq-input, .slide-notes-input, .slide-textbox-content, .slide-callout-content, .slide-rich-text-preview, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function () {
+    $ctx.on("input.slide change.slide", ".slide-title-input, .slide-subtitle-input, .slide-title-credit-input, .slide-item-input, .slide-eq-input, .slide-notes-input, .slide-textbox-content, .slide-callout-content, .slide-free-formula-source, .slide-rich-text-preview, .slide-placeholder-label, [data-th], [data-tr], [data-tc]", function () {
       if ($(this).hasClass("slide-rich-text-preview")) {
         syncSingleRichText($(this));
         rememberRichTextSelection(this);
       }
       updateScopedMathPreviews(mathPreviewScope($(this)));
-      syncTextboxHeight($(this).closest(".slide-textbox"));
       saveCurrentSlide();
       scheduleLatexSync();
       scheduleHistoryCommit();
@@ -4802,8 +8184,10 @@
       var $host = mathPreviewScope($preview);
       syncSingleRichText($preview);
       setTimeout(function () {
+        if (Date.now() < toolbarSelectionHoldUntil || $(".slide-toolbar").find(document.activeElement).length) {
+          return;
+        }
         updateScopedMathPreviews($host);
-        syncTextboxHeight($preview.closest(".slide-textbox"));
       }, 0);
     });
 
@@ -4930,6 +8314,7 @@
       saveCurrentSlide();
       var slide = slidesData.slides[currentSlideIdx];
       slide.reviewBackground = true;
+      slide.backgroundMode = "review";
       renderSlideEditor(slide);
       renderSlideList();
       commitHistorySnapshot(false);
@@ -5027,13 +8412,426 @@
       commitHistorySnapshot(false);
       scheduleLatexSync();
     });
+
+    $ctx.on("click.slide", '[data-action="remove-formula-box"]', function (e) {
+      e.stopImmediatePropagation();
+      var idx = parseInt($(this).data("formula-box"), 10);
+      saveCurrentSlide();
+      var slide = slidesData.slides[currentSlideIdx];
+      if (!Array.isArray(slide.formulaBoxes)) slide.formulaBoxes = [];
+      slide.formulaBoxes.splice(idx, 1);
+      renderSlideEditor(slide);
+      renderSlideList();
+      commitHistorySnapshot(false);
+      scheduleLatexSync();
+    });
+  }
+
+  function normalizeParsedSlidesData(data, previousSlidesData) {
+    if (!data || !Array.isArray(data.slides)) return null;
+    if (!Array.isArray(data.missing_equations)) data.missing_equations = [];
+    if (!Array.isArray(data.resolved_equations)) data.resolved_equations = [];
+    if (data.slides[0] && data.slides[0].type === "title") {
+      if (!data.slides[0].title) data.slides[0].title = data.title || "";
+      if (!data.slides[0].subtitle) data.slides[0].subtitle = data.subtitle || "";
+      if (!data.slides[0].titleCredit) {
+        data.slides[0].titleCredit = [data.author || "", data.date || ""].filter(Boolean).join("\n");
+      }
+    }
+    for (var i = 0; i < data.slides.length; i++) {
+      if (!data.slides[i].images) data.slides[i].images = [];
+      if (!data.slides[i].textboxes) data.slides[i].textboxes = [];
+      if (!data.slides[i].formulaBoxes) data.slides[i].formulaBoxes = [];
+      if (!data.slides[i].callouts) data.slides[i].callouts = [];
+      if (!Array.isArray(data.slides[i].missing_equations)) data.slides[i].missing_equations = [];
+      normalizeSlideEditableText(data.slides[i]);
+      data.slides[i].placeholders = normalizePlaceholders(data.slides[i].placeholders);
+      if (data.slides[i].table) data.slides[i].table = normalizeTable(data.slides[i].table);
+    }
+    if (previousSlidesData) mergeEditedImagePositions(data, previousSlidesData);
+    ensureAllSlideFigurePlaceholders(data);
+    return data;
+  }
+
+  function applyRenderedPagesToSlides(data, renderedPages, options) {
+    data = data || {};
+    renderedPages = Array.isArray(renderedPages) ? renderedPages : [];
+    options = options || {};
+    if (!Array.isArray(data.slides)) data.slides = [];
+    if (!data.slides.length && renderedPages.length) {
+      data.slides = renderedPages.map(function (_, idx) {
+        return {
+          id: idx,
+          type: idx === 0 ? "title" : "content",
+          title: "页面 " + (idx + 1),
+          subtitle: "",
+          items: [],
+          equations: [],
+          table: null,
+          notes: "",
+          images: [],
+          placeholders: [],
+          textboxes: [],
+          formulaBoxes: [],
+          callouts: [],
+        };
+      });
+    }
+    renderedPages.forEach(function (page, idx) {
+      if (!data.slides[idx]) {
+        data.slides[idx] = {
+          id: idx,
+          type: "content",
+          title: "页面 " + (idx + 1),
+          subtitle: "",
+          items: [],
+          equations: [],
+          table: null,
+          notes: "",
+          images: [],
+          placeholders: [],
+          textboxes: [],
+          formulaBoxes: [],
+          callouts: [],
+        };
+      }
+      data.slides[idx].renderedBackground = page.image || "";
+      data.slides[idx].renderedBackgroundWidth = page.width || 0;
+      data.slides[idx].renderedBackgroundHeight = page.height || 0;
+      data.slides[idx].backgroundMode = "latex-rendered";
+      data.slides[idx].latexRenderedPage = true;
+      data.slides[idx].hideParsedContent = options.hideParsedContent !== false;
+      if (data.slides[idx].hideParsedContent) {
+        data.slides[idx].title = "页面 " + (idx + 1);
+        data.slides[idx].subtitle = "";
+        data.slides[idx].titleCredit = "";
+        data.slides[idx].items = [];
+        data.slides[idx].itemRichHtml = [];
+        data.slides[idx].equations = [];
+        data.slides[idx].missing_equations = [];
+        data.slides[idx].table = null;
+        data.slides[idx].notes = "";
+        data.slides[idx].images = [];
+        data.slides[idx].placeholders = [];
+        data.slides[idx].textboxes = [];
+        data.slides[idx].formulaBoxes = [];
+        data.slides[idx].callouts = [];
+      }
+    });
+    for (var i = 0; i < data.slides.length; i++) {
+      data.slides[i].id = i;
+    }
+    return data;
+  }
+
+  function finishEditablePptLoad(data, options, statusPrefix) {
+    options = options || {};
+    slidesData = normalizeParsedSlidesData(data, null);
+    if (!slidesData) {
+      setStatus("解析失败: 未识别到幻灯片结构", "error");
+      return;
+    }
+    if (options.chapterTitle) {
+      slidesData.chapter_title = options.chapterTitle;
+      slidesData.title = slidesData.title || options.chapterTitle;
+      $("#pptChapterTitleInput").val(options.chapterTitle);
+    }
+    var renderedPageMode = hasRenderedLatexPages(slidesData);
+    if (renderedPageMode) {
+      inputCollapsed = true;
+      localStorage.setItem("bg_input_panel_collapsed", "1");
+    }
+    sourceLatex = fullLatex;
+    if (!renderedPageMode) {
+      fullLatex = buildLatexFromSlides(slidesData);
+      sourceLatex = fullLatex;
+      updateLatexEditor(fullLatex);
+      rebuildLatexSyncMapFromSource(slidesData, fullLatex);
+    } else if (!isLatexImportMode) {
+      rebuildLatexSyncMapFromSource(slidesData, fullLatex);
+    } else {
+      rebuildRenderedPageLocationMap(slidesData, fullLatex);
+    }
+    currentSlideIdx = slidesData.slides.length > 0 ? 0 : -1;
+    resetHistory();
+    $("#tabPpt").prop("disabled", false);
+    updateDownloadPptxButton();
+    setActiveTab("ppt");
+    if (renderedPageMode) {
+      applyInputCollapsedState();
+    }
+    renderSlideList();
+    if (currentSlideIdx >= 0) selectSlide(currentSlideIdx);
+    setStatus((statusPrefix || "生成完成") + "，共 " + slidesData.slides.length + " 页幻灯片", "success");
+    updateLatexImportMeta(importedLatexFileName || importedPdfFileName
+      ? "已导入：" + (importedLatexFileName || importedPdfFileName) + "。左侧显示 LaTeX 源码；右侧以 PDF 页面为底图，可添加和编辑覆盖层内容。"
+      : (renderedPageMode ? "已按编译 PDF 页面渲染为 PPT；右侧可添加和编辑覆盖层内容。" : "已从左侧内容生成可编辑 PPT"));
+  }
+
+  function loadOverleafZipIntoEditablePpt(file, options) {
+    options = options || {};
+    if (!file) return $.Deferred().reject(new Error("未选择文件")).promise();
+    importedLatexFileName = file.name || "";
+    importedPdfFileName = "";
+    var formData = new FormData();
+    formData.append("file", file);
+    setStatus("正在导入 Overleaf 源码包...", "info");
+
+    return $.ajax({
+      url: "/beamer-generator/api/import-overleaf-package",
+      method: "POST",
+      data: formData,
+      processData: false,
+      contentType: false,
+      success: function (data) {
+        if (!data || data.error || !data.latex) {
+          setStatus("Overleaf ZIP 导入失败: " + ((data && data.error) || "未读取到 LaTeX 文件"), "error");
+          return;
+        }
+        importedLatexFileName = data.tex_filename || importedLatexFileName;
+        fullLatex = data.latex || "";
+        sourceLatex = fullLatex;
+        updateLatexEditor(fullLatex);
+        $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf").prop("disabled", !fullLatex.trim());
+        $("#btnConvertPpt, #btnDownloadPptx").hide().prop("disabled", true);
+        if (data.asset_urls) {
+          setPackageImages(data.asset_urls);
+        }
+        var title = options.chapterTitle || titleFromLatexFileName(importedLatexFileName) || titleFromLatexFileName(file.name || "") || "Overleaf 演示文稿";
+        if (Array.isArray(data.rendered_pages) && data.rendered_pages.length) {
+          setImportedPreviewImages(renderedPagesToPreviewImages(data.rendered_pages, "Overleaf 页面"), "Overleaf 导入预览");
+          applyRenderedPagesToSlides(data, data.rendered_pages, { hideParsedContent: true });
+          finishEditablePptLoad(data, { chapterTitle: title }, "Overleaf 导入完成");
+          return;
+        }
+        finishEditablePptLoad(data, { chapterTitle: title }, "Overleaf 源码解析完成");
+        if (data.render_error) {
+          setStatus("Overleaf ZIP 已导入，但本地未能高保真渲染：" + data.render_error + "。可改为导入 Overleaf 下载的 PDF。", "error");
+        }
+      },
+      error: function (xhr) {
+        var msg = ajaxErrorMessage(xhr, "导入请求失败");
+        setStatus("Overleaf ZIP 导入失败: " + msg, "error");
+      },
+    });
+  }
+
+  function loadPdfIntoEditablePpt(file, options) {
+    options = options || {};
+    if (!file) return;
+    importedPdfFileName = file.name || "";
+    importedLatexFileName = "";
+    var formData = new FormData();
+    formData.append("file", file);
+    fullLatex = "% PDF 高保真页面背景：" + (importedPdfFileName || "presentation.pdf") + "\n";
+    sourceLatex = fullLatex;
+    updateLatexEditor(fullLatex);
+    $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt").prop("disabled", false);
+    setStatus("正在把 PDF 页面渲染成高保真 PPT 页面...", "info");
+
+    $.ajax({
+      url: "/beamer-generator/api/render-pdf-pages",
+      method: "POST",
+      data: formData,
+      processData: false,
+      contentType: false,
+      success: function (data) {
+        if (!data || data.error || !Array.isArray(data.rendered_pages) || !data.rendered_pages.length) {
+          setStatus("PDF 渲染失败: " + ((data && data.error) || "未生成页面图片"), "error");
+          return;
+        }
+        var title = options.chapterTitle || titleFromLatexFileName(importedPdfFileName) || "PDF 演示文稿";
+        var pptData = {
+          title: title,
+          chapter_title: title,
+          slides: [],
+        };
+        setImportedPreviewImages(renderedPagesToPreviewImages(data.rendered_pages, "PDF 页面"), "PDF 导入预览");
+        applyRenderedPagesToSlides(pptData, data.rendered_pages, { hideParsedContent: true });
+        finishEditablePptLoad(pptData, { chapterTitle: title }, "PDF 渲染完成");
+      },
+      error: function (xhr) {
+        var msg = ajaxErrorMessage(xhr, "渲染请求失败");
+        setStatus("PDF 渲染失败: " + msg, "error");
+      },
+    });
+  }
+
+  function loadPptIntoLatexFromFile(file, options) {
+    options = options || {};
+    if (!file) return $.Deferred().reject(new Error("未选择文件")).promise();
+    if (!/\.pptx$/i.test(file.name || "")) {
+      return $.Deferred().reject(new Error("请选择 .pptx 文件")).promise();
+    }
+
+    var formData = new FormData();
+    formData.append("file", file);
+    importedLatexFileName = (file.name || "presentation.pptx").replace(/\.pptx$/i, ".tex");
+    importedPdfFileName = "";
+    setStatus("正在导入 PPTX 并转换为 LaTeX...", "info");
+
+    return $.ajax({
+      url: "/beamer-generator/api/import-ppt-latex",
+      method: "POST",
+      data: formData,
+      processData: false,
+      contentType: false,
+      success: function (data) {
+        if (!data || data.error || !data.latex) {
+          setStatus("PPTX 转 LaTeX 失败: " + ((data && data.error) || "未生成 LaTeX"), "error");
+          return;
+        }
+        fullLatex = data.latex || "";
+        sourceLatex = fullLatex;
+        updateLatexEditor(fullLatex);
+        $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt").prop("disabled", !fullLatex.trim());
+        if (data.asset_urls) {
+          setPackageImages(data.asset_urls);
+        }
+        var title = options.chapterTitle || titleFromLatexFileName(file.name || importedLatexFileName);
+        setImportedPreviewImages(figureAssetsToPreviewImages(data.figure_assets), "PPT 图片/公式预览");
+        $("#pptChapterTitleInput").val(title || "");
+        setActiveTab("latex");
+        var imageCount = Array.isArray(data.figure_assets) ? data.figure_assets.length : 0;
+        updateLatexImportMeta("已导入：" + (file.name || "PPTX") + "。已按页面元素转换为 LaTeX；图片保留为 Figure 编号和 fig 路径占位框，公式截图与蓝色注释框保留原页位置。");
+        setStatus("PPTX 转 LaTeX 完成：共 " + (data.slide_count || 0) + " 页，图片 " + imageCount + " 张；可点击“预览导入内容”查看缩略图。", "success");
+      },
+      error: function (xhr) {
+        var msg = ajaxErrorMessage(xhr, "转换请求失败");
+        setStatus("PPTX 转 LaTeX 失败: " + msg, "error");
+      },
+    });
+  }
+
+  function loadLatexProjectIntoEditablePpt(files, options) {
+    options = options || {};
+    files = Array.prototype.slice.call(files || []);
+    if (!files.length) return;
+
+    var texFiles = files.filter(function (file) {
+      return /\.(tex|latex)$/i.test(file.name || "") || /\.(tex|latex)$/i.test(file.webkitRelativePath || "");
+    });
+    if (!texFiles.length) {
+      setStatus("LaTeX 项目目录中未找到 .tex 文件", "error");
+      return;
+    }
+
+    var formData = new FormData();
+    files.forEach(function (file) {
+      var relPath = file.webkitRelativePath || file.name;
+      formData.append("files", file, relPath);
+    });
+    setStatus("正在上传并编译 LaTeX 项目目录...", "info");
+
+    return $.ajax({
+      url: "/beamer-generator/api/render-latex-project",
+      method: "POST",
+      data: formData,
+      processData: false,
+      contentType: false,
+      success: function (data) {
+        if (!data || data.error || !data.latex || !Array.isArray(data.rendered_pages) || !data.rendered_pages.length) {
+          setStatus("LaTeX 项目渲染失败: " + ((data && data.error) || "未生成页面图片"), "error");
+          return;
+        }
+        importedLatexFileName = data.tex_filename || data.filename || importedLatexFileName || "presentation.tex";
+        importedPdfFileName = "";
+        fullLatex = data.latex || "";
+        sourceLatex = fullLatex;
+        updateLatexEditor(fullLatex);
+        $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt").prop("disabled", !fullLatex.trim());
+        if (data.asset_urls) {
+          setPackageImages(data.asset_urls);
+        }
+        var title = options.chapterTitle || titleFromLatexFileName(importedLatexFileName) || "LaTeX 演示文稿";
+        setImportedPreviewImages(renderedPagesToPreviewImages(data.rendered_pages, "LaTeX 页面"), "LaTeX 项目预览");
+        applyRenderedPagesToSlides(data, data.rendered_pages, { hideParsedContent: true });
+        finishEditablePptLoad(data, { chapterTitle: title }, "LaTeX 项目渲染完成");
+      },
+      error: function (xhr) {
+        var msg = ajaxErrorMessage(xhr, "渲染请求失败");
+        setStatus("LaTeX 项目渲染失败: " + msg + "。请确认已选择包含图片、样式文件和主 .tex 的完整目录。", "error");
+      },
+    });
+  }
+
+  function loadLatexIntoEditablePpt(tex, options) {
+    options = options || {};
+    tex = String(tex || "");
+    if (!tex.trim()) {
+      setStatus("请先导入或粘贴 LaTeX 代码", "error");
+      return;
+    }
+    fullLatex = tex;
+    sourceLatex = fullLatex;
+    if (options.updateEditor !== false) updateLatexEditor(fullLatex);
+    $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt").prop("disabled", false);
+    setStatus(isLatexImportMode ? "正在渲染 LaTeX 页面..." : "正在解析 LaTeX 结构...", "info");
+
+    if (isLatexImportMode) {
+      $.ajax({
+        url: "/beamer-generator/api/render-latex-pages",
+        method: "POST",
+        contentType: "application/json",
+        data: JSON.stringify({ latex: fullLatex, filename: importedLatexFileName || "presentation.tex", asset_urls: importedPackageAssetUrls || {} }),
+        success: function (data) {
+          if (!data || data.error || !Array.isArray(data.rendered_pages) || !data.rendered_pages.length) {
+            setStatus("高保真渲染失败: " + ((data && data.error) || "未生成页面图片"), "error");
+            return;
+          }
+          setImportedPreviewImages(renderedPagesToPreviewImages(data.rendered_pages, "渲染页面"), "导入内容预览");
+          applyRenderedPagesToSlides(data, data.rendered_pages, { hideParsedContent: true });
+          finishEditablePptLoad(data, options, "高保真渲染完成");
+        },
+        error: function (xhr) {
+          var msg = ajaxErrorMessage(xhr, "渲染请求失败");
+          setStatus("高保真渲染失败: " + msg + "。请先修复 LaTeX 编译错误，或导入已经编译成功的 PDF 文件。", "error");
+        },
+      });
+      return;
+    }
+
+    $.ajax({
+      url: "/beamer-generator/api/parse-slides",
+      method: "POST",
+      contentType: "application/json",
+      data: JSON.stringify({ latex: fullLatex }),
+      success: function (data) {
+        if (!data || data.error || !data.slides) {
+          setStatus("解析失败: " + ((data && data.error) || "未识别到幻灯片结构"), "error");
+          return;
+        }
+        if (data.latex && data.latex !== fullLatex) {
+          fullLatex = data.latex;
+          sourceLatex = fullLatex;
+          if (options.updateEditor !== false) updateLatexEditor(fullLatex);
+        }
+        finishEditablePptLoad(data, options, "解析完成");
+      },
+      error: function () {
+        setStatus("解析请求失败", "error");
+      },
+    });
   }
 
   function bindToolbarEvents($ctx) {
-    $ctx.off("input.toolbar change.toolbar mousedown.toolbar click.toolbar");
+    $ctx.off("input.toolbar change.toolbar mousedown.toolbar pointerdown.toolbar focusin.toolbar click.toolbar");
 
-    $ctx.on("mousedown.toolbar", ".slide-toolbar input, .slide-toolbar select, .slide-toolbar button", function (e) {
+    function holdRichTextSelectionForToolbar() {
+      toolbarSelectionHoldUntil = Date.now() + 1200;
+      rememberCurrentRichTextSelection();
+    }
+
+    $ctx.on("pointerdown.toolbar mousedown.toolbar focusin.toolbar", ".slide-toolbar input, .slide-toolbar select, .slide-toolbar button", function (e) {
+      holdRichTextSelectionForToolbar();
       if (this.tagName === "BUTTON") e.preventDefault();
+    });
+
+    $ctx.on("mouseup.toolbar keyup.toolbar focusin.toolbar", ".slide-rich-text-preview, .slide-rich-text-preview *", function () {
+      setTimeout(function () {
+        if (Date.now() < toolbarSelectionHoldUntil) return;
+        syncToolbarFontSizeFromSelection();
+      }, 0);
     });
 
     function afterRichTextFormat() {
@@ -5087,6 +8885,7 @@
     }
 
     function applyToolbarFontColor(value) {
+      holdRichTextSelectionForToolbar();
       if (applyRichSelectionStyle({ color: value })) return;
     }
 
@@ -5106,17 +8905,26 @@
 
     $ctx.on("click.toolbar", "#toolbarResetBgColor", function (e) {
       e.preventDefault();
-      if (lastFocusedTextbox) {
-        $(lastFocusedTextbox).css("background-color", "#ffffff");
-        updateScopedMathPreviews($(lastFocusedTextbox));
-        saveCurrentSlide();
-        scheduleLatexSync();
-        scheduleHistoryCommit();
+      e.stopImmediatePropagation();
+      if (!slidesData || currentSlideIdx < 0 || !slidesData.slides[currentSlideIdx]) return;
+      var textboxIdx = lastFocusedTextbox ? parseInt($(lastFocusedTextbox).data("tb"), 10) : NaN;
+      saveCurrentSlide();
+      var slide = slidesData.slides[currentSlideIdx];
+      slide.reviewBackground = false;
+      slide.backgroundMode = slide.renderedBackground ? "latex-rendered" : "";
+      if (!Number.isNaN(textboxIdx) && slide.textboxes && slide.textboxes[textboxIdx]) {
+        slide.textboxes[textboxIdx].bg = "#ffffff";
       }
       $("#toolbarBgColor").val("#ffffff");
+      renderSlideEditor(slide);
+      renderSlideList();
+      commitHistorySnapshot(false);
+      scheduleLatexSync();
+      setStatus("已恢复当前页面白色背景", "success");
     });
 
     $ctx.on("change.toolbar", "#toolbarFontSize", function () {
+      holdRichTextSelectionForToolbar();
       if (formatRichSelection("fontSize", "7")) {
         $(lastFocusedRichText).find("font[size='7']").each(function () {
           var span = document.createElement("span");
@@ -5134,6 +8942,7 @@
         scheduleLatexSync();
         scheduleHistoryCommit();
       }
+      syncToolbarFontSizeFromSelection();
     });
 
     $ctx.on("change.toolbar", "#toolbarTextAlign", function () {
@@ -5225,6 +9034,26 @@
     $(this).val("");
   });
 
+  $("#pptLatexImporter").on("change", function () {
+    var file = this.files && this.files[0];
+    if (!file) return;
+    if (!/\.pptx$/i.test(file.name || "")) {
+      setStatus("请选择 .pptx 文件", "error");
+      $(this).val("");
+      return;
+    }
+
+    $("#btnImportPptLatex").prop("disabled", true).text("转换中...");
+    $("#btnImportPptInLatexPanel").prop("disabled", true).text("转换中...");
+    loadPptIntoLatexFromFile(file, {
+      chapterTitle: titleFromLatexFileName(file.name || ""),
+    }).always(function () {
+        $("#btnImportPptLatex").prop("disabled", false).text("导入 PPTX 转 LaTeX");
+        $("#btnImportPptInLatexPanel").prop("disabled", false).text("导入 PPTX 转 LaTeX");
+        $("#pptLatexImporter").val("");
+    });
+  });
+
   function saveCurrentSlide() {
     if (!slidesData || currentSlideIdx < 0) return;
     var slide = slidesData.slides[currentSlideIdx];
@@ -5240,6 +9069,14 @@
     var subVal = $canvas.find('[data-field="subtitle"]').val();
     if (subVal !== undefined) slide.subtitle = subVal;
     slide.subtitleRichHtml = $canvas.find(".slide-subtitle-rich").data("rich-html") || "";
+
+    var creditVal = $canvas.find('[data-field="titleCredit"]').val();
+    if (creditVal !== undefined) slide.titleCredit = creditVal;
+    if (slide.type === "title" && creditVal !== undefined && slidesData) {
+      var creditLines = String(creditVal || "").split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean);
+      if (creditLines.length) slidesData.author = creditLines[0];
+      if (creditLines.length > 1) slidesData.date = creditLines.slice(1).join(" ");
+    }
 
     var items = [];
     var itemRichHtml = [];
@@ -5261,6 +9098,7 @@
     normalizeSlideEquations(slide);
 
     if (slide.table && slide.table.headers) {
+      slide.table.columnSpec = slide.table.columnSpec || "";
       slide.table.headerRichHtml = [];
       $canvas.find("[data-th]").each(function () {
         var j = parseInt($(this).data("th"), 10);
@@ -5286,11 +9124,14 @@
       var $ph = $(this);
       var label = $ph.find(".slide-placeholder-label").val() || "图片占位";
       var figure = extractFigureReference($ph.data("figure") || label);
+      var figureKey = normalizeFigureLabel(figure || label);
+      var mappedFigure = figureKey ? figurePreviewMap[figureKey] : null;
+      var asset = $ph.data("asset") || (mappedFigure && mappedFigure.url) || pickPackageImageForFigure(figure || label) || "";
       placeholders.push({
         type: "image",
         label: label,
         figure: figure,
-        asset: $ph.data("asset") || "",
+        asset: asset,
         position: "",
         x: fromSlidePx(parseFloat($ph.css("left")) || 0, renderScale),
         y: fromSlidePx(parseFloat($ph.css("top")) || 0, renderScale),
@@ -5323,7 +9164,6 @@
     var tbs = [];
     $canvas.find(".slide-textbox").each(function () {
       var $tb = $(this);
-      syncTextboxHeight($tb);
       var $content = $tb.find(".slide-textbox-content");
       tbs.push({
         text: $content.val(),
@@ -5341,6 +9181,25 @@
       });
     });
     slide.textboxes = tbs;
+
+    var formulaBoxes = [];
+    $canvas.find(".slide-free-formula-box").each(function () {
+      var $box = $(this);
+      var $source = $box.find(".slide-free-formula-source");
+      var formula = latexMathDisplaySource($source.val());
+      if (!formula) return;
+      formulaBoxes.push({
+        formula: formula,
+        number: $box.data("number") || "",
+        label: $box.data("label") || "",
+        fontSize: parseInt($box.css("font-size"), 10) || 18,
+        width: fromSlidePx(cssPx($box, "width", 520), renderScale),
+        height: fromSlidePx(cssPx($box, "height", 96), renderScale),
+        x: fromSlidePx(parseFloat($box.css("left")) || 0, renderScale),
+        y: fromSlidePx(parseFloat($box.css("top")) || 0, renderScale),
+      });
+    });
+    slide.formulaBoxes = formulaBoxes;
 
     var callouts = [];
     $canvas.find(".slide-callout").each(function () {
@@ -5383,20 +9242,24 @@
       slidesData.slides[i].id = i;
     }
 
+    if (idx < currentSlideIdx) {
+      currentSlideIdx -= 1;
+    }
     if (currentSlideIdx >= slidesData.slides.length) {
       currentSlideIdx = slidesData.slides.length - 1;
     }
 
     renderSlideList();
     if (currentSlideIdx >= 0) selectSlide(currentSlideIdx);
+    commitHistorySnapshot(false);
     scheduleLatexSync();
-    setStatus("操作完成", "success");
+    setStatus("已删除第 " + (idx + 1) + " 页", "success");
   }
 
   $("#btnAddSlide").on("click", function () {
     if (!slidesData) return;
     saveCurrentSlide();
-    var newSlide = {
+      var newSlide = {
       id: slidesData.slides.length,
       type: "content",
       title: "新页面",
@@ -5408,6 +9271,7 @@
       images: [],
       placeholders: [],
       textboxes: [],
+      formulaBoxes: [],
       callouts: [],
     };
     slidesData.slides.push(newSlide);
@@ -5480,8 +9344,10 @@
 
     postProjectJson(["/beamer-generator/api/save-project", "/beamer-generator/api/save-project/", "/api/save-project"], payload)
       .then(function (data) {
-        return loadSavedPptProjects().then(function () {
-          setStatus("保存完成：已保存到网页端“查找已保存内容”中（" + (data.chapter_title || enteredTitle) + "）", "success");
+        upsertSavedPptProject(data);
+        return loadSavedPptProjects({ openAfterLoad: true, selectedChapterId: data.chapter_id }).then(function () {
+          upsertSavedPptProject(data);
+          setStatus("保存完成：已保存到左侧“选择已保存章节”中（" + (data.chapter_title || enteredTitle) + "）", "success");
         });
       })
       .catch(function (err) {
@@ -5496,14 +9362,21 @@
     if (!slidesData) return;
     var payload = buildProjectSavePayload();
     if (!payload) return;
-    setStatus("正在生成 PPTX 文件...", "info");
+    setStatus("正在按网页端样式捕获 PPT 页面...", "info");
     delete payload.latex;
 
-    postProjectBlob(["/beamer-generator/api/export-pptx", "/beamer-generator/api/export-pptx/", "/api/export-pptx"], payload)
+    buildRenderedSlideSnapshots()
+      .then(function (renderedSlides) {
+        if (renderedSlides.length) {
+          payload.rendered_slides = renderedSlides;
+        }
+        setStatus("正在生成 PPTX 文件...", "info");
+        return postProjectBlob(["/beamer-generator/api/export-pptx", "/beamer-generator/api/export-pptx/", "/api/export-pptx"], payload);
+      })
       .then(function (blob) {
         downloadFile(blob, "presentation_" + today() + ".pptx",
           "application/vnd.openxmlformats-officedocument.presentationml.presentation");
-    setStatus("操作完成", "success");
+        setStatus("操作完成", "success");
       })
       .catch(function (err) {
         setStatus("PPTX 生成请求失败: " + err.message, "error");
@@ -5513,12 +9386,18 @@
   $(document).on("keydown", function (e) {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
-      $("#btnGenerate").click();
+      if (!isLatexImportMode) {
+        $("#btnGenerate").click();
+      }
     }
   });
 
+  restoreGptConfigFromBrowser();
+  applyLatexImportMode();
   $("#savedLectureSelect, #btnRefreshSavedLectures").hide();
   $("#btnImportMarkdown").text("导入 MD 知识图谱");
+  renderMarkdownImportList();
+  removeLegacySavedPptLoadButton();
   loadSavedPptProjects();
   setupColumnResize();
   collapsedPaneResize = setupCollapsedPaneResize();

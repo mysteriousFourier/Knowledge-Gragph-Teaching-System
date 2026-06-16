@@ -468,6 +468,9 @@ function canvasLayoutFromSlide(slide: PptSlideDetail): CanvasItem[] {
   }
 
   const images = collectSlideImages(slide)
+  if (slide.layout?.mode === "title") {
+    return titleCanvasLayoutFromSlide(slide, images)
+  }
   const items: CanvasItem[] = []
   const hasImages = images.length > 0
   const content = String(slide.content || "").trim()
@@ -511,6 +514,54 @@ function canvasLayoutFromSlide(slide: PptSlideDetail): CanvasItem[] {
   return items
 }
 
+function titleCanvasLayoutFromSlide(slide: PptSlideDetail, images: SlideImage[]): CanvasItem[] {
+  const footerImage = titleFooterImage(images)
+  const logoImages = images.filter((image) => image !== footerImage).slice(0, 2)
+  const items: CanvasItem[] = [
+    {
+      id: "title",
+      type: "title",
+      x: 160,
+      y: 160,
+      width: 680,
+      height: estimateCanvasTextHeight(String(slide.title || ""), 680, 34, 1.12, 18, 116),
+    },
+  ]
+  if (String(slide.content || "").trim()) {
+    items.push({
+      id: "content",
+      type: "content",
+      x: 260,
+      y: 292,
+      width: 480,
+      height: 140,
+    })
+  }
+  logoImages.forEach((image, index) => {
+    items.push({
+      id: `title-logo-${index}`,
+      type: "image",
+      ref: image.tex_ref || image.source_path || `title-logo-${index}`,
+      x: 1000 - 16 - (logoImages.length - index) * 100,
+      y: 3,
+      width: 92,
+      height: 38,
+    })
+  })
+  if (footerImage) {
+    items.push({
+      id: "title-footer",
+      type: "image",
+      ref: footerImage.tex_ref || footerImage.source_path || "title-footer",
+      x: 0,
+      y: CANVAS_HEIGHT - 62,
+      width: CANVAS_WIDTH,
+      height: 62,
+    })
+  }
+  return items
+}
+
 function clampCanvasNumber(value: unknown, fallback: number, min: number, max: number) {
   const numeric = typeof value === "number" && Number.isFinite(value) ? value : fallback
   return Math.min(Math.max(numeric, min), max)
@@ -522,6 +573,19 @@ function imageCanvasId(image: SlideImage, index: number) {
 
 function canvasLayoutById(items: CanvasItem[]) {
   return new Map(items.map((item) => [item.id, item]))
+}
+
+function imageForCanvasItem(items: CanvasItem[], item: CanvasItem, images: SlideImage[]) {
+  const imagePosition = items.filter((candidate) => candidate.type === "image").findIndex((candidate) => candidate.id === item.id)
+  return imagePosition >= 0 ? images[imagePosition] : undefined
+}
+
+function titleFooterImage(images: SlideImage[]) {
+  return images.find((image) => {
+    const source = `${image.source_path || ""} ${image.tex_ref || ""}`.toLowerCase()
+    const options = String(image.tex_options || "")
+    return options.includes("\\paperwidth") || source.includes("图片3") || source.includes("picture3")
+  }) || images[images.length - 1]
 }
 
 function assetSourceKeys(asset: CoursewareAsset) {
@@ -2329,7 +2393,7 @@ function TeacherPreparePage() {
               onSelect={setSelectedIndex}
             />
             <div className="min-w-0 space-y-4">
-              <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(720px,1.35fr)_minmax(380px,0.65fr)]">
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(340px,0.6fr)]">
                 {selectedSlide ? (
                   <SlidePreview
                     slide={selectedSlide}
@@ -2404,6 +2468,9 @@ function TeacherPreparePage() {
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="font-semibold">对应讲解</h2>
               <span className="text-xs text-muted-foreground">状态：{lectureStatusText}</span>
+              <span className="text-xs text-muted-foreground">
+                语音规划：{selectedSpeechCueCount ? `已标记 ${selectedSpeechCueCount} 个重点` : "未标记"}
+              </span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {preview?.slides.length ? (
@@ -3063,21 +3130,27 @@ function SlideCanvasEditor({
         className="kgts-slide-stage relative mx-auto aspect-video overflow-hidden rounded-sm bg-white shadow-inner ring-1 ring-slate-200 dark:bg-slate-950 dark:ring-slate-800"
         style={{ touchAction: "none" }}
       >
+        {slide.layout?.mode === "title" ? <TitleCanvasBackground /> : null}
         {[...items].sort((a, b) => {
           const aObject = editableObjects.find((object) => object.id === a.id)
           const bObject = editableObjects.find((object) => object.id === b.id)
           if (activeId === a.id && activeId !== b.id) return 1
           if (activeId === b.id && activeId !== a.id) return -1
           return Number(aObject?.z || 0) - Number(bObject?.z || 0)
-        }).map((item, index) => {
+        }).map((item) => {
           const object = editableObjects.find((candidate) => candidate.id === item.id)
           if (item.type === "image") {
-            const image = images.find((candidate, imageIndex) => imageMatchesCanvasItem(candidate, item, imageIndex)) || images[index]
+            const image = images.find((candidate, imageIndex) => imageMatchesCanvasItem(candidate, item, imageIndex)) || imageForCanvasItem(items, item, images)
             const asset = findAssetForObject(object, assetMap) || (image ? findAssetForImage(image, assetMap) : undefined)
             return (
-              <CanvasBox key={item.id} item={item} active={activeId === item.id} canEdit={canEdit} onActivate={setActiveId} onPointerDown={beginInteraction}>
+              <CanvasBox key={item.id} item={item} active={activeId === item.id} canEdit={canEdit} transparent={!canEdit && slide.layout?.mode === "title"} onActivate={setActiveId} onPointerDown={beginInteraction}>
                 {asset?.data_uri || image?.data_uri ? (
-                  <img src={asset?.data_uri || image?.data_uri || ""} alt={asset?.source_path || image?.source_path || "课件图片"} className="h-full w-full object-contain" draggable={false} />
+                  <img
+                    src={asset?.data_uri || image?.data_uri || ""}
+                    alt={asset?.source_path || image?.source_path || "课件图片"}
+                    className={cn("h-full w-full", slide.layout?.mode === "title" && item.id === "title-footer" ? "object-cover" : "object-contain")}
+                    draggable={false}
+                  />
                 ) : (
                   <div className="flex h-full items-center justify-center bg-muted px-3 text-center text-xs text-muted-foreground">
                     {asset?.oversized || image?.oversized ? "图片过大，未内嵌预览" : object?.label || "图片无法预览"}
@@ -3116,10 +3189,22 @@ function SlideCanvasEditor({
   )
 }
 
+function TitleCanvasBackground() {
+  return (
+    <>
+      <div className="pointer-events-none absolute inset-x-0 top-[7.1%] h-[3px] bg-[#007470]" />
+      <div className="pointer-events-none absolute left-0 top-0 flex h-[7%] w-[25%] items-center justify-center bg-slate-200 px-3 text-center text-[clamp(0.52rem,0.82vw,0.82rem)] leading-tight text-slate-900">
+        Public course in BIMSA in 2026 spring semester
+      </div>
+    </>
+  )
+}
+
 function CanvasBox({
   item,
   active,
   canEdit,
+  transparent = false,
   children,
   onActivate,
   onPointerDown,
@@ -3127,6 +3212,7 @@ function CanvasBox({
   item: CanvasItem
   active: boolean
   canEdit: boolean
+  transparent?: boolean
   children: ReactNode
   onActivate: (id: string) => void
   onPointerDown: (event: React.PointerEvent, item: CanvasItem, mode: CanvasInteraction["mode"], handle?: ResizeHandle) => void
@@ -3137,7 +3223,8 @@ function CanvasBox({
   return (
     <div
       className={cn(
-        "group absolute overflow-visible border border-transparent bg-white/70 p-1 text-slate-950 dark:bg-slate-950/70 dark:text-slate-50",
+        "group absolute overflow-visible border border-transparent p-1 text-slate-950 dark:text-slate-50",
+        transparent ? "bg-transparent" : "bg-white/70 dark:bg-slate-950/70",
         canEdit && "cursor-move hover:border-primary/60 hover:bg-primary/5",
         active && canEdit && "border-primary bg-primary/5 shadow-sm",
       )}
@@ -3723,14 +3810,14 @@ function ImageList({
   return (
     <div>
       {!compact && <div className="text-xs font-medium uppercase text-muted-foreground">图片</div>}
-      <div className={cn("grid grid-cols-1 gap-3", compact ? "mt-0" : "mt-2 md:grid-cols-2")}>
+      <div className={cn("grid grid-cols-1 gap-3", compact ? compactImageGridClass(images.length) : "mt-2 md:grid-cols-2")}>
         {images.map((image, index) => (
-          <figure key={`${image.source_path || index}-${index}`} className={cn("rounded-lg border bg-background p-2", compact && "bg-white/80 dark:bg-slate-900")}>
+          <figure key={`${image.source_path || index}-${index}`} className={cn("min-h-0 rounded-lg border bg-background p-2", compact && "bg-white/80 dark:bg-slate-900")}>
             {image.data_uri ? (
               <img
                 src={image.data_uri}
                 alt={image.source_path || `课件图片 ${index + 1}`}
-                className={cn("w-full rounded object-contain", compact ? "max-h-72" : "max-h-80")}
+                className={cn("w-full rounded object-contain", compact ? "max-h-48" : "max-h-80")}
               />
             ) : (
               <div className="flex min-h-32 items-center justify-center rounded bg-muted px-3 text-center text-xs text-muted-foreground">
@@ -3746,6 +3833,12 @@ function ImageList({
       </div>
     </div>
   )
+}
+
+function compactImageGridClass(count: number) {
+  if (count <= 1) return "mt-0"
+  if (count === 2) return "mt-0 sm:grid-cols-2"
+  return "mt-0 sm:grid-cols-3"
 }
 
 function ImageWidthControl({

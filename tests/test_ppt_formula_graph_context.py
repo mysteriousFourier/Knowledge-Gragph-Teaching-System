@@ -12,11 +12,57 @@ from KGTS.education.kg_constraints import (
     formula_context_for_text,
     graph_paths_for_evidence,
 )
-from KGTS.education.router import _build_ppt_learning_plan
+from KGTS.education.router import (
+    _attach_slide_source_node_ids,
+    _build_ppt_learning_plan,
+    _source_node_ids_from_evidence,
+)
 from KGTS.core.graph_context import build_graphrag_context
 
 
 class PptFormulaGraphContextTest(unittest.TestCase):
+    def test_source_node_ids_from_evidence_keeps_only_real_graph_nodes(self):
+        node_ids = _source_node_ids_from_evidence(
+            [
+                {"id": "ppt_slide::1", "source": "slide"},
+                {"id": "graph_node_a", "source": "graph"},
+                {"node_id": "graph_node_b", "source": "retrieval"},
+                {"metadata": {"id": "graph_node_c"}, "source": "retrieval"},
+                {"id": "graph_node_a", "source": "graph"},
+                {"id": ""},
+            ]
+        )
+
+        self.assertEqual(node_ids, ["graph_node_a", "graph_node_b", "graph_node_c"])
+
+    def test_attach_slide_source_node_ids_maps_generated_slides_to_matching_evidence(self):
+        slides = [
+            {"index": 1, "title": "Price equation", "content": "Covariance and selection response"},
+            {"index": 2, "title": "Fisher theorem", "content": "Additive variance in fitness"},
+        ]
+        evidence = [
+            {
+                "id": "price",
+                "label": "Price equation",
+                "content": "Covariance explains selection response.",
+            },
+            {
+                "id": "fisher",
+                "label": "Fisher theorem",
+                "content": "Additive variance in fitness.",
+            },
+            {
+                "id": "ppt_slide::1",
+                "label": "Slide text",
+                "content": "Price equation",
+            },
+        ]
+
+        mapped = _attach_slide_source_node_ids(slides, evidence)
+
+        self.assertEqual(mapped[0]["source_node_ids"], ["price"])
+        self.assertEqual(mapped[1]["source_node_ids"], ["fisher"])
+
     def test_ppt_learning_plan_keeps_slide_content_and_matching_graph_evidence(self):
         graph = {
             "nodes": [

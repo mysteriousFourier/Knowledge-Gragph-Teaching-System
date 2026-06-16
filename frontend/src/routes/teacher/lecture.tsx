@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { BookOpen, ChevronLeft, ChevronRight, Edit3, Eye, Pause, Play, RotateCcw, Save, Trash2, X } from "lucide-react"
 import { useDeleteChapter, useSaveLecture, useTeacherChapters } from "@/api/teacher"
 import { EvidenceSummary } from "@/components/common/EvidenceSummary"
@@ -20,6 +20,23 @@ export const Route = createFileRoute("/teacher/lecture")({
     chapterId: typeof search.chapterId === "string" ? search.chapterId : "",
   }),
 })
+
+type SlideImage = NonNullable<PptSlideDetail["images"]>[number]
+type SlideLayout = NonNullable<PptSlideDetail["layout"]>
+type SlideLayoutColumn = NonNullable<SlideLayout["columns"]>[number]
+type CanvasItemKind = "title" | "content" | "image"
+type CanvasItem = {
+  id: string
+  type: CanvasItemKind
+  ref?: string
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+const CANVAS_WIDTH = 1000
+const CANVAS_HEIGHT = 562.5
 
 function LecturePage() {
   const { chapterId } = Route.useSearch()
@@ -83,6 +100,33 @@ function LecturePage() {
     if (!slideLectures.length || !currentCoursewareSlide) return undefined
     return slideLectures.find((item) => item.index === currentCoursewareSlide.index && item.lecture?.trim())
   }, [currentCoursewareSlide, slideLectures])
+  const canNavigateSlides = !isEditing && segmentCount > 1
+
+  useEffect(() => {
+    if (!canNavigateSlides) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isInteractiveElement(event.target)) return
+      if (event.altKey || event.ctrlKey || event.metaKey) return
+      if (["ArrowRight", "PageDown", " ", "Enter"].includes(event.key)) {
+        event.preventDefault()
+        playback.setCurrentSegment((current) => current + 1)
+      }
+      if (["ArrowLeft", "PageUp", "Backspace"].includes(event.key)) {
+        event.preventDefault()
+        playback.setCurrentSegment((current) => current - 1)
+      }
+      if (event.key === "Home") {
+        event.preventDefault()
+        playback.setCurrentSegment(0)
+      }
+      if (event.key === "End") {
+        event.preventDefault()
+        playback.setCurrentSegment(segmentCount - 1)
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [canNavigateSlides, playback, segmentCount])
 
   const handleStartEdit = () => {
     setDraftContent(selectedChapter?.lecture_content || "")
@@ -283,38 +327,59 @@ function LecturePage() {
             </div>
           ) : isCoursewareChapter && coursewareSlides.length ? (
             <>
-              <PlaybackProgress progress={playback.progress} statusText={playback.statusText} />
-              <div className="grid gap-0 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
-                <div className="border-b p-4 xl:border-b-0 xl:border-r xl:p-5">
+              <PlaybackProgress
+                progress={playback.progress}
+                statusText={playback.statusText}
+                audioPosition={playback.audioPosition}
+                onSeek={playback.seekAudio}
+              />
+              <div>
+                <div className="border-b p-4 xl:p-5">
                   {currentCoursewareSlide ? (
-                    <PptSlidePreview slide={currentCoursewareSlide} assetMap={selectedChapter.asset_map || selectedChapter.editable_model?.assets || {}} />
+                    <div className="relative">
+                      <PptSlidePreview
+                        slide={currentCoursewareSlide}
+                        assetMap={selectedChapter.asset_map || selectedChapter.editable_model?.assets || {}}
+                        onNext={currentSlide < coursewareSlides.length - 1 ? () => playback.setCurrentSegment((current) => current + 1) : undefined}
+                      />
+                      <SlideSideNav
+                        current={currentSlide}
+                        total={coursewareSlides.length}
+                        onPrev={() => playback.setCurrentSegment((current) => current - 1)}
+                        onNext={() => playback.setCurrentSegment((current) => current + 1)}
+                      />
+                    </div>
                   ) : (
                     <EmptyState title="暂无页面" description="该课件缺少页面预览数据。" />
                   )}
                 </div>
-                <div className="p-4 xl:p-5">
-                  {currentSlideLecture?.lecture ? (
-                    <RichTextContent content={currentSlideLecture.lecture} />
-                  ) : lectureContent.trim() ? (
-                    <RichTextContent content={lectureContent} />
-                  ) : (
-                    <EmptyState title="暂无本页讲稿" description="左侧可先浏览课件展示页；逐页讲稿可在备课工作台生成。" />
-                  )}
-                  {(currentSlideLecture?.learning_plan || currentSlideLecture?.sources?.length) && (
-                    <div className="mt-4">
-                      <EvidenceSummary
-                        learningPlan={currentSlideLecture.learning_plan}
-                        sources={currentSlideLecture.sources}
-                      />
+                <section className="border-b bg-muted/20 p-4 xl:p-5">
+                  <div className="mx-auto max-w-5xl">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">第 {currentCoursewareSlide?.index || currentSlide + 1} 页讲稿</div>
+                      <div className="text-xs text-muted-foreground">只显示当前课件页对应文案</div>
                     </div>
-                  )}
-                  <LectureReviewPanel
-                    className="mt-4"
-                    learningPlan={currentSlideLecture?.learning_plan}
-                    sources={currentSlideLecture?.sources}
-                    consistencyReport={currentSlideLecture?.consistency_report}
-                  />
-                </div>
+                    {currentSlideLecture?.lecture ? (
+                      <RichTextContent content={currentSlideLecture.lecture} />
+                    ) : (
+                      <EmptyState title="暂无本页讲稿" description="逐页讲稿需要在备课工作台生成；这里不会混用整章文案。" />
+                    )}
+                    {(currentSlideLecture?.learning_plan || currentSlideLecture?.sources?.length) && (
+                      <div className="mt-4">
+                        <EvidenceSummary
+                          learningPlan={currentSlideLecture.learning_plan}
+                          sources={currentSlideLecture.sources}
+                        />
+                      </div>
+                    )}
+                    <LectureReviewPanel
+                      className="mt-4"
+                      learningPlan={currentSlideLecture?.learning_plan}
+                      sources={currentSlideLecture?.sources}
+                      consistencyReport={currentSlideLecture?.consistency_report}
+                    />
+                  </div>
+                </section>
               </div>
 
               <Pager
@@ -322,11 +387,17 @@ function LecturePage() {
                 total={coursewareSlides.length}
                 onPrev={() => playback.setCurrentSegment((prev) => prev - 1)}
                 onNext={() => playback.setCurrentSegment((prev) => prev + 1)}
+                onJump={(next) => playback.setCurrentSegment(next)}
               />
             </>
           ) : markdownSlides.length > 0 ? (
             <>
-              <PlaybackProgress progress={playback.progress} statusText={playback.statusText} />
+              <PlaybackProgress
+                progress={playback.progress}
+                statusText={playback.statusText}
+                audioPosition={playback.audioPosition}
+                onSeek={playback.seekAudio}
+              />
               <div className="min-h-[240px] p-4 sm:min-h-[300px] sm:p-6">
                 <RichTextContent content={markdownSlides[currentSlide]} />
                 <LectureReviewPanel
@@ -341,6 +412,7 @@ function LecturePage() {
                 total={markdownSlides.length}
                 onPrev={() => playback.setCurrentSegment((prev) => prev - 1)}
                 onNext={() => playback.setCurrentSegment((prev) => prev + 1)}
+                onJump={(next) => playback.setCurrentSegment(next)}
               />
             </>
           ) : (
@@ -358,34 +430,100 @@ function LecturePage() {
   )
 }
 
-function Pager({ current, total, onPrev, onNext }: { current: number; total: number; onPrev: () => void; onNext: () => void }) {
+function isInteractiveElement(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  return Boolean(target.closest("input, textarea, select, button, a, [contenteditable='true'], [role='slider']"))
+}
+
+function Pager({
+  current,
+  total,
+  onPrev,
+  onNext,
+  onJump,
+}: {
+  current: number
+  total: number
+  onPrev: () => void
+  onNext: () => void
+  onJump: (next: number) => void
+}) {
   return (
-    <div className="flex items-center justify-between gap-3 border-t p-4">
+    <div className="grid gap-4 border-t bg-muted/25 p-4 md:grid-cols-[auto_minmax(220px,1fr)_auto] md:items-center">
       <button
         onClick={onPrev}
         disabled={current === 0}
-        className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm hover:bg-muted disabled:opacity-50"
+        className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border bg-background px-5 text-base font-medium shadow-sm transition-colors hover:bg-accent disabled:opacity-50"
       >
-        <ChevronLeft size={16} />
+        <ChevronLeft size={20} />
         上一页
       </button>
-      <span className="text-sm text-muted-foreground">
-        {current + 1} / {total}
-      </span>
+      <div className="min-w-0 space-y-2">
+        <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+          <span>第 {current + 1} 页</span>
+          <span>共 {total} 页</span>
+        </div>
+        <input
+          type="range"
+          min={1}
+          max={Math.max(total, 1)}
+          step={1}
+          value={current + 1}
+          aria-label="课件页面"
+          onChange={(event) => onJump(Number(event.target.value) - 1)}
+          className="h-3 w-full cursor-pointer accent-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        />
+      </div>
       <button
         onClick={onNext}
         disabled={current === total - 1}
-        className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-sm hover:bg-muted disabled:opacity-50"
+        className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-base font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:opacity-50"
       >
         下一页
-        <ChevronRight size={16} />
+        <ChevronRight size={20} />
+      </button>
+      <div className="text-center text-xs text-muted-foreground md:col-span-3">
+        键盘：←/→、PageUp/PageDown 翻页，空格或 Enter 下一页，Home/End 跳到首尾
+      </div>
+    </div>
+  )
+}
+
+function SlideSideNav({ current, total, onPrev, onNext }: { current: number; total: number; onPrev: () => void; onNext: () => void }) {
+  return (
+    <div className="pointer-events-none absolute inset-y-10 left-0 right-0 hidden items-center justify-between px-2 md:flex">
+      <button
+        type="button"
+        onClick={onPrev}
+        disabled={current === 0}
+        aria-label="上一页"
+        className="pointer-events-auto flex h-16 w-12 items-center justify-center rounded-lg border bg-background/90 text-foreground shadow-sm backdrop-blur transition hover:bg-accent disabled:opacity-30"
+      >
+        <ChevronLeft size={24} />
+      </button>
+      <button
+        type="button"
+        onClick={onNext}
+        disabled={current === total - 1}
+        aria-label="下一页"
+        className="pointer-events-auto flex h-16 w-12 items-center justify-center rounded-lg border bg-background/90 text-foreground shadow-sm backdrop-blur transition hover:bg-accent disabled:opacity-30"
+      >
+        <ChevronRight size={24} />
       </button>
     </div>
   )
 }
 
-function PptSlidePreview({ slide, assetMap = {} }: { slide: PptSlideDetail; assetMap?: Record<string, CoursewareAsset> }) {
-  const images = hydrateSlideImages(slide, assetMap)
+function PptSlidePreview({
+  slide,
+  assetMap = {},
+  onNext,
+}: {
+  slide: PptSlideDetail
+  assetMap?: Record<string, CoursewareAsset>
+  onNext?: () => void
+}) {
+  const images = collectSlideImages(slide, assetMap)
   const hasVisualContent = Boolean(slide.title || slide.content || slide.raw_text || images.length || slide.tables?.length)
 
   return (
@@ -396,27 +534,15 @@ function PptSlidePreview({ slide, assetMap = {} }: { slide: PptSlideDetail; asse
       </div>
 
       <div className="mx-auto w-full max-w-5xl">
-        <div className="relative aspect-video overflow-hidden rounded-lg border bg-white text-slate-950 shadow-sm">
-          <div className="absolute inset-x-0 top-0 h-1 bg-primary" />
+        <div
+          role={onNext ? "button" : undefined}
+          tabIndex={onNext ? 0 : undefined}
+          onClick={onNext}
+          className="relative block aspect-video w-full overflow-hidden rounded-lg border bg-white text-left text-slate-950 shadow-sm transition hover:border-primary/70 focus:outline-none focus:ring-2 focus:ring-primary/30"
+          title="点击课件区域进入下一页"
+        >
           {hasVisualContent ? (
-            <div className="flex h-full flex-col p-[4.8%]">
-              <div className="min-h-[13%] border-b border-slate-200 pb-3">
-                <h3 className="text-balance text-[clamp(1.15rem,2.2vw,2.45rem)] font-semibold leading-tight tracking-normal text-slate-950">
-                  {slide.title || `第 ${slide.index} 页`}
-                </h3>
-              </div>
-              <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 pt-4 lg:grid-cols-[minmax(0,1fr)_minmax(210px,0.42fr)]">
-                <div className="min-h-0 overflow-hidden text-[clamp(0.82rem,1.12vw,1.08rem)] leading-relaxed text-slate-800">
-                  <RichTextContent content={slide.content || slide.raw_text || "无正文文本"} className="lecture-slide-prose" />
-                </div>
-                {(images.length > 0 || !!slide.tables?.length) && (
-                  <div className="min-h-0 space-y-3 overflow-hidden">
-                    <SlideImageStrip images={images} />
-                    <SlideTableStrip slide={slide} />
-                  </div>
-                )}
-              </div>
-            </div>
+            <ReadonlySlideFrame slide={slide} images={images} assetMap={assetMap} />
           ) : (
             <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-500">该页暂无可展示内容</div>
           )}
@@ -435,21 +561,283 @@ function PptSlidePreview({ slide, assetMap = {} }: { slide: PptSlideDetail; asse
   )
 }
 
-function SlideImageStrip({ images }: { images: PptSlideDetail["images"] }) {
-  if (!images?.length) return null
+function ReadonlySlideFrame({ slide, images, assetMap }: { slide: PptSlideDetail; images: SlideImage[]; assetMap: Record<string, CoursewareAsset> }) {
+  if (slide.layout?.canvas?.items?.length) {
+    return <CanvasSlidePreview slide={slide} images={images} assetMap={assetMap} />
+  }
+  if (slide.layout?.mode === "title") {
+    return <TitleSlidePreview slide={slide} images={images} />
+  }
+  if (slide.layout?.mode === "columns" && slide.layout.columns?.length) {
+    return <ColumnSlidePreview slide={slide} columns={slide.layout.columns} assetMap={assetMap} />
+  }
+  if (slide.layout?.mode === "image_only" && images.length) {
+    return <ImageOnlySlidePreview slide={slide} images={images} />
+  }
+  if ((slide.layout?.mode === "image_text" || slide.layout?.mode === "text_image") && images.length) {
+    return <ImageTextSlidePreview slide={slide} images={images} />
+  }
+  return <DefaultSlidePreview slide={slide} images={images} />
+}
+
+function TitleSlidePreview({ slide, images }: { slide: PptSlideDetail; images: SlideImage[] }) {
+  const footerImage = titleFooterImage(images)
+  const logoImages = images.filter((image) => image !== footerImage).slice(0, 2)
+  const detailLines = titleDetailLines(slide)
   return (
-    <div className="grid h-full max-h-[250px] gap-2">
-      {images.slice(0, 2).map((image, index) => (
-        <figure key={`${image.source_path || image.tex_ref || index}-${index}`} className="min-h-0 overflow-hidden rounded border border-slate-200 bg-slate-50 p-1.5">
-          {image.data_uri ? (
-            <img src={image.data_uri} alt={image.source_path || `课件图片 ${index + 1}`} className="h-full max-h-48 w-full object-contain" />
+    <div className="relative h-full w-full overflow-hidden bg-white text-slate-950">
+      <div className="absolute inset-x-0 top-[7.1%] h-[3px] bg-[#007470]" />
+      <div className="absolute left-0 top-0 flex h-[7%] w-[25%] items-center justify-center bg-slate-200 px-3 text-center text-[clamp(0.52rem,0.82vw,0.82rem)] leading-tight text-slate-900">
+        Public course in BIMSA in 2026 spring semester
+      </div>
+      <div className="absolute right-[0.5%] top-[0.5%] flex h-[6.8%] items-start justify-end gap-1">
+        {logoImages.map((image, index) => (
+          <div key={`${image.source_path || image.tex_ref || index}-${index}`} className="h-full w-[8.8%] min-w-[54px]">
+            {image.data_uri ? (
+              <img src={image.data_uri} alt={image.source_path || `标题页 logo ${index + 1}`} className="h-full w-full object-contain" />
+            ) : (
+              <MissingImageBox image={image} />
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="absolute inset-x-[10%] top-[23%] flex flex-col items-center text-center">
+        <div className="bg-white px-[3%] py-[2%] text-[clamp(1.35rem,3vw,3.1rem)] font-bold leading-tight text-slate-950">
+          {slide.title || `第 ${slide.index} 页`}
+        </div>
+        {detailLines[0] ? (
+          <div className="mt-[1.4%] max-w-[82%] rounded-sm bg-white px-[2.2%] py-[1.2%] text-[clamp(0.78rem,1.45vw,1.45rem)] leading-snug text-slate-950">
+            {detailLines[0]}
+          </div>
+        ) : null}
+        {detailLines.length > 1 ? (
+          <div className="mt-[1.4%] max-w-[68%] bg-white px-[2%] py-[1%] text-[clamp(0.66rem,1.05vw,1.05rem)] leading-relaxed text-slate-950">
+            {detailLines.slice(1).map((line, index) => (
+              <div key={`${line}-${index}`}>{line}</div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {footerImage ? (
+        <div className="absolute inset-x-0 bottom-0 h-[11%] overflow-hidden">
+          {footerImage.data_uri ? (
+            <img src={footerImage.data_uri} alt={footerImage.source_path || "标题页页脚"} className="h-full w-full object-cover" />
           ) : (
-            <div className="flex h-24 items-center justify-center px-2 text-center text-xs text-slate-500">
-              {image.oversized ? "图片过大，未内嵌预览" : "图片无法预览"}
+            <MissingImageBox image={footerImage} />
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function DefaultSlidePreview({ slide, images }: { slide: PptSlideDetail; images: SlideImage[] }) {
+  return (
+    <>
+      <div className="absolute inset-x-0 top-0 h-1 bg-primary" />
+      <div className="flex h-full flex-col p-[4.8%]">
+        <SlideTitle slide={slide} />
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 pt-4 lg:grid-cols-[minmax(0,1fr)_minmax(210px,0.42fr)]">
+          <div className="min-h-0 overflow-hidden text-[clamp(0.82rem,1.12vw,1.08rem)] leading-relaxed text-slate-800">
+            <RichTextContent content={slide.content || slide.raw_text || "无正文文本"} className="lecture-slide-prose" />
+          </div>
+          {(images.length > 0 || !!slide.tables?.length) && (
+            <div className="min-h-0 space-y-3 overflow-hidden">
+              <SlideImageStrip images={images} />
+              <SlideTableStrip slide={slide} />
             </div>
+          )}
+        </div>
+      </div>
+    </>
+  )
+}
+
+function SlideTitle({ slide }: { slide: PptSlideDetail }) {
+  return (
+    <div className="min-h-[13%] border-b border-slate-200 pb-3">
+      <h3 className="text-balance text-[clamp(1.15rem,2.2vw,2.45rem)] font-semibold leading-tight tracking-normal text-slate-950">
+        {slide.title || `第 ${slide.index} 页`}
+      </h3>
+    </div>
+  )
+}
+
+function titleFooterImage(images: SlideImage[]) {
+  return images.find((image) => {
+    const source = `${image.source_path || ""} ${image.tex_ref || ""}`.toLowerCase()
+    const options = String(image.tex_options || "")
+    return options.includes("\\paperwidth") || source.includes("图片3") || source.includes("picture3")
+  }) || images[images.length - 1]
+}
+
+function titleDetailLines(slide: PptSlideDetail) {
+  const text = String(slide.content || slide.raw_text || "")
+  return text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line && line !== slide.title)
+}
+
+function ColumnSlidePreview({ slide, columns, assetMap }: { slide: PptSlideDetail; columns: SlideLayoutColumn[]; assetMap: Record<string, CoursewareAsset> }) {
+  const visibleColumns = columns.filter((column) => column.content?.trim() || column.images?.length)
+  return (
+    <>
+      <div className="absolute inset-x-0 top-0 h-1 bg-primary" />
+      <div className="flex h-full flex-col p-[4.8%]">
+        <SlideTitle slide={slide} />
+        {slide.layout?.outside_content ? (
+          <div className="pt-3 text-[clamp(0.72rem,0.95vw,0.92rem)] leading-relaxed text-slate-700">
+            <RichTextContent content={slide.layout.outside_content} className="lecture-slide-prose" />
+          </div>
+        ) : null}
+        <div
+          className="grid min-h-0 flex-1 gap-5 pt-4"
+          style={{ gridTemplateColumns: buildColumnTemplate(visibleColumns) }}
+        >
+          {visibleColumns.map((column, index) => (
+            <div key={index} className="min-h-0 overflow-hidden text-[clamp(0.78rem,1.02vw,1rem)] leading-relaxed text-slate-800">
+              {column.image_first ? <SlideImageStrip images={(column.images || []).map((image) => hydrateImage(image, assetMap))} /> : null}
+              {column.content?.trim() ? <RichTextContent content={column.content} className="lecture-slide-prose" /> : null}
+              {!column.image_first ? <SlideImageStrip images={(column.images || []).map((image) => hydrateImage(image, assetMap))} /> : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  )
+}
+
+function ImageOnlySlidePreview({ slide, images }: { slide: PptSlideDetail; images: SlideImage[] }) {
+  return (
+    <div className="flex h-full flex-col p-[4.8%]">
+      <SlideTitle slide={slide} />
+      <div className="min-h-0 flex-1 pt-4">
+        <SlideImageStrip images={images} containerClassName="grid h-full max-h-none gap-2" imageClassName="h-full max-h-full w-full object-contain" />
+      </div>
+    </div>
+  )
+}
+
+function ImageTextSlidePreview({ slide, images }: { slide: PptSlideDetail; images: SlideImage[] }) {
+  const imageFirst = Boolean(slide.layout?.image_first || slide.layout?.mode === "image_text")
+  const imagePane = (
+    <div className="min-h-0 overflow-hidden">
+      <SlideImageStrip images={images} containerClassName="grid h-full max-h-none gap-2" imageClassName="h-full max-h-full w-full object-contain" />
+    </div>
+  )
+  const textPane = (
+    <div className="min-h-0 overflow-hidden text-[clamp(0.82rem,1.1vw,1.05rem)] leading-relaxed text-slate-800">
+      <RichTextContent content={slide.content || slide.raw_text || ""} className="lecture-slide-prose" />
+    </div>
+  )
+  return (
+    <>
+      <div className="absolute inset-x-0 top-0 h-1 bg-primary" />
+      <div className="flex h-full flex-col p-[4.8%]">
+        <SlideTitle slide={slide} />
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 pt-4 lg:grid-cols-2">
+          {imageFirst ? imagePane : textPane}
+          {imageFirst ? textPane : imagePane}
+        </div>
+      </div>
+    </>
+  )
+}
+
+function CanvasSlidePreview({ slide, images, assetMap }: { slide: PptSlideDetail; images: SlideImage[]; assetMap: Record<string, CoursewareAsset> }) {
+  const items = canvasLayoutFromSlide(slide)
+  return (
+    <div className="relative h-full w-full bg-white">
+      {items.map((item) => {
+        if (item.type === "image") {
+          const image = images.find((candidate, imageIndex) => imageMatchesCanvasItem(candidate, item, imageIndex)) || imageForCanvasItem(items, item, images)
+          const asset = image ? findAssetForImage(image, assetMap) : undefined
+          return (
+            <CanvasBox key={item.id} item={item}>
+              {asset?.data_uri || image?.data_uri ? (
+                <img src={asset?.data_uri || image?.data_uri || ""} alt={asset?.source_path || image?.source_path || "课件图片"} className="h-full w-full object-contain" />
+              ) : (
+                <MissingImageBox image={image} />
+              )}
+            </CanvasBox>
+          )
+        }
+        if (item.type === "title") {
+          return (
+            <CanvasBox key={item.id} item={item}>
+              <div className="flex h-full items-center text-[clamp(1rem,2.1vw,2.25rem)] font-semibold leading-tight text-slate-950">
+                {slide.title || `第 ${slide.index} 页`}
+              </div>
+            </CanvasBox>
+          )
+        }
+        return (
+          <CanvasBox key={item.id} item={item}>
+            <div className="h-full overflow-hidden text-[clamp(0.74rem,1.02vw,1rem)] leading-relaxed text-slate-800">
+              <RichTextContent content={slide.content || slide.raw_text || ""} className="lecture-slide-prose" />
+            </div>
+          </CanvasBox>
+        )
+      })}
+    </div>
+  )
+}
+
+function CanvasBox({ item, children }: { item: CanvasItem; children: ReactNode }) {
+  return (
+    <div
+      className="absolute overflow-hidden p-1"
+      style={{
+        left: `${(item.x / CANVAS_WIDTH) * 100}%`,
+        top: `${(item.y / CANVAS_HEIGHT) * 100}%`,
+        width: `${(item.width / CANVAS_WIDTH) * 100}%`,
+        height: `${(item.height / CANVAS_HEIGHT) * 100}%`,
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function SlideImageStrip({
+  images,
+  containerClassName,
+  imageClassName = "h-full min-h-0 w-full object-contain",
+}: {
+  images: PptSlideDetail["images"]
+  containerClassName?: string
+  imageClassName?: string
+}) {
+  if (!images?.length) return null
+  const gridClassName = containerClassName || slideImageStripGridClass(images.length)
+  return (
+    <div className={gridClassName}>
+      {images.map((image, index) => (
+        <figure key={`${image.source_path || image.tex_ref || index}-${index}`} className="flex min-h-0 overflow-hidden rounded border border-slate-200 bg-slate-50 p-1.5">
+          {image.data_uri ? (
+            <img src={image.data_uri} alt={image.source_path || `课件图片 ${index + 1}`} className={imageClassName} />
+          ) : (
+            <MissingImageBox image={image} />
           )}
         </figure>
       ))}
+    </div>
+  )
+}
+
+function slideImageStripGridClass(count: number) {
+  if (count <= 1) return "grid h-full min-h-0 gap-2"
+  if (count === 2) return "grid h-full min-h-0 grid-cols-2 gap-2"
+  return "grid h-full min-h-0 grid-cols-3 gap-2"
+}
+
+function MissingImageBox({ image }: { image?: SlideImage }) {
+  return (
+    <div className="flex h-24 min-h-full items-center justify-center px-2 text-center text-xs text-slate-500">
+      {image?.oversized ? "图片过大，未内嵌预览" : image?.source_path || image?.tex_ref ? `图片：${image.source_path || image.tex_ref}` : "图片无法预览"}
     </div>
   )
 }
@@ -576,17 +964,84 @@ function imageFromEditableObject(object: EditableSlideObject, assetMap: Record<s
   }
 }
 
-function hydrateSlideImages(slide: PptSlideDetail, assetMap: Record<string, CoursewareAsset>) {
+function collectSlideImages(slide: PptSlideDetail, assetMap: Record<string, CoursewareAsset>) {
+  const images: SlideImage[] = []
+  const seen = new Set<string>()
+  const add = (image?: SlideImage) => {
+    if (!image) return
+    const hydrated = hydrateImage(image, assetMap)
+    const key = normalizeAssetKey(hydrated.source_path || hydrated.tex_ref || `${images.length}`)
+    if (seen.has(key)) return
+    seen.add(key)
+    images.push(hydrated)
+  }
+  ;(slide.images || []).forEach(add)
+  ;(slide.layout?.columns || []).forEach((column) => (column.images || []).forEach(add))
+  return images
+}
+
+function hydrateImage(image: SlideImage, assetMap: Record<string, CoursewareAsset>): SlideImage {
+  if (image.data_uri) return image
   const assets = Object.values(assetMap)
-  return (slide.images || []).map((image) => {
-    if (image.data_uri) return image
-    const key = normalizeAssetKey(image.source_path || image.tex_ref || "")
-    const asset = assets.find((candidate) => {
-      const candidates = [candidate.id, candidate.source_path, candidate.tex_ref, candidate.name, ...(candidate.aliases || [])]
-      return candidates.some((item) => normalizeAssetKey(item || "") === key)
-    })
-    return asset?.data_uri ? { ...image, data_uri: asset.data_uri, oversized: asset.oversized } : image
+  const key = normalizeAssetKey(image.source_path || image.tex_ref || "")
+  const asset = assets.find((candidate) => {
+    const candidates = [candidate.id, candidate.source_path, candidate.tex_ref, candidate.name, ...(candidate.aliases || [])]
+    return candidates.some((item) => normalizeAssetKey(item || "") === key)
   })
+  return asset?.data_uri ? { ...image, data_uri: asset.data_uri, oversized: asset.oversized } : image
+}
+
+function findAssetForImage(image: SlideImage, assetMap: Record<string, CoursewareAsset>) {
+  const keys = new Set([image.source_path, image.tex_ref, normalizeAssetKey(image.source_path || ""), normalizeAssetKey(image.tex_ref || "")].filter(Boolean))
+  return Object.values(assetMap).find((asset) => {
+    const candidates = [asset.id, asset.source_path, asset.tex_ref, asset.name, ...(asset.aliases || [])]
+    return candidates.some((candidate) => keys.has(candidate || "") || keys.has(normalizeAssetKey(candidate || "")))
+  })
+}
+
+function buildColumnTemplate(columns: SlideLayout["columns"]) {
+  const safeColumns = columns || []
+  if (safeColumns.length <= 1) return "minmax(0, 1fr)"
+  return safeColumns
+    .map((column) => {
+      const width = typeof column.width_ratio === "number" && Number.isFinite(column.width_ratio) ? column.width_ratio : 1
+      return `minmax(0, ${Math.max(width, 0.2)}fr)`
+    })
+    .join(" ")
+}
+
+function canvasLayoutFromSlide(slide: PptSlideDetail): CanvasItem[] {
+  const savedItems = Array.isArray(slide.layout?.canvas?.items) ? slide.layout?.canvas?.items : []
+  return savedItems
+    .map((item, index) => {
+      const type: CanvasItemKind = item.type === "image" || item.type === "title" ? item.type : "content"
+      return {
+        id: String(item.id || `${type}-${index}`),
+        type,
+        ref: typeof item.ref === "string" ? item.ref : undefined,
+        x: clampCanvasNumber(item.x, 5, 0, CANVAS_WIDTH - 30),
+        y: clampCanvasNumber(item.y, 5, 0, CANVAS_HEIGHT - 30),
+        width: clampCanvasNumber(item.width, 320, 30, CANVAS_WIDTH),
+        height: clampCanvasNumber(item.height, 100, 24, CANVAS_HEIGHT),
+      }
+    })
+    .filter((item) => item.type === "title" || item.type === "content" || item.type === "image")
+}
+
+function imageForCanvasItem(items: CanvasItem[], item: CanvasItem, images: SlideImage[]) {
+  const imagePosition = items.filter((candidate) => candidate.type === "image").findIndex((candidate) => candidate.id === item.id)
+  return imagePosition >= 0 ? images[imagePosition] : undefined
+}
+
+function clampCanvasNumber(value: unknown, fallback: number, min: number, max: number) {
+  const numeric = typeof value === "number" && Number.isFinite(value) ? value : fallback
+  return Math.min(Math.max(numeric, min), max)
+}
+
+function imageMatchesCanvasItem(image: SlideImage, item: CanvasItem, index: number) {
+  const ref = normalizeAssetKey(item.ref || "")
+  if (!ref) return item.id === `image-${index}` || item.id.endsWith(String(index))
+  return [image.source_path, image.tex_ref].some((value) => normalizeAssetKey(value || "") === ref)
 }
 
 function normalizeAssetKey(value: string) {
@@ -612,7 +1067,10 @@ function parseTexSlides(texContent: string): PptSlideDetail[] {
     const frameSource = match[0]
     const body = match[1] || ""
     const title = extractFrameTitle(frameSource) || `第 ${index + 1} 页`
-    const content = texToReadableMarkdown(removeFrameTitle(body))
+    const bodyWithoutTitle = removeFrameTitle(body)
+    const images = extractTexImages(bodyWithoutTitle)
+    const layout = inferTexFrameLayout(bodyWithoutTitle, images)
+    const content = texToReadableMarkdown(bodyWithoutTitle)
     return {
       index: index + 1,
       title,
@@ -620,8 +1078,121 @@ function parseTexSlides(texContent: string): PptSlideDetail[] {
       raw_text: content,
       source_tex: frameSource,
       source_body_tex: body,
+      images,
+      image_count: images.length,
+      has_images: images.length > 0,
+      layout,
     }
   })
+}
+
+function extractTexImages(value: string): SlideImage[] {
+  const images: SlideImage[] = []
+  const seen = new Set<string>()
+  const pattern = /\\(?<cmd>includegraphics|safecontentimage|safeverticalimage|safelogoimage)(?:\[(?<options>[^\]]*)\])?\{(?<path>[^}]+)\}/g
+  for (const match of value.matchAll(pattern)) {
+    const sourcePath = String(match.groups?.path || "").trim()
+    if (!sourcePath || seen.has(sourcePath)) continue
+    seen.add(sourcePath)
+    const command = match.groups?.cmd || "includegraphics"
+    const options = match.groups?.options || ""
+    const widthRatio = extractTexWidthRatio(options, command)
+    images.push({
+      data_uri: null,
+      width_emu: 0,
+      height_emu: 0,
+      left_emu: 0,
+      top_emu: 0,
+      source_path: sourcePath,
+      tex_ref: sourcePath,
+      width_ratio: widthRatio,
+    })
+  }
+  return images
+}
+
+function extractTexWidthRatio(options: string, command: string) {
+  if (command === "safeverticalimage") return 0.46
+  if (command === "safecontentimage") return 0.7
+  const widthMatch = /width\s*=\s*([0-9.]+)\s*\\textwidth/.exec(options)
+  if (widthMatch?.[1]) return Math.min(Math.max(Number(widthMatch[1]), 0.05), 1)
+  return undefined
+}
+
+function inferTexFrameLayout(body: string, images: SlideImage[]): PptSlideDetail["layout"] {
+  const columns = extractTexColumns(body)
+  const contentWithoutColumns = removeTexColumnsBlocks(body)
+  const outsideContent = columns.length ? texToReadableMarkdown(contentWithoutColumns) : ""
+  if (columns.length > 1) {
+    return {
+      mode: "columns",
+      has_columns: true,
+      column_count: columns.length,
+      columns,
+      outside_content: outsideContent,
+      image_count: images.length,
+    }
+  }
+  const contentWithoutImages = texToReadableMarkdown(stripTexImages(body))
+  const imageFirst = firstTexImageComesBeforeText(body)
+  const imageOnly = images.length > 0 && !contentWithoutImages.trim()
+  if (/\\titlepage\b/.test(body)) {
+    return { mode: "title", has_columns: false, column_count: 0, columns: [], image_count: images.length }
+  }
+  if (imageOnly) {
+    return { mode: "image_only", has_columns: false, column_count: 0, columns: [], image_count: images.length, image_first: true }
+  }
+  if (images.length) {
+    return {
+      mode: imageFirst ? "image_text" : "text_image",
+      has_columns: false,
+      column_count: 0,
+      columns: [],
+      image_count: images.length,
+      image_first: imageFirst,
+      max_image_width: images[0]?.width_ratio,
+    }
+  }
+  return { mode: "text", has_columns: columns.length > 0, column_count: columns.length, columns, outside_content: outsideContent, image_count: 0 }
+}
+
+function extractTexColumns(body: string): SlideLayoutColumn[] {
+  const columns: SlideLayoutColumn[] = []
+  const columnPattern = /\\begin\{column\}(?:\[(?:[^\]]*)\])?\{([^}]*)\}([\s\S]*?)\\end\{column\}/g
+  for (const match of body.matchAll(columnPattern)) {
+    const columnSource = match[2] || ""
+    const columnImages = extractTexImages(columnSource)
+    columns.push({
+      width_ratio: parseColumnWidthRatio(match[1]),
+      content: texToReadableMarkdown(stripTexImages(columnSource)),
+      images: columnImages,
+      image_count: columnImages.length,
+      image_first: firstTexImageComesBeforeText(columnSource),
+      source_tex: match[0],
+    })
+  }
+  return columns
+}
+
+function parseColumnWidthRatio(value: string) {
+  const numeric = /([0-9.]+)\s*\\textwidth/.exec(value || "")
+  if (numeric?.[1]) return Math.min(Math.max(Number(numeric[1]), 0.05), 1)
+  return null
+}
+
+function removeTexColumnsBlocks(value: string) {
+  return value.replace(/\\begin\{columns\}(?:\[[^\]]*\])?[\s\S]*?\\end\{columns\}/g, "")
+}
+
+function stripTexImages(value: string) {
+  return value.replace(/\\(?:includegraphics|safecontentimage|safeverticalimage|safelogoimage)(?:\[[^\]]*\])?\{[^}]+\}/g, "")
+}
+
+function firstTexImageComesBeforeText(value: string) {
+  const imageIndex = value.search(/\\(?:includegraphics|safecontentimage|safeverticalimage|safelogoimage)(?:\[[^\]]*\])?\{[^}]+\}/)
+  if (imageIndex < 0) return false
+  const before = texToReadableMarkdown(stripTexImages(value.slice(0, imageIndex))).trim()
+  return !before
 }
 
 function extractFrameTitle(frameSource: string) {
@@ -648,7 +1219,7 @@ function texToReadableMarkdown(value: string) {
     .replace(/\\\[((?:.|\n)*?)\\\]/g, (_match, formula) => `\n\n$$\n${formula.trim()}\n$$\n\n`)
     .replace(/\\\(((?:.|\n)*?)\\\)/g, (_match, formula) => `$${formula.trim()}$`)
     .replace(/\$\$([\s\S]*?)\$\$/g, (_match, formula) => `\n\n$$\n${formula.trim()}\n$$\n\n`)
-    .replace(/\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}/g, "\n\n[图：$1]\n\n")
+    .replace(/\\(?:includegraphics|safecontentimage|safeverticalimage|safelogoimage)(?:\[[^\]]*\])?\{([^}]+)\}/g, "\n\n[图：$1]\n\n")
     .replace(/\\(textbf|textit|emph|alert)\{([^{}]*)\}/g, "$2")
     .replace(/\\(small|footnotesize|scriptsize|large|Large|centering|pause)\b/g, "")
     .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^{}]*)\})?/g, (_match, inner) => inner || "")

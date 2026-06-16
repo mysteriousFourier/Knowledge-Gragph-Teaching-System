@@ -38,6 +38,14 @@ export interface PlaybackProgress {
   total: number
 }
 
+export interface AudioPlaybackPosition {
+  currentTime: number
+  duration: number
+  isReady: boolean
+  percent: number
+  seekable: boolean
+}
+
 const LONG_TEXT_THRESHOLD = 420
 const TTS_CHUNK_CHARS = 260
 const PREFETCH_AHEAD = 2
@@ -52,6 +60,13 @@ const initialChunkInfo: ChunkInfo = {
   pending: 0,
   cacheHits: 0,
   stage: "idle",
+}
+const initialAudioPosition: AudioPlaybackPosition = {
+  currentTime: 0,
+  duration: 0,
+  isReady: false,
+  percent: 0,
+  seekable: false,
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -105,6 +120,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
   const [providerDetail, setProviderDetail] = useState("")
   const [playbackError, setPlaybackError] = useState("")
   const [chunkInfo, setChunkInfo] = useState<ChunkInfo>(initialChunkInfo)
+  const [audioPosition, setAudioPosition] = useState<AudioPlaybackPosition>(initialAudioPosition)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const requestIdRef = useRef(0)
   const synthesizedRef = useRef(new Map<string, Promise<TtsSynthesizeResponse>>())
@@ -143,9 +159,17 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
 
   const stopAudio = useCallback(() => {
     if (!audioRef.current) return
+    audioRef.current.ontimeupdate = null
+    audioRef.current.onloadedmetadata = null
+    audioRef.current.ondurationchange = null
+    audioRef.current.onseeking = null
+    audioRef.current.onseeked = null
+    audioRef.current.onended = null
+    audioRef.current.onerror = null
     audioRef.current.pause()
     audioRef.current.src = ""
     audioRef.current = null
+    setAudioPosition(initialAudioPosition)
   }, [])
 
   const primeAudioForUserGesture = useCallback(() => {
@@ -159,16 +183,6 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     return audio
   }, [])
 
-  const setCurrentSegment = (next: number | ((current: number) => number)) => {
-    pause()
-    setCurrentSegmentState((current) => {
-      const value = typeof next === "function" ? next(current) : next
-      const clamped = Math.min(Math.max(value, 0), Math.max(segmentCount - 1, 0))
-      currentSegmentRef.current = clamped
-      return clamped
-    })
-  }
-
   const pause = useCallback(() => {
     requestIdRef.current += 1
     setIsPlaying(false)
@@ -176,6 +190,31 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     setChunkInfo(initialChunkInfo)
     stopAudio()
   }, [stopAudio])
+
+  const setCurrentSegment = useCallback((next: number | ((current: number) => number)) => {
+    pause()
+    setCurrentSegmentState((current) => {
+      const value = typeof next === "function" ? next(current) : next
+      const clamped = Math.min(Math.max(value, 0), Math.max(segmentCount - 1, 0))
+      currentSegmentRef.current = clamped
+      return clamped
+    })
+  }, [pause, segmentCount])
+
+  const seekAudio = useCallback((percent: number) => {
+    const audio = audioRef.current
+    if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return
+    const clampedPercent = Math.min(Math.max(percent, 0), 100)
+    const nextTime = (clampedPercent / 100) * audio.duration
+    audio.currentTime = nextTime
+    setAudioPosition({
+      currentTime: nextTime,
+      duration: audio.duration,
+      isReady: true,
+      percent: clampedPercent,
+      seekable: true,
+    })
+  }, [])
 
   const synthesizeCached = useCallback((text: string, segmentIndex?: number, chunkIndex?: number, speechCues?: SpeechCue[]) => {
     const key = text.trim()
@@ -223,7 +262,6 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
       setPlaybackError("当前片段没有可朗读文本")
       return
     }
-
     const speechCues = getSegmentSpeechCues?.(resolvedSegment)?.filter((cue) => cue.target_text?.trim()) || []
 
     const requestId = requestIdRef.current + 1
@@ -325,11 +363,30 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
         markReady(chunkIndex, result)
         syncProgress({ lastCacheHit: !!result.cache_hit, stage: "synthesizing" })
         const audio = audioRef.current || gestureAudio || new Audio()
+        const updateAudioPosition = () => {
+          if (requestIdRef.current !== requestId) return
+          const duration = Number.isFinite(audio.duration) ? audio.duration : 0
+          const currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0
+          setAudioPosition({
+            currentTime,
+            duration,
+            isReady: duration > 0,
+            percent: duration > 0 ? Math.min(Math.max((currentTime / duration) * 100, 0), 100) : 0,
+            seekable: duration > 0,
+          })
+        }
         audio.src = result.audio_url
         audio.preload = "auto"
         audioRef.current = audio
+        setAudioPosition(initialAudioPosition)
+        audio.ontimeupdate = updateAudioPosition
+        audio.onloadedmetadata = updateAudioPosition
+        audio.ondurationchange = updateAudioPosition
+        audio.onseeking = updateAudioPosition
+        audio.onseeked = updateAudioPosition
         audio.onended = () => {
           if (requestIdRef.current !== requestId) return
+          updateAudioPosition()
           chunkIndex += 1
           void playChunk()
         }
@@ -429,10 +486,12 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     pause,
     play,
     progress,
+    audioPosition,
     provider,
     providerLabel,
     replay,
     reset,
+    seekAudio,
     setCurrentSegment,
     statusText,
     toggle,

@@ -45,15 +45,42 @@ _LATEX_COMMANDS = {
     "times": "乘以",
     "cdot": "乘以",
     "pm": "正负",
+    "mp": "负正",
     "le": "小于等于",
     "leq": "小于等于",
     "ge": "大于等于",
     "geq": "大于等于",
+    "ll": "远小于",
+    "gg": "远大于",
     "neq": "不等于",
     "ne": "不等于",
     "approx": "约等于",
     "simeq": "约等于",
+    "sim": "相似于",
+    "equiv": "恒等于",
+    "cong": "全等于",
+    "propto": "正比于",
+    "in": "属于",
+    "notin": "不属于",
+    "subset": "真子集",
+    "supset": "真包含",
+    "subseteq": "子集或等于",
+    "supseteq": "包含或等于",
+    "cup": "并集",
+    "cap": "交集",
+    "forall": "任意",
+    "exists": "存在",
+    "emptyset": "空集",
+    "nabla": "梯度",
+    "land": "且",
+    "lor": "或",
+    "neg": "非",
+    "Rightarrow": "推出",
+    "Leftarrow": "由此可得",
+    "Leftrightarrow": "当且仅当",
     "infty": "无穷大",
+    "int": "积分",
+    "prod": "连乘",
     "ldots": "省略",
     "cdots": "省略",
     "ln": "自然对数",
@@ -147,17 +174,51 @@ _GPT_SOVITS_UNSAFE_CJK_SPEECH = {
 _SYMBOL_SPEECH_REPLACEMENTS = {
     "≤": "小于等于",
     "≥": "大于等于",
+    "≪": "远小于",
+    "≫": "远大于",
     "≈": "约等于",
+    "≃": "约等于",
+    "≅": "全等于",
     "≠": "不等于",
+    "≡": "恒等于",
+    "≲": "小于约等于",
+    "≳": "大于约等于",
     "∞": "无穷大",
     "√": "根号",
     "∑": "求和",
+    "∏": "连乘",
+    "∫": "积分",
+    "∇": "梯度",
     "∂": "偏导",
+    "∝": "正比于",
+    "∈": "属于",
+    "∉": "不属于",
+    "⊂": "真子集",
+    "⊃": "真包含",
+    "⊆": "子集或等于",
+    "⊇": "包含或等于",
+    "∪": "并集",
+    "∩": "交集",
+    "∀": "任意",
+    "∃": "存在",
+    "∅": "空集",
+    "∧": "且",
+    "∨": "或",
+    "¬": "非",
+    "⇒": "推出",
+    "⇐": "由此可得",
+    "⇔": "当且仅当",
     "→": "到",
     "←": "来自",
+    "↔": "双向箭头",
+    "↦": "映射到",
     "×": "乘以",
     "÷": "除以",
+    "−": "减",
     "±": "正负",
+    "∓": "负正",
+    "∴": "所以",
+    "∵": "因为",
     "％": "百分之",
     "%": "百分之",
     "℃": "摄氏度",
@@ -176,10 +237,24 @@ _SRE_PHRASE_REPLACEMENTS = (
     ("infinity", "无穷大"),
     ("greater than or equal to", "大于等于"),
     ("less than or equal to", "小于等于"),
+    ("much greater than", "远大于"),
+    ("much less than", "远小于"),
     ("greater than", "大于"),
     ("less than", "小于"),
     ("not equals", "不等于"),
     ("not equal to", "不等于"),
+    ("approximately equals", "约等于"),
+    ("approximately equal to", "约等于"),
+    ("identical to", "恒等于"),
+    ("proportional to", "正比于"),
+    ("element of", "属于"),
+    ("not an element of", "不属于"),
+    ("subset of", "子集"),
+    ("union", "并集"),
+    ("intersection", "交集"),
+    ("there exists", "存在"),
+    ("for all", "任意"),
+    ("if and only if", "当且仅当"),
     ("equals", "等于"),
     ("minus", "减"),
     ("plus", "加"),
@@ -283,8 +358,12 @@ _PUNCTUATION_NORMALIZATION = str.maketrans(
 )
 
 _BARE_MATH_TOKEN = r"(?:\\[A-Za-z]+|[A-Za-zΑ-Ωα-ω0-9]+(?:_\{[^{}]+\}|_[A-Za-z0-9]+|\^\{[^{}]+\}|\^[A-Za-z0-9+-]+)?|\([^()，。！？；：\s]+\)|\{[^{}]+\})"
+_BARE_MATH_OPERATOR = (
+    r"<=|>=|<<|>>|≤|≥|≪|≫|≲|≳|≈|≃|≅|≠|≡|∝|∈|∉|⊂|⊃|⊆|⊇|∪|∩|"
+    r"⇒|⇐|⇔|→|←|↔|↦|=|<|>|\+|-|−|\*|/|×|÷"
+)
 _BARE_MATH_EXPR_RE = re.compile(
-    rf"(?<![A-Za-z0-9])({_BARE_MATH_TOKEN}(?:\s*(?:<=|>=|≤|≥|=|<|>|\+|-|\*|/)\s*{_BARE_MATH_TOKEN})+)(?![A-Za-z0-9])"
+    rf"(?<![A-Za-z0-9])({_BARE_MATH_TOKEN}(?:\s*(?:{_BARE_MATH_OPERATOR})\s*{_BARE_MATH_TOKEN})+)(?![A-Za-z0-9])"
 )
 _LATEX_SUBSUP_TOKEN_RE = re.compile(
     r"(?<![A-Za-z0-9])"
@@ -564,6 +643,38 @@ def _legacy_latex_to_speech(expr: str) -> str:
     expr = re.sub(r"([A-Za-z0-9})])\^([A-Za-z0-9+-]+)", r"\1 的 \2 次方", expr)
 
     replacements = {
+        "<<": " 远小于 ",
+        ">>": " 远大于 ",
+        "≤": " 小于等于 ",
+        "≥": " 大于等于 ",
+        "≪": " 远小于 ",
+        "≫": " 远大于 ",
+        "≈": " 约等于 ",
+        "≃": " 约等于 ",
+        "≅": " 全等于 ",
+        "≠": " 不等于 ",
+        "≡": " 恒等于 ",
+        "≲": " 小于约等于 ",
+        "≳": " 大于约等于 ",
+        "∝": " 正比于 ",
+        "∈": " 属于 ",
+        "∉": " 不属于 ",
+        "⊂": " 真子集 ",
+        "⊃": " 真包含 ",
+        "⊆": " 子集或等于 ",
+        "⊇": " 包含或等于 ",
+        "∪": " 并集 ",
+        "∩": " 交集 ",
+        "⇒": " 推出 ",
+        "⇐": " 由此可得 ",
+        "⇔": " 当且仅当 ",
+        "→": " 到 ",
+        "←": " 来自 ",
+        "↔": " 双向箭头 ",
+        "↦": " 映射到 ",
+        "×": " 乘以 ",
+        "÷": " 除以 ",
+        "−": " 减 ",
         "=": " 等于 ",
         "+": " 加 ",
         "-": " 减 ",
@@ -694,7 +805,7 @@ def _expand_markdown_emphasis_for_speech(text: str) -> str:
         emphasized = re.sub(r"\s+", " ", match.group(1)).strip(" ，。；：、")
         if not emphasized:
             return " "
-        return f"这个很重要，我们重复一遍，{emphasized}。{emphasized}。"
+        return emphasized
 
     return re.sub(r"\*\*([^*\n][\s\S]*?[^*\n])\*\*", replace, text)
 
@@ -732,7 +843,7 @@ def apply_speech_cues_for_tts(text: str, speech_cues: list[dict[str, Any]] | Non
         target = cue["target_text"]
         if target not in result:
             continue
-        replacement = f"{target}\u3002这个关键点我们再说一遍，{target}\u3002"
+        replacement = f"{target}。这个关键点我们再说一遍，{target}。"
         result = result.replace(target, replacement, 1)
     return result
 

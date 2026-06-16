@@ -190,7 +190,12 @@ function LearnPage() {
                   当前状态：{statusLabel(selectedProgress.status)} · 正确 {selectedProgress.correct_count || 0} · 错误 {selectedProgress.wrong_count || 0}
                 </div>
               )}
-              <PlaybackProgress progress={playback.progress} statusText={playback.statusText} />
+              <PlaybackProgress
+                progress={playback.progress}
+                statusText={playback.statusText}
+                audioPosition={playback.audioPosition}
+                onSeek={playback.seekAudio}
+              />
               <div className="p-4">
                 {isCoursewareChapter && currentCoursewareSlide ? (
                   <div className="space-y-5">
