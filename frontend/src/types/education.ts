@@ -52,6 +52,13 @@ export interface TtsStatusResponse {
   max_chars?: number
 }
 
+export interface SpeechCue {
+  type: "repeat" | "key_point" | string
+  target_text: string
+  style?: string
+  priority?: number
+}
+
 export interface TtsSynthesizeRequest {
   text: string
   character_name?: string
@@ -61,6 +68,7 @@ export interface TtsSynthesizeRequest {
   chapter_id?: string
   segment_id?: string
   content_hash?: string
+  speech_cues?: SpeechCue[]
 }
 
 export interface TtsSynthesizeResponse {
@@ -80,6 +88,7 @@ export interface TtsSegmentRequest {
   text: string
   language?: string
   max_chars?: number
+  speech_cues?: SpeechCue[]
 }
 
 export interface TtsSegmentItem {
@@ -431,6 +440,7 @@ export interface PptSlideLecture {
   sources?: unknown[]
   graph_paths?: unknown[]
   formula_context?: unknown[]
+  speech_cues?: SpeechCue[]
   learning_plan?: unknown
   consistency_report?: ConsistencyReport
   error?: string
@@ -441,6 +451,23 @@ export interface PptSlideLecture {
   completion_model?: string
   completion_added_chars?: number
   completion_error?: string
+}
+
+export interface PlanSlideSpeechRequest {
+  chapter_title?: string
+  slide: PptSlideDetail
+  lecture: string
+  max_cues?: number
+  teacher_guidance?: string
+}
+
+export interface PlanSlideSpeechResponse {
+  success: boolean
+  speech_cues: SpeechCue[]
+  speech_cue_count?: number
+  estimated_chars?: number
+  error?: string
+  detail?: string
 }
 
 export interface SlideLecturePacingSummary {

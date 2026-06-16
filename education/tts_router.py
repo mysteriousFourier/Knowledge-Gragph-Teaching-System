@@ -22,7 +22,7 @@ from KGTS.core.tts_service import (
     tts_audio_cache,
     validate_wav_audio_file,
 )
-from KGTS.core.tts_text import normalize_tts_text
+from KGTS.core.tts_text import apply_speech_cues_for_tts, normalize_tts_text
 from KGTS.core.tts_text import resolve_genie_tts_language
 
 
@@ -51,6 +51,13 @@ class TtsReferenceAudioRequest(BaseModel):
     language: str | None = None
 
 
+class TtsSpeechCue(BaseModel):
+    type: str = Field("repeat", description="Speech cue type, currently repeat")
+    target_text: str = Field("", description="Exact text span from the lecture to emphasize")
+    style: str | None = Field(None, description="Optional cue style")
+    priority: int | None = Field(None, description="Optional priority")
+
+
 class TtsSynthesizeRequest(BaseModel):
     text: str = Field(..., min_length=1)
     character_name: str | None = None
@@ -69,12 +76,14 @@ class TtsSynthesizeRequest(BaseModel):
     chapter_id: str | None = None
     segment_id: str | None = None
     content_hash: str | None = None
+    speech_cues: list[TtsSpeechCue] | None = None
 
 
 class TtsSegmentRequest(BaseModel):
     text: str = Field(..., min_length=1)
     language: str | None = None
     max_chars: int | None = Field(default=None, ge=80, le=800)
+    speech_cues: list[TtsSpeechCue] | None = None
 
 
 class TtsUnloadCharacterRequest(BaseModel):
@@ -147,13 +156,17 @@ def _effective_tts_language(provider: str, text: str, normalized_language: str, 
     return normalized_language
 
 
-def _course_audio_path(payload: TtsSynthesizeRequest, text: str) -> Path | None:
+def _normalize_payload_text(text: str, default_language: str, language: str | None, speech_cues: list[TtsSpeechCue] | None = None):
+    cues = [cue.model_dump() if hasattr(cue, "model_dump") else cue.dict() for cue in speech_cues or []]
+    planned_text = apply_speech_cues_for_tts(text, cues)
+    return normalize_tts_text(planned_text, default_language, language)
+
+
+def _course_audio_path(payload: TtsSynthesizeRequest, normalized_text: str, effective_language: str) -> Path | None:
     if not payload.chapter_id:
         return None
     settings = get_tts_settings()
-    normalized = normalize_tts_text(text, settings.language, payload.language)
-    effective_language = _effective_tts_language(settings.provider, normalized.normalized_text, normalized.text_lang, settings.language)
-    text_hash = hashlib.sha256(f"{effective_language}\n{text}".encode("utf-8")).hexdigest()[:24]
+    text_hash = hashlib.sha256(f"{effective_language}\n{normalized_text}".encode("utf-8")).hexdigest()[:24]
     requested_hash = _safe_id(payload.content_hash, text_hash)
     if requested_hash == "none":
         requested_hash = text_hash
@@ -210,7 +223,7 @@ def _ensure_cache_admin_enabled() -> None:
 async def _synthesize_via_server(payload: TtsSynthesizeRequest) -> Path:
     settings = get_tts_settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
-    normalized = normalize_tts_text(payload.text, settings.language, payload.language)
+    normalized = _normalize_payload_text(payload.text, settings.language, payload.language, payload.speech_cues)
     effective_language = _effective_tts_language(settings.provider, normalized.normalized_text, normalized.text_lang, settings.language)
     body: dict[str, Any] = {
         "text": normalized.normalized_text,
@@ -255,7 +268,7 @@ async def _synthesize_via_server(payload: TtsSynthesizeRequest) -> Path:
 async def _synthesize_via_gpt_sovits_server(payload: TtsSynthesizeRequest) -> Path:
     settings = get_tts_settings()
     settings.output_dir.mkdir(parents=True, exist_ok=True)
-    normalized = normalize_tts_text(payload.text, settings.language, payload.language)
+    normalized = _normalize_payload_text(payload.text, settings.language, payload.language, payload.speech_cues)
     body: dict[str, Any] = {
         "text": normalized.normalized_text,
         "text_lang": normalized.text_lang,
@@ -319,7 +332,7 @@ async def clear_audio_cache() -> dict[str, Any]:
 @router.post("/segments")
 async def split_segments(payload: TtsSegmentRequest) -> dict[str, Any]:
     settings = get_tts_settings()
-    normalized = normalize_tts_text(payload.text, settings.language, payload.language)
+    normalized = _normalize_payload_text(payload.text, settings.language, payload.language, payload.speech_cues)
     effective_language = _effective_tts_language(settings.provider, normalized.normalized_text, normalized.text_lang, settings.language)
     max_chars = payload.max_chars or min(settings.max_chars, DEFAULT_SEGMENT_CHARS)
     segments = _split_tts_text(normalized.normalized_text, max_chars=max_chars)
@@ -372,14 +385,14 @@ async def set_reference_audio(payload: TtsReferenceAudioRequest) -> dict[str, An
 async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
     settings = get_tts_settings()
     _ensure_tts_enabled()
-    normalized = normalize_tts_text(payload.text, settings.language, payload.language)
+    normalized = _normalize_payload_text(payload.text, settings.language, payload.language, payload.speech_cues)
     text = normalized.normalized_text
     effective_language = _effective_tts_language(settings.provider, text, normalized.text_lang, settings.language)
     if not text:
         raise HTTPException(status_code=400, detail="Text is empty after cleaning.")
     if len(text) > settings.max_chars:
         raise _long_text_error(len(text), settings.max_chars)
-    persistent_path = _course_audio_path(payload, text)
+    persistent_path = _course_audio_path(payload, text, effective_language)
     if persistent_path and persistent_path.is_file():
         return {
             "success": True,
@@ -404,7 +417,7 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
         if settings.provider == "gpt_sovits_local":
             result = await run_in_threadpool(
                 gpt_sovits_local_service.synthesize,
-                text=payload.text,
+                text=text,
                 language=payload.language,
                 reference_audio_path=payload.reference_audio_path,
                 reference_text=payload.reference_text,

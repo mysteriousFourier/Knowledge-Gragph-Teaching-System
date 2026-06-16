@@ -59,6 +59,11 @@ function LecturePage() {
       }
       return markdownSlides[segment] || ""
     },
+    getSegmentSpeechCues: (segment) => {
+      if (!isCoursewareChapter) return undefined
+      const slide = coursewareSlides[segment]
+      return slideLectures.find((item) => item.index === slide?.index && item.lecture?.trim())?.speech_cues
+    },
   })
   const currentSlide = playback.currentSegment
 

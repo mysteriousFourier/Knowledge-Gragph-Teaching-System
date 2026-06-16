@@ -15,6 +15,8 @@ import type {
   LearningPlanResponse,
   NaturalSupplementRequest,
   NaturalSupplementResponse,
+  PlanSlideSpeechRequest,
+  PlanSlideSpeechResponse,
   PptArtifact,
   PptPreviewResponse,
   PptTexGenerateRequest,
@@ -345,6 +347,17 @@ export const useGenerateSlideLectures = () => {
       }
       throw new Error("逐页讲解任务仍在运行，请稍后刷新项目查看结果")
     },
+  })
+}
+
+export const usePlanSlideSpeech = () => {
+  return useMutation({
+    mutationFn: (data: PlanSlideSpeechRequest) =>
+      educationClient
+        .post<PlanSlideSpeechResponse>("/api/education/plan-slide-speech", data, {
+          timeout: 120000,
+        })
+        .then((r) => r.data),
   })
 }
 

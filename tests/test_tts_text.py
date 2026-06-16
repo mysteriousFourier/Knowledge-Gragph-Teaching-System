@@ -1,5 +1,5 @@
 from KGTS.core import tts_text
-from KGTS.core.tts_text import normalize_tts_text, resolve_genie_tts_language
+from KGTS.core.tts_text import apply_speech_cues_for_tts, normalize_speech_cues, normalize_tts_text, resolve_genie_tts_language
 
 
 def test_normalize_tts_text_replaces_gpt_sovits_unsafe_cjk() -> None:

@@ -77,6 +77,16 @@ class GenerateSlideLecturesRequest(BaseModel):
     model: Optional[str] = Field(None, description="DeepSeek model name")
 
 
+class PlanSlideSpeechRequest(BaseModel):
+    chapter_title: str = Field("", description="Courseware or chapter title")
+    slide: Dict[str, Any] = Field(default_factory=dict, description="Current slide/page details")
+    lecture: str = Field(..., min_length=1, description="Visible lecture script text")
+    max_cues: int = Field(1, ge=0, le=3, description="Maximum speech cues to return")
+    teacher_guidance: Optional[str] = Field(None, description="Optional teacher guidance for emphasis")
+    api_key: Optional[str] = Field(None, description="DeepSeek API key")
+    model: Optional[str] = Field(None, description="DeepSeek model name")
+
+
 class AskQuestionRequest(BaseModel):
     question: str = Field(..., description="Question")
     api_key: Optional[str] = Field(None, description="DeepSeek API key")

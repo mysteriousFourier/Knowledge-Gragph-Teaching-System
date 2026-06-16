@@ -35,6 +35,7 @@ import {
   useGeneratePptTex,
   useGenerateSlideLectures,
   useGraphNodeContext,
+  usePlanSlideSpeech,
   usePreviewTex,
   usePreviewPpt,
   useSaveCoursewareProject,
@@ -1089,6 +1090,7 @@ function TeacherPreparePage() {
   const generateUploadedPptLectures = useGeneratePptLectures()
   const generatePptTex = useGeneratePptTex()
   const generateSlideLectures = useGenerateSlideLectures()
+  const planSlideSpeech = usePlanSlideSpeech()
   const deleteCoursewareProject = useDeleteCoursewareProject()
   const saveChapter = useSaveChapter()
   const saveLecture = useSaveLecture()
@@ -1139,6 +1141,7 @@ function TeacherPreparePage() {
   const hasGeneratedSlideLectures = useMemo(() => slideLectures.some(hasUsableSlideLecture), [slideLectures])
   const durationDraftChanged = durationDraftMinutes !== targetDurationMinutes
   const selectedLectureError = selectedLecture?.error?.trim() || ""
+  const selectedSpeechCueCount = selectedLecture?.speech_cues?.length || 0
   const lectureStatusText = hasUsableSlideLecture(selectedLecture)
     ? "已生成"
     : selectedLectureError
@@ -1170,6 +1173,11 @@ function TeacherPreparePage() {
       if (!slide) return ""
       const lecture = slideLectures.find((item) => item.index === slide.index)
       return lecture?.lecture || slide.notes || slide.content || slide.raw_text || ""
+    },
+    getSegmentSpeechCues: (segment) => {
+      const slide = preview?.slides[segment]
+      if (!slide) return undefined
+      return slideLectures.find((item) => item.index === slide.index)?.speech_cues
     },
   })
   const imageBySourcePath = useMemo(() => {
@@ -1580,6 +1588,34 @@ function TeacherPreparePage() {
       setStatus(result.warning || `已重生成第 ${slideIndex} 页讲解`)
     } catch (error) {
       setStatus(`当前页讲解生成失败：${errorMessage(error)}`)
+    }
+  }
+
+  const handlePlanCurrentSpeech = async () => {
+    if (!preview?.slides.length || !selectedSlide || !selectedLecture?.lecture?.trim()) return
+    setStatus("")
+    try {
+      const result = await planSlideSpeech.mutateAsync({
+        chapter_title: effectiveCoursewareTitle(),
+        slide: compactSlideForLectureRequest(selectedSlide),
+        lecture: selectedLecture.lecture,
+        max_cues: 1,
+        teacher_guidance: teacherGuidance,
+      })
+      setSlideLectures((previous) =>
+        previous.map((item) =>
+          item.index === selectedLecture.index
+            ? {
+                ...item,
+                speech_cues: result.speech_cues || [],
+                estimated_chars: result.estimated_chars ?? item.estimated_chars,
+              }
+            : item,
+        ),
+      )
+      setStatus((result.speech_cues || []).length ? `已更新第 ${selectedLecture.index} 页语音规划` : `第 ${selectedLecture.index} 页没有需要重复强调的重点`)
+    } catch (error) {
+      setStatus(`语音规划生成失败：${errorMessage(error)}`)
     }
   }
 
@@ -2382,6 +2418,15 @@ function TeacherPreparePage() {
               >
                 <Clipboard size={15} />
                 复制
+              </button>
+              <button
+                onClick={handlePlanCurrentSpeech}
+                disabled={!selectedLecture?.lecture || planSlideSpeech.isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+                title="只重算当前页语音重点，不改写讲稿正文"
+              >
+                {planSlideSpeech.isPending ? <LoadingSpinner size={15} /> : <Wand2 size={15} />}
+                语音规划
               </button>
               <button
                 onClick={lecturePlayback.toggle}

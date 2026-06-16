@@ -8,6 +8,7 @@ import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -696,6 +697,44 @@ def _expand_markdown_emphasis_for_speech(text: str) -> str:
         return f"这个很重要，我们重复一遍，{emphasized}。{emphasized}。"
 
     return re.sub(r"\*\*([^*\n][\s\S]*?[^*\n])\*\*", replace, text)
+
+
+def normalize_speech_cues(text: str, speech_cues: list[dict[str, Any]] | None, *, max_repeat_cues: int = 2) -> list[dict[str, str]]:
+    source = str(text or "")
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in speech_cues or []:
+        if not isinstance(raw, dict):
+            continue
+        cue_type = str(raw.get("type") or raw.get("kind") or "").strip().lower()
+        if cue_type not in {"repeat", "key_point"}:
+            continue
+        target = str(raw.get("target_text") or raw.get("text") or "").strip()
+        target = re.sub(r"\s+", " ", target).strip(" ，。；：、")
+        if len(target) < 6 or len(target) > 90:
+            continue
+        if target in seen or target not in source:
+            continue
+        seen.add(target)
+        normalized.append({
+            "type": "repeat",
+            "target_text": target,
+            "style": str(raw.get("style") or "key_point").strip()[:40] or "key_point",
+        })
+        if len(normalized) >= max_repeat_cues:
+            break
+    return normalized
+
+
+def apply_speech_cues_for_tts(text: str, speech_cues: list[dict[str, Any]] | None) -> str:
+    result = str(text or "")
+    for cue in normalize_speech_cues(result, speech_cues):
+        target = cue["target_text"]
+        if target not in result:
+            continue
+        replacement = f"{target}\u3002这个关键点我们再说一遍，{target}\u3002"
+        result = result.replace(target, replacement, 1)
+    return result
 
 
 def remove_parenthetical_asides_for_speech(text: str) -> str:

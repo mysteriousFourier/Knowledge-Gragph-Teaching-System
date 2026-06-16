@@ -52,6 +52,11 @@ function LearnPage() {
       }
       return selectedContent
     },
+    getSegmentSpeechCues: (segment) => {
+      if (!isCoursewareChapter) return undefined
+      const slide = selectedChapter?.ppt_slides?.[segment]
+      return slideLectures.find((item) => item.index === slide?.index && item.lecture?.trim())?.speech_cues
+    },
   })
   const currentSlide = playback.currentSegment
   const currentCoursewareSlide = selectedChapter?.ppt_slides?.[currentSlide]

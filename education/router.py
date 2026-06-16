@@ -20,6 +20,7 @@ from KGTS.models.education import (
     GenerateLectureRequest,
     GeneratePptTexRequest,
     GenerateSlideLecturesRequest,
+    PlanSlideSpeechRequest,
     PreviewTexRequest,
     AskQuestionRequest,
     LearningPlanRequest,
@@ -40,6 +41,7 @@ from KGTS.core.bridge import (
     import_graphml_payload,
     search_nodes as backend_search_nodes,
 )
+from KGTS.core.tts_text import apply_speech_cues_for_tts, normalize_speech_cues
 from KGTS.core.graph_context import build_graphrag_context, build_node_contexts
 from KGTS.education.claude_api import DeepSeekAPIClient, get_deepseek_model, _strip_json_fence
 from KGTS.education.kg_constraints import (
@@ -641,6 +643,21 @@ async def get_slide_lecture_job(job_id: str):
         "stage": job.get("stage") or "",
         "message": job.get("message") or "",
         "elapsed_seconds": _slide_lecture_job_elapsed_seconds(job),
+    }
+
+
+@router.post("/education/plan-slide-speech")
+async def plan_slide_speech(request: PlanSlideSpeechRequest):
+    lecture = str(request.lecture or "").strip()
+    if not lecture:
+        raise HTTPException(status_code=400, detail="缺少当前页讲稿，无法生成语音规划")
+    speech_cues = await _plan_slide_speech_cues_with_model(request)
+    spoken_text = apply_speech_cues_for_tts(lecture, speech_cues)
+    return {
+        "success": True,
+        "speech_cues": speech_cues,
+        "speech_cue_count": len(speech_cues),
+        "estimated_chars": _count_speech_chars(spoken_text),
     }
 
 
@@ -1644,7 +1661,12 @@ def _attach_slide_lecture_timing(
     speech_rate_cpm: int,
 ) -> Dict[str, Any]:
     lecture = str(item.get("lecture") or "")
-    estimated_chars = _count_speech_chars(lecture)
+    if "speech_cues" not in item:
+        item["speech_cues"] = _fallback_speech_cues_for_lecture(lecture, max_cues=1)
+    else:
+        item["speech_cues"] = normalize_speech_cues(lecture, item.get("speech_cues"), max_repeat_cues=2)
+    spoken_text = apply_speech_cues_for_tts(lecture, item.get("speech_cues") or [])
+    estimated_chars = _count_speech_chars(spoken_text)
     target_chars = int((pacing or {}).get("target_chars") or max(estimated_chars, 0))
     item["target_chars"] = target_chars
     if pacing:
@@ -1653,6 +1675,107 @@ def _attach_slide_lecture_timing(
     item["estimated_chars"] = estimated_chars
     item["estimated_duration_seconds"] = int(round((estimated_chars / max(speech_rate_cpm, 1)) * 60))
     return item
+
+
+def _speech_plan_sentence_candidates(lecture: str) -> List[str]:
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", str(lecture or ""))
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    raw_parts = re.split(r"(?<=[???!??;])\s*|\n+", text)
+    candidates: List[str] = []
+    for raw in raw_parts:
+        sentence = re.sub(r"^[#>*\-\d.\s]+", "", raw).strip()
+        sentence = re.sub(r"\s+", " ", sentence).strip(" ，。；：、")
+        if len(sentence) < 10 or len(sentence) > 80:
+            continue
+        if sentence in candidates:
+            continue
+        candidates.append(sentence)
+    return candidates
+
+
+def _fallback_speech_cues_for_lecture(lecture: str, *, max_cues: int = 1) -> List[Dict[str, str]]:
+    if max_cues <= 0:
+        return []
+    keyword_patterns = (
+        r"关键|核心|重点|重要|注意|本质|决定|影响|意味着|因此|所以|结论|记住",
+        r"Ne|N_e|选择|漂变|固定概率|遗传|方差|均值|适合度",
+    )
+    scored: List[tuple[int, str]] = []
+    for sentence in _speech_plan_sentence_candidates(lecture):
+        score = 0
+        for pattern in keyword_patterns:
+            if re.search(pattern, sentence, flags=re.I):
+                score += 2
+        score += min(len(sentence), 60) // 20
+        scored.append((score, sentence))
+    scored.sort(key=lambda item: (-item[0], len(item[1])))
+    cues = [
+        {"type": "repeat", "target_text": sentence, "style": "key_point", "priority": index + 1}
+        for index, (_score, sentence) in enumerate(scored[:max_cues])
+    ]
+    return normalize_speech_cues(lecture, cues, max_repeat_cues=max_cues)
+
+
+def _parse_speech_plan_payload(raw: str) -> List[Dict[str, Any]]:
+    text = _strip_json_fence(str(raw or "").strip())
+    try:
+        data = json.loads(text)
+    except Exception:
+        match = re.search(r"\{[\s\S]*\}|\[[\s\S]*\]", text)
+        if not match:
+            return []
+        try:
+            data = json.loads(match.group(0))
+        except Exception:
+            return []
+    if isinstance(data, dict):
+        cues = data.get("speech_cues") or data.get("cues") or []
+    else:
+        cues = data
+    return cues if isinstance(cues, list) else []
+
+
+async def _plan_slide_speech_cues_with_model(request: PlanSlideSpeechRequest) -> List[Dict[str, str]]:
+    lecture = str(request.lecture or "").strip()
+    max_cues = max(0, min(int(request.max_cues or 1), 3))
+    if not lecture or max_cues <= 0:
+        return []
+    slide = request.slide or {}
+    slide_text = _compact_slide_for_lecture(slide, max_chars=900) if isinstance(slide, dict) else ""
+    prompt = f"""请为一页 PPT 讲稿生成语音规划，只标记真正需要口播重复的重点。
+
+课程标题：{request.chapter_title or ""}
+页面标题：{slide.get("title", "") if isinstance(slide, dict) else ""}
+
+页面内容：
+{slide_text}
+
+讲稿正文：
+{lecture}
+
+约束：
+1. 只返回 JSON，不要解释。
+2. JSON 格式为 {{"speech_cues":[{{"type":"repeat","target_text":"讲稿中的原句或短语","style":"key_point","priority":1}}]}}。
+3. target_text 必须是讲稿正文中逐字存在的连续文本，不要改写，不要新增讲稿里没有的句子。
+4. 最多返回 {max_cues} 个重点；如果没有值得重复的重点，返回 {{"speech_cues":[]}}。
+5. target_text 长度控制在 10 到 80 个字符，优先选择承载本页结论、定义、公式含义或易错点的短句。
+"""
+    if request.teacher_guidance:
+        prompt += "
+教师强调偏好：
+" + _truncate_for_prompt(str(request.teacher_guidance), 500)
+    client = DeepSeekAPIClient(api_key=request.api_key, model=request.model or get_deepseek_model("flash"))
+    try:
+        raw = await client._call_deepseek(
+            prompt,
+            max_tokens=900,
+            system_prompt=KG_CONSTRAINED_SYSTEM_PROMPT,
+            read_timeout_seconds=60,
+        )
+        cues = normalize_speech_cues(lecture, _parse_speech_plan_payload(raw), max_repeat_cues=max_cues)
+    except Exception:
+        cues = []
+    return cues or _fallback_speech_cues_for_lecture(lecture, max_cues=max_cues)
 
 
 def _summarize_slide_lecture_pacing(slide_lectures: List[Dict[str, Any]], pacing: Dict[str, Any]) -> Dict[str, Any]:
