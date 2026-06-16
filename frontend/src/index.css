@@ -168,6 +168,62 @@
     font-size: 1em;
   }
 
+  .kgts-latex-color-black {
+    color: #111111;
+  }
+
+  .kgts-latex-color-gray {
+    color: #6b7280;
+  }
+
+  .kgts-latex-color-darkgray {
+    color: #4b5563;
+  }
+
+  .kgts-latex-color-lightgray {
+    color: #9ca3af;
+  }
+
+  .kgts-latex-color-white {
+    color: #ffffff;
+  }
+
+  .kgts-latex-color-red {
+    color: #dc2626;
+  }
+
+  .kgts-latex-color-blue {
+    color: #2563eb;
+  }
+
+  .kgts-latex-color-green {
+    color: #15803d;
+  }
+
+  .kgts-latex-color-yellow {
+    color: #a16207;
+  }
+
+  .kgts-latex-color-orange {
+    color: #c2410c;
+  }
+
+  .kgts-latex-color-purple {
+    color: #7e22ce;
+  }
+
+  .kgts-latex-color-cyan {
+    color: #0891b2;
+  }
+
+  .kgts-latex-color-magenta {
+    color: #be185d;
+  }
+
+  .kgts-latex-color-myline {
+    color: #007470;
+  }
+
   .kgts-slide-stage {
     width: min(100%, calc((100vh - 250px) * 16 / 9));
   }

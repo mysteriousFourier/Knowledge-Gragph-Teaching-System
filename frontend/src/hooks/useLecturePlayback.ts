@@ -46,8 +46,8 @@ export interface AudioPlaybackPosition {
   seekable: boolean
 }
 
-const LONG_TEXT_THRESHOLD = 420
-const TTS_CHUNK_CHARS = 260
+export const LONG_TEXT_THRESHOLD = 420
+export const TTS_CHUNK_CHARS = 260
 const PREFETCH_AHEAD = 2
 const SILENT_WAV_DATA_URI =
   "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="
@@ -93,7 +93,7 @@ function getProviderLabel(provider: PlaybackProvider) {
   return provider
 }
 
-function stableTextHash(text: string) {
+export function stableTextHash(text: string) {
   let hash = 2166136261
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index)
@@ -102,7 +102,7 @@ function stableTextHash(text: string) {
   return (hash >>> 0).toString(16).padStart(8, "0")
 }
 
-function stableSpeechCueHash(speechCues?: SpeechCue[]) {
+export function stableSpeechCueHash(speechCues?: SpeechCue[]) {
   if (!speechCues?.length) return "no-cues"
   return stableTextHash(JSON.stringify(speechCues.map((cue) => ({
     type: cue.type,

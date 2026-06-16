@@ -301,19 +301,21 @@ export const useGenerateSlideLectures = () => {
   return useMutation({
     mutationFn: async (data: GenerateSlideLecturesRequest & {
       onProgress?: (job: {
+        job_id?: string
         status: string
         stage?: string
         message?: string
         elapsed_seconds?: number
       }) => void
+      onJobStarted?: (job: { job_id: string; status: string; created_at?: string }) => void
     }) => {
-      const { onProgress, ...requestData } = data
+      const { onProgress, onJobStarted, ...requestData } = data
       const payload = {
         graph_scope: requestData.graph_scope || "subtree",
         ...requestData,
       }
       const started = await educationClient
-        .post<{ success: boolean; job_id: string; status: string; error?: string }>(
+        .post<{ success: boolean; job_id: string; status: string; created_at?: string; error?: string }>(
           "/api/education/generate-slide-lectures/jobs",
           payload,
           { timeout: 30000 },
@@ -322,6 +324,7 @@ export const useGenerateSlideLectures = () => {
       if (!started.success || !started.job_id) {
         throw new Error(started.error || "逐页讲解任务启动失败")
       }
+      onJobStarted?.({ job_id: started.job_id, status: started.status, created_at: started.created_at })
 
       const startedAt = Date.now()
       const maxWaitMs = 30 * 60 * 1000
@@ -349,6 +352,20 @@ export const useGenerateSlideLectures = () => {
     },
   })
 }
+
+export const getSlideLectureJob = (jobId: string) =>
+  educationClient
+    .get<{
+      success: boolean
+      job_id: string
+      status: string
+      result?: PptUploadResponse
+      error?: string
+      stage?: string
+      message?: string
+      elapsed_seconds?: number
+    }>(`/api/education/generate-slide-lectures/jobs/${encodeURIComponent(jobId)}`, { timeout: 0 })
+    .then((r) => r.data)
 
 export const usePlanSlideSpeech = () => {
   return useMutation({

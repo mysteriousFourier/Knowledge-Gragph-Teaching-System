@@ -30,6 +30,49 @@ function normalizeLatexDelimiters(content: string) {
     .join("")
 }
 
+function normalizeLatexTextColors(content: string) {
+  const colorPattern = /\\textcolor(?:\[[^\]]*\])?\{([^{}]+)\}\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g
+  return content
+    .split(/(```[\s\S]*?```|\$\$[\s\S]*?\$\$|\$[^$\n]*\$)/g)
+    .map((block) => {
+      if (block.startsWith("```") || block.startsWith("$$") || block.startsWith("$")) return block
+      return block
+        .replace(/\\color\{([^{}]+)\}\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g, (_match, color, body) => {
+          return `<span class="${latexColorClass(String(color))}">${body}</span>`
+        })
+        .replace(colorPattern, (_match, color, body) => {
+          return `<span class="${latexColorClass(String(color))}">${body}</span>`
+        })
+    })
+    .join("")
+}
+
+function latexColorClass(value: string) {
+  const color = value.trim().toLowerCase()
+  const normalized = color.replace(/!.*$/, "")
+  const classByColor: Record<string, string> = {
+    black: "black",
+    gray: "gray",
+    grey: "gray",
+    darkgray: "darkgray",
+    darkgrey: "darkgray",
+    lightgray: "lightgray",
+    lightgrey: "lightgray",
+    white: "white",
+    red: "red",
+    blue: "blue",
+    green: "green",
+    yellow: "yellow",
+    orange: "orange",
+    purple: "purple",
+    cyan: "cyan",
+    magenta: "magenta",
+    myblue: "blue",
+    myline: "myline",
+  }
+  return `kgts-latex-color kgts-latex-color-${classByColor[normalized] || "black"}`
+}
+
 function normalizeBrokenDisplayMath(segment: string) {
   return segment
     .replace(/\\\\\[/g, "\\[")
@@ -74,7 +117,7 @@ function wrapStandaloneBareMath(segment: string) {
 }
 
 export function MarkdownRenderer({ content, className = "", inline = false }: MarkdownRendererProps) {
-  const normalizedContent = normalizeLatexDelimiters(content)
+  const normalizedContent = normalizeLatexTextColors(normalizeLatexDelimiters(content))
   const components = {
     pre: ({ children }: { children?: React.ReactNode }) => (
       <pre className="bg-muted p-3 rounded-lg overflow-x-auto">{children}</pre>

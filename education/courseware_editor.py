@@ -306,6 +306,10 @@ def _editable_slide_from_detail(slide: Dict[str, Any], asset_map: Dict[str, Dict
     cursor_y = 34.0
     if title:
         title_bbox = _bbox_from_canvas(canvas_items, "title") or _default_bbox("title", 0, slide)
+        title_style: Dict[str, Any] = {"fontSize": 28, "lineHeight": 1.12}
+        title_color = _latex_text_color(title)
+        if title_color:
+            title_style["color"] = title_color
         objects.append(
             _object_payload(
                 slide_index=index,
@@ -316,7 +320,7 @@ def _editable_slide_from_detail(slide: Dict[str, Any], asset_map: Dict[str, Dict
                 text=title,
                 rich_html=_rich_html_from_text(title),
                 role="title",
-                style={"fontSize": 28, "lineHeight": 1.12},
+                style=title_style,
             )
         )
         cursor_y = max(cursor_y, title_bbox["y"] + title_bbox["height"] + 22)
@@ -324,6 +328,10 @@ def _editable_slide_from_detail(slide: Dict[str, Any], asset_map: Dict[str, Dict
 
     body_without_display_math = _remove_display_equations(content).strip()
     if body_without_display_math:
+        body_style: Dict[str, Any] = {"fontSize": 18, "lineHeight": 1.32}
+        body_color = _latex_text_color(body_without_display_math)
+        if body_color:
+            body_style["color"] = body_color
         body_canvas_bbox = _bbox_from_canvas(canvas_items, "content", ordinal=content_canvas_ordinal)
         body_bbox = body_canvas_bbox or _default_bbox("richText", 0, slide)
         if body_canvas_bbox:
@@ -346,7 +354,7 @@ def _editable_slide_from_detail(slide: Dict[str, Any], asset_map: Dict[str, Dict
                 text=body_without_display_math,
                 rich_html=_rich_html_from_markdown(body_without_display_math),
                 role="body",
-                style={"fontSize": 18, "lineHeight": 1.32},
+                style=body_style,
             )
         )
         cursor_y = max(cursor_y, body_bbox["y"] + body_bbox["height"] + 20)
@@ -979,18 +987,66 @@ def _rich_html_from_markdown(value: str) -> str:
     if not lines:
         return ""
     if sum(1 for line in lines if line.startswith("- ")) >= max(1, len(lines) // 2):
-        items = "".join(f"<li>{html.escape(line[2:].strip())}</li>" for line in lines)
+        items = "".join(f"<li>{_rich_inline_latex_to_html(line[2:].strip())}</li>" for line in lines)
         return f"<ul>{items}</ul>"
-    return "".join(f"<p>{html.escape(line)}</p>" for line in lines)
+    return "".join(f"<p>{_rich_inline_latex_to_html(line)}</p>" for line in lines)
 
 
 def _rich_html_from_text(value: str) -> str:
-    return f"<p>{html.escape(value or '')}</p>" if value else ""
+    return f"<p>{_rich_inline_latex_to_html(value or '')}</p>" if value else ""
+
+
+def _rich_inline_latex_to_html(value: str) -> str:
+    escaped = html.escape(value or "")
+    color_re = re.compile(r"\\textcolor(?:\[[^\]]*\])?\{([^{}]+)\}\{([^{}]*)\}")
+    return color_re.sub(
+        lambda match: f'<span style="color: {_latex_color_to_css(match.group(1))}">{html.escape(match.group(2))}</span>',
+        escaped,
+    )
+
+
+def _latex_color_to_css(value: str) -> str:
+    color = str(value or "").strip().lower()
+    named = {
+        "black": "#111111",
+        "gray": "#6b7280",
+        "grey": "#6b7280",
+        "darkgray": "#4b5563",
+        "darkgrey": "#4b5563",
+        "lightgray": "#9ca3af",
+        "lightgrey": "#9ca3af",
+        "red": "#dc2626",
+        "blue": "#2563eb",
+        "green": "#15803d",
+        "myblue": "#2864b4",
+        "myline": "#007470",
+    }
+    mixed_gray = re.match(r"^(?:gray|grey)!(\d{1,3})$", color)
+    if mixed_gray:
+        percent = min(max(int(mixed_gray.group(1)), 0), 100)
+        channel = round(255 - (percent / 100) * 255)
+        return f"rgb({channel}, {channel}, {channel})"
+    if re.match(r"^#[0-9a-f]{3}([0-9a-f]{3})?$", color):
+        return color
+    if re.match(r"^[a-z][a-z0-9-]*$", color):
+        return named.get(color, color)
+    return named.get(color, "#111111")
+
+
+def _latex_text_color(value: str) -> Optional[str]:
+    matches = re.findall(r"\\textcolor(?:\[[^\]]*\])?\{([^{}]+)\}\{[^{}]*\}", value or "")
+    if not matches:
+        return None
+    first = matches[0]
+    if all(item == first for item in matches):
+        return _latex_color_to_css(first)
+    return None
 
 
 def _plain_latex_to_text(value: str) -> str:
     text = re.sub(r"\\item(?:<[^>]*>)?(?:\[[^\]]*\])?\s*", "- ", value or "")
-    text = re.sub(r"\\(?:textbf|textit|emph|alert|textcolor)(?:\[[^\]]*\])?\{([^{}]*)\}", r"\1", text)
+    text = re.sub(r"\\textcolor(?:\[[^\]]*\])?\{[^{}]+\}\{([^{}]*)\}", r"\1", text)
+    text = re.sub(r"\\(?:textbf|textit|emph|alert)(?:\[[^\]]*\])?\{([^{}]*)\}", r"\1", text)
     text = re.sub(r"\\[A-Za-z@]+(?:\*|<[^>]*>)?(?:\[[^\]]*\])?", " ", text)
     text = text.replace("\\\\", "\n")
     text = text.replace(r"\%", "%").replace(r"\&", "&").replace(r"\_", "_")

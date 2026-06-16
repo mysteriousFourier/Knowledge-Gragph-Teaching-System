@@ -13,7 +13,9 @@ import {
   ImagePlus,
   Minus,
   LayoutPanelTop,
+  Maximize2,
   MessageSquareText,
+  Minimize2,
   Move,
   Network,
   Pause,
@@ -41,6 +43,10 @@ import {
   useSaveCoursewareProject,
   useUploadCoursewareAssets,
   useUploadCoursewareStyleReference,
+  getSlideLectureJob,
+  getTtsStatus,
+  splitTtsSegments,
+  synthesizeTts,
 } from "@/api/education"
 import { useGraphScopeTree } from "@/api/graph"
 import { useSaveChapter, useSaveLecture, useTeacherChapter } from "@/api/teacher"
@@ -55,7 +61,7 @@ import {
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
 import { PlaybackProgress } from "@/components/common/PlaybackProgress"
 import { RichTextContent } from "@/components/renderers/RichTextContent"
-import { useLecturePlayback } from "@/hooks/useLecturePlayback"
+import { LONG_TEXT_THRESHOLD, TTS_CHUNK_CHARS, stableSpeechCueHash, stableTextHash, useLecturePlayback } from "@/hooks/useLecturePlayback"
 import type {
   GraphSourceScope,
   CoursewareAsset,
@@ -68,6 +74,7 @@ import type {
   PptSlideLecture,
   SourceDriftReport,
   CoursewareProject,
+  SpeechCue,
 } from "@/types/education"
 import type { Chapter } from "@/types/chapter"
 import { getRuntimeConfig } from "@/lib/config"
@@ -113,6 +120,24 @@ const CANVAS_WIDTH = 1000
 const CANVAS_HEIGHT = 562.5
 const DEFAULT_LECTURE_DURATION_MINUTES = 10
 const DEFAULT_SPEECH_RATE_CPM = 250
+const SLIDE_LECTURE_JOB_STORAGE_KEY = "kgts.prepare.slideLectureJob.v1"
+
+type StoredSlideLectureJob = {
+  jobId: string
+  title: string
+  createdAt: string
+  selectedIndex?: number
+}
+
+type CourseAudioProgress = {
+  running: boolean
+  currentSlide: number
+  slideCount: number
+  readyChunks: number
+  totalChunks: number
+  cacheHits: number
+  error?: string
+}
 
 function normalizeTexNewlines(value: string) {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
@@ -170,6 +195,51 @@ function formatSlideLectureJobProgress(job: { message?: string; stage?: string; 
   const elapsed = typeof job.elapsed_seconds === "number" && Number.isFinite(job.elapsed_seconds) ? Math.max(0, Math.round(job.elapsed_seconds)) : 0
   if (!elapsed) return message
   return `${message}（已运行 ${elapsed} 秒）`
+}
+
+function readStoredSlideLectureJob(): StoredSlideLectureJob | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.localStorage.getItem(SLIDE_LECTURE_JOB_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<StoredSlideLectureJob>
+    if (!parsed.jobId) return null
+    return {
+      jobId: String(parsed.jobId),
+      title: String(parsed.title || "逐页讲解"),
+      createdAt: String(parsed.createdAt || new Date().toISOString()),
+      selectedIndex: typeof parsed.selectedIndex === "number" ? parsed.selectedIndex : undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeStoredSlideLectureJob(job: StoredSlideLectureJob | null) {
+  if (typeof window === "undefined") return
+  if (!job) {
+    window.localStorage.removeItem(SLIDE_LECTURE_JOB_STORAGE_KEY)
+    return
+  }
+  window.localStorage.setItem(SLIDE_LECTURE_JOB_STORAGE_KEY, JSON.stringify(job))
+}
+
+const emptyCourseAudioProgress: CourseAudioProgress = {
+  running: false,
+  currentSlide: 0,
+  slideCount: 0,
+  readyChunks: 0,
+  totalChunks: 0,
+  cacheHits: 0,
+}
+
+function courseAudioStatusText(progress: CourseAudioProgress) {
+  if (progress.error) return progress.error
+  if (!progress.running && progress.totalChunks > 0) {
+    return `全课语音已生成：${progress.readyChunks}/${progress.totalChunks} 段，缓存命中 ${progress.cacheHits} 段`
+  }
+  if (!progress.running) return "全课语音未生成"
+  return `全课语音生成中：第 ${progress.currentSlide}/${progress.slideCount} 页，${progress.readyChunks}/${progress.totalChunks || "?"} 段，缓存命中 ${progress.cacheHits} 段`
 }
 
 function estimateSlideDurationMinutes(slide: PptSlideDetail, allSlides: PptSlideDetail[], targetDurationMinutes: number) {
@@ -932,10 +1002,41 @@ function objectLineHeight(object: EditableSlideObject | undefined) {
   return 1.32
 }
 
+function objectColor(object: EditableSlideObject | undefined) {
+  const raw = object?.style?.color || object?.style?.foreground || object?.style?.textColor
+  if (typeof raw !== "string" || !raw.trim()) return undefined
+  const color = raw.trim().toLowerCase()
+  const named: Record<string, string> = {
+    black: "#111111",
+    gray: "#6b7280",
+    grey: "#6b7280",
+    darkgray: "#4b5563",
+    darkgrey: "#4b5563",
+    lightgray: "#9ca3af",
+    lightgrey: "#9ca3af",
+    red: "#dc2626",
+    blue: "#2563eb",
+    green: "#15803d",
+    myblue: "#2864b4",
+    myline: "#007470",
+  }
+  const mixedGray = /^(?:gray|grey)!(\d{1,3})$/.exec(color)
+  if (mixedGray) {
+    const percent = Math.min(Math.max(Number(mixedGray[1]), 0), 100)
+    const channel = Math.round(255 - (percent / 100) * 255)
+    return `rgb(${channel}, ${channel}, ${channel})`
+  }
+  if (/^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/.test(color)) return color
+  if (/^[a-z][a-z0-9-]*$/.test(color)) return named[color] || color
+  return undefined
+}
+
 function objectTextStyle(object: EditableSlideObject | undefined, fallback = 18): CSSProperties {
+  const color = objectColor(object)
   return {
     fontSize: objectFontSize(object, fallback),
     lineHeight: objectLineHeight(object),
+    ...(color ? { color } : {}),
   }
 }
 
@@ -1143,7 +1244,11 @@ function TeacherPreparePage() {
   const [lectureSourceScope, setLectureSourceScope] = useState<GraphSourceScope | null>(null)
   const [driftReport, setDriftReport] = useState<SourceDriftReport | null>(null)
   const [isGeneratingSlideLecturesBatch, setIsGeneratingSlideLecturesBatch] = useState(false)
+  const [activeSlideLectureJob, setActiveSlideLectureJob] = useState<StoredSlideLectureJob | null>(() => readStoredSlideLectureJob())
+  const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false)
+  const [courseAudioProgress, setCourseAudioProgress] = useState<CourseAudioProgress>(emptyCourseAudioProgress)
   const [status, setStatus] = useState("")
+  const courseAudioAbortRef = useRef(false)
 
   const previewPpt = usePreviewPpt()
   const previewTex = usePreviewTex()
@@ -1336,8 +1441,84 @@ function TeacherPreparePage() {
     }
   }, [chapterId, loadedRecordId, savedTeacherChapter.data?.chapter])
 
+  useEffect(() => {
+    if (!activeSlideLectureJob) {
+      writeStoredSlideLectureJob(null)
+      return
+    }
+    writeStoredSlideLectureJob(activeSlideLectureJob)
+  }, [activeSlideLectureJob])
+
+  useEffect(() => {
+    if (!activeSlideLectureJob) return
+    let cancelled = false
+    let timer: number | undefined
+
+    const poll = async () => {
+      try {
+        const job = await getSlideLectureJob(activeSlideLectureJob.jobId)
+        if (cancelled) return
+        if (job.status === "completed" && job.result) {
+          const result = job.result
+          if (result.success) {
+            if (result.slide_lectures?.length) setSlideLectures(result.slide_lectures)
+            if (result.source_scope) setLectureSourceScope(result.source_scope)
+            if (result.drift_report) setDriftReport(result.drift_report)
+            const nextSelected =
+              result.slide_lectures?.find((lecture) => lecture.lecture?.trim())?.index ||
+              activeSlideLectureJob.selectedIndex ||
+              selectedIndex
+            setSelectedIndex(nextSelected)
+            setStatus(result.warning || "已完成逐页讲解生成")
+          } else {
+            setStatus(result.message || result.error || "逐页讲解生成失败")
+          }
+          setIsGeneratingSlideLecturesBatch(false)
+          setActiveSlideLectureJob(null)
+          return
+        }
+        if (job.status === "failed") {
+          setStatus(`逐页讲解生成失败：${job.error || job.message || "任务失败"}`)
+          setIsGeneratingSlideLecturesBatch(false)
+          setActiveSlideLectureJob(null)
+          return
+        }
+        setIsGeneratingSlideLecturesBatch(true)
+        setStatus(formatSlideLectureJobProgress(job))
+        timer = window.setTimeout(poll, 3000)
+      } catch (error) {
+        if (cancelled) return
+        setStatus(`逐页讲解任务恢复失败：${errorMessage(error)}`)
+        setIsGeneratingSlideLecturesBatch(false)
+        setActiveSlideLectureJob(null)
+      }
+    }
+
+    void poll()
+    return () => {
+      cancelled = true
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [activeSlideLectureJob, selectedIndex])
+
+  useEffect(() => {
+    if (!isPreviewFullscreen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsPreviewFullscreen(false)
+    }
+    document.body.style.overflow = "hidden"
+    window.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.body.style.overflow = ""
+      window.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [isPreviewFullscreen])
+
   const resetGeneratedLectures = () => {
     lecturePlayback.pause()
+    courseAudioAbortRef.current = true
+    setCourseAudioProgress(emptyCourseAudioProgress)
+    setActiveSlideLectureJob(null)
     setSlideLectures([])
     setLectureSourceScope(null)
     setDriftReport(null)
@@ -1566,6 +1747,7 @@ function TeacherPreparePage() {
     const sourceNodeIds = lectureNodeIds.length ? lectureNodeIds : pptNodeIds
     setSlideLectures([])
     setIsGeneratingSlideLecturesBatch(true)
+    setActiveSlideLectureJob(null)
     try {
       setStatus("正在分配每页字数并逐页生成讲解...")
       const result = await generateSlideLectures.mutateAsync({
@@ -1581,6 +1763,14 @@ function TeacherPreparePage() {
         style_reference: styleReference,
         ppt_source_node_ids: pptNodeIds,
         ppt_source_scope: pptSourceScope,
+        onJobStarted: (job) => {
+          setActiveSlideLectureJob({
+            jobId: job.job_id,
+            title: effectiveCoursewareTitle(),
+            createdAt: job.created_at || new Date().toISOString(),
+            selectedIndex,
+          })
+        },
         onProgress: (job) => {
           if (job.status === "running") {
             setStatus(formatSlideLectureJobProgress(job))
@@ -1599,8 +1789,10 @@ function TeacherPreparePage() {
       setLectureSourceScope(result.source_scope || null)
       setDriftReport(result.drift_report || null)
       setStatus(result.warning || "已完成逐页讲解生成")
+      setActiveSlideLectureJob(null)
     } catch (error) {
       setStatus(`逐页讲解生成失败：${errorMessage(error)}`)
+      setActiveSlideLectureJob(null)
     } finally {
       setIsGeneratingSlideLecturesBatch(false)
     }
@@ -1637,6 +1829,14 @@ function TeacherPreparePage() {
         existing_slide_lectures: slideLectures,
         ppt_source_node_ids: pptNodeIds,
         ppt_source_scope: pptSourceScope,
+        onJobStarted: (job) => {
+          setActiveSlideLectureJob({
+            jobId: job.job_id,
+            title: `${effectiveCoursewareTitle()} · 第 ${slideIndex} 页`,
+            createdAt: job.created_at || new Date().toISOString(),
+            selectedIndex: slideIndex,
+          })
+        },
         onProgress: (job) => {
           if (job.status === "running") {
             setStatus(formatSlideLectureJobProgress(job))
@@ -1650,8 +1850,10 @@ function TeacherPreparePage() {
       setLectureSourceScope(result.source_scope || null)
       setDriftReport(result.drift_report || null)
       setStatus(result.warning || `已重生成第 ${slideIndex} 页讲解`)
+      setActiveSlideLectureJob(null)
     } catch (error) {
       setStatus(`当前页讲解生成失败：${errorMessage(error)}`)
+      setActiveSlideLectureJob(null)
     }
   }
 
@@ -1680,6 +1882,123 @@ function TeacherPreparePage() {
       setStatus((result.speech_cues || []).length ? `已更新第 ${selectedLecture.index} 页语音规划` : `第 ${selectedLecture.index} 页没有需要重复强调的重点`)
     } catch (error) {
       setStatus(`语音规划生成失败：${errorMessage(error)}`)
+    }
+  }
+
+  const handleStopCourseAudio = () => {
+    courseAudioAbortRef.current = true
+    setCourseAudioProgress((previous) => ({ ...previous, running: false, error: "已停止全课语音生成" }))
+    setStatus("已停止全课语音生成")
+  }
+
+  const handleGenerateCourseAudio = async () => {
+    const slides = preview?.slides || []
+    const lectureItems = slides
+      .map((slide, position) => {
+        const lecture = slideLectures.find((item) => item.index === slide.index)
+        const text = (lecture?.lecture || slide.notes || slide.content || slide.raw_text || "").trim()
+        const speechCues = (lecture?.speech_cues || []).filter((cue) => cue.target_text?.trim())
+        return {
+          slide,
+          position,
+          text,
+          speechCues,
+        }
+      })
+      .filter((item) => item.text)
+
+    if (!lectureItems.length) {
+      setStatus("没有可生成语音的讲稿，请先生成逐页讲解")
+      return
+    }
+
+    courseAudioAbortRef.current = false
+    setStatus("正在检查语音服务...")
+    setCourseAudioProgress({
+      ...emptyCourseAudioProgress,
+      running: true,
+      slideCount: lectureItems.length,
+    })
+
+    try {
+      const ttsStatus = await getTtsStatus()
+      if (!ttsStatus.enabled || !ttsStatus.available) {
+        throw new Error(ttsStatus.detail || "语音接口未接入")
+      }
+
+      let readyChunks = 0
+      let totalChunks = 0
+      let cacheHits = 0
+      const chapterKey = chapterId || preview?.chapter_title || effectiveCoursewareTitle()
+
+      for (const item of lectureItems) {
+        if (courseAudioAbortRef.current) break
+        const shouldSplit = item.text.length > LONG_TEXT_THRESHOLD
+        const speechCues = item.speechCues as SpeechCue[]
+        const splitResult = shouldSplit
+          ? await splitTtsSegments({ text: item.text, max_chars: TTS_CHUNK_CHARS, speech_cues: speechCues })
+          : {
+              success: true,
+              segments: [{ index: 0, text: item.text, length: item.text.length }],
+            }
+        if (!splitResult.success || !splitResult.segments.length) {
+          throw new Error(`第 ${item.slide.index} 页语音分段失败`)
+        }
+        totalChunks += splitResult.segments.length
+        setCourseAudioProgress({
+          running: true,
+          currentSlide: item.position + 1,
+          slideCount: lectureItems.length,
+          readyChunks,
+          totalChunks,
+          cacheHits,
+        })
+
+        for (const chunk of splitResult.segments) {
+          if (courseAudioAbortRef.current) break
+          const cueHash = stableSpeechCueHash(shouldSplit ? undefined : speechCues)
+          const textHash = stableTextHash(chunk.text.trim())
+          const result = await synthesizeTts({
+            text: chunk.text,
+            split_sentence: true,
+            chapter_id: chapterKey,
+            segment_id: `slide-${item.slide.index}-chunk-${chunk.index + 1}`,
+            content_hash: `${textHash}-${cueHash}`,
+            speech_cues: shouldSplit ? undefined : speechCues,
+          })
+          if (!result.success || !result.audio_url) {
+            throw new Error(result.detail || result.error || `第 ${item.slide.index} 页第 ${chunk.index + 1} 段语音生成失败`)
+          }
+          readyChunks += 1
+          if (result.cache_hit) cacheHits += 1
+          setCourseAudioProgress({
+            running: true,
+            currentSlide: item.position + 1,
+            slideCount: lectureItems.length,
+            readyChunks,
+            totalChunks,
+            cacheHits,
+          })
+        }
+      }
+
+      const stopped = courseAudioAbortRef.current
+      setCourseAudioProgress({
+        running: false,
+        currentSlide: stopped ? Math.min(lectureItems.length, Math.max(1, lectureItems.findIndex((item) => item.slide.index === selectedIndex) + 1)) : lectureItems.length,
+        slideCount: lectureItems.length,
+        readyChunks,
+        totalChunks,
+        cacheHits,
+        error: stopped ? "已停止全课语音生成" : undefined,
+      })
+      setStatus(stopped ? "已停止全课语音生成" : `已生成全课语音：${readyChunks}/${totalChunks} 段，缓存命中 ${cacheHits} 段`)
+    } catch (error) {
+      const message = `全课语音生成失败：${errorMessage(error)}`
+      setCourseAudioProgress((previous) => ({ ...previous, running: false, error: message }))
+      setStatus(message)
+    } finally {
+      courseAudioAbortRef.current = false
     }
   }
 
@@ -2166,6 +2485,18 @@ function TeacherPreparePage() {
             导出文案
           </button>
           <button
+            onClick={courseAudioProgress.running ? handleStopCourseAudio : handleGenerateCourseAudio}
+            disabled={!hasGeneratedSlideLectures}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50",
+              courseAudioProgress.running && "text-amber-700",
+            )}
+            title={courseAudioStatusText(courseAudioProgress)}
+          >
+            {courseAudioProgress.running ? <Pause size={16} /> : <Play size={16} />}
+            {courseAudioProgress.running ? "停止语音" : "生成全课语音"}
+          </button>
+          <button
             onClick={handleNormalizeEditableLayout}
             disabled={!editableModel}
             className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50"
@@ -2377,6 +2708,7 @@ function TeacherPreparePage() {
             <span>总预算约 {totalTargetChars} 字</span>
             <span>已生成约 {generatedLectureChars} 字 / {formatDuration(generatedLectureSeconds)}</span>
             <span>当前页约 {selectedLecture?.estimated_chars || 0} 字 / {formatDuration(currentLectureSeconds)}</span>
+            <span>{courseAudioStatusText(courseAudioProgress)}</span>
           </div>
         </section>
 
@@ -2400,9 +2732,11 @@ function TeacherPreparePage() {
                     lecture={selectedLecture}
                     editableModel={editableModel}
                     assetMap={mergedAssetMap}
+                    isFullscreen={isPreviewFullscreen}
                     frameDraft={selectedFrameDraft}
                     hasChanges={hasSelectedFrameChanges}
                     isPending={previewTex.isPending}
+                    onToggleFullscreen={() => setIsPreviewFullscreen((value) => !value)}
                     onFrameDraftChange={handleFrameDraftChange}
                     onApplyFrameDraft={handleApplyFrameDraft}
                     onEditableObjectChange={handleEditableObjectChange}
@@ -2711,9 +3045,11 @@ function SlidePreview({
   lecture,
   editableModel,
   assetMap,
+  isFullscreen,
   frameDraft,
   hasChanges,
   isPending,
+  onToggleFullscreen,
   onFrameDraftChange,
   onApplyFrameDraft,
   onEditableObjectChange,
@@ -2732,9 +3068,11 @@ function SlidePreview({
   lecture?: PptSlideLecture
   editableModel: EditableSlideModel | null
   assetMap: Record<string, CoursewareAsset>
+  isFullscreen: boolean
   frameDraft: string
   hasChanges: boolean
   isPending: boolean
+  onToggleFullscreen: () => void
   onFrameDraftChange: (value: string) => void
   onApplyFrameDraft: () => void
   onEditableObjectChange: (slideIndex: number, objectId: string, patch: Partial<EditableSlideObject>) => void
@@ -2789,7 +3127,12 @@ function SlidePreview({
   }
 
   return (
-    <div className="space-y-4">
+    <div
+      className={cn(
+        "space-y-4",
+        isFullscreen && "fixed inset-0 z-50 overflow-auto bg-background p-4",
+      )}
+    >
       <div className="overflow-hidden rounded-lg border bg-background shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -2798,15 +3141,26 @@ function SlidePreview({
             </span>
             {allImages.length ? <span>{allImages.length} 张图片</span> : null}
             {hasChanges ? <span className="text-amber-600">浏览页修改未应用</span> : null}
+            {isFullscreen ? <span>Esc 退出全屏</span> : null}
           </div>
-          <button
-            onClick={onApplyFrameDraft}
-            disabled={!canEdit || !hasChanges || isPending}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {isPending ? <LoadingSpinner size={14} /> : <FileText size={14} />}
-            应用当前页
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleFullscreen}
+              className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
+            >
+              {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              {isFullscreen ? "退出全屏" : "全屏"}
+            </button>
+            <button
+              onClick={onApplyFrameDraft}
+              disabled={!canEdit || !hasChanges || isPending}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {isPending ? <LoadingSpinner size={14} /> : <FileText size={14} />}
+              应用当前页
+            </button>
+          </div>
         </div>
         <SlideCanvasEditor
           slide={slide}
@@ -2815,6 +3169,7 @@ function SlidePreview({
           assetMap={assetMap}
           initialItems={canvasItems}
           canEdit={canEdit}
+          isFullscreen={isFullscreen}
           onTitleCommit={updateTitle}
           onContentCommit={updateContent}
           onLayoutCommit={updateCanvasLayout}
@@ -2925,6 +3280,7 @@ function SlideCanvasEditor({
   assetMap,
   initialItems,
   canEdit,
+  isFullscreen = false,
   onTitleCommit,
   onContentCommit,
   onLayoutCommit,
@@ -2944,6 +3300,7 @@ function SlideCanvasEditor({
   assetMap: Record<string, CoursewareAsset>
   initialItems: CanvasItem[]
   canEdit: boolean
+  isFullscreen?: boolean
   onTitleCommit: (value: string) => boolean | void
   onContentCommit: (value: string) => boolean | void
   onLayoutCommit: (items: CanvasItem[]) => void
@@ -3107,7 +3464,7 @@ function SlideCanvasEditor({
   const columns = (slide.layout?.columns || []).filter((column) => column.content?.trim() || column.images?.length)
 
   return (
-    <div className="bg-slate-100 p-3 dark:bg-slate-900/60">
+    <div className={cn("bg-slate-100 p-3 dark:bg-slate-900/60", isFullscreen && "min-h-[calc(100vh-66px)]")}>
       {canEdit ? (
         <CanvasToolbar
           activeObject={activeObject}
@@ -3127,7 +3484,10 @@ function SlideCanvasEditor({
       ) : null}
       <div
         ref={stageRef}
-        className="kgts-slide-stage relative mx-auto aspect-video overflow-hidden rounded-sm bg-white shadow-inner ring-1 ring-slate-200 dark:bg-slate-950 dark:ring-slate-800"
+        className={cn(
+          "relative mx-auto aspect-video overflow-hidden rounded-sm bg-white shadow-inner ring-1 ring-slate-200 dark:bg-slate-950 dark:ring-slate-800",
+          isFullscreen ? "w-[min(100%,calc((100vh-170px)*16/9))]" : "kgts-slide-stage",
+        )}
         style={{ touchAction: "none" }}
       >
         {slide.layout?.mode === "title" ? <TitleCanvasBackground /> : null}
