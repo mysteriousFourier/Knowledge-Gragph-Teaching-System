@@ -213,9 +213,10 @@ export const useGraphRelationships = (limit = 10000, relationType?: string) => {
   })
 }
 
-export const useGraphScopeTree = () => {
+export const useGraphScopeTree = (enabled = true) => {
   return useQuery({
     queryKey: ["graph-scope-tree"],
+    enabled,
     queryFn: async () => {
       const payload = await getGraphScopeTree()
       const nodes = (payload.data?.nodes || []).map(normalizeNode).filter((node) => !isLectureNode(node))

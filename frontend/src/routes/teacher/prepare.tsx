@@ -1247,6 +1247,7 @@ function TeacherPreparePage() {
   const [activeSlideLectureJob, setActiveSlideLectureJob] = useState<StoredSlideLectureJob | null>(() => readStoredSlideLectureJob())
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false)
   const [courseAudioProgress, setCourseAudioProgress] = useState<CourseAudioProgress>(emptyCourseAudioProgress)
+  const [graphScopeEnabled, setGraphScopeEnabled] = useState(() => !chapterId || Boolean(nodeId))
   const [status, setStatus] = useState("")
   const courseAudioAbortRef = useRef(false)
 
@@ -1283,9 +1284,10 @@ function TeacherPreparePage() {
   const selectedCoursewareProjectIsHidden = Boolean(
     selectedCoursewareProject && !coursewareProjects.some((project) => project.id === selectedCoursewareProject.id),
   )
-  const { data: scopeTreeData, isLoading: scopeTreeLoading } = useGraphScopeTree()
-  const { data: pptNodeContext, isLoading: pptContextLoading } = useGraphNodeContext(pptNodeIds)
-  const { data: lectureNodeContext, isLoading: lectureContextLoading } = useGraphNodeContext(lectureNodeIds)
+  const shouldLoadGraphScope = graphScopeEnabled
+  const { data: scopeTreeData, isLoading: scopeTreeLoading } = useGraphScopeTree(shouldLoadGraphScope)
+  const { data: pptNodeContext, isLoading: pptContextLoading } = useGraphNodeContext(pptNodeIds, shouldLoadGraphScope)
+  const { data: lectureNodeContext, isLoading: lectureContextLoading } = useGraphNodeContext(lectureNodeIds, shouldLoadGraphScope)
 
   const selectedSlide = preview?.slides.find((slide) => slide.index === selectedIndex)
   const selectedLecture = slideLectures.find((lecture) => lecture.index === selectedIndex)
@@ -1304,7 +1306,7 @@ function TeacherPreparePage() {
     })
     return Array.from(next)
   }, [tree])
-  const isGraphLoading = scopeTreeLoading
+  const isGraphLoading = shouldLoadGraphScope && scopeTreeLoading
   const isGeneratingPpt = generatePptTex.isPending || previewPpt.isPending || previewTex.isPending
   const isGeneratingLectures = isGeneratingSlideLecturesBatch || generateSlideLectures.isPending || generateUploadedPptLectures.isPending
   const hasGeneratedSlideLectures = useMemo(() => slideLectures.some(hasUsableSlideLecture), [slideLectures])
@@ -1656,6 +1658,7 @@ function TeacherPreparePage() {
 
   const handleGeneratePptTex = async () => {
     if (!pptNodeIds.length) return
+    setGraphScopeEnabled(true)
     setMode("graph")
     setStatus("")
     resetGeneratedLectures()
@@ -2533,51 +2536,75 @@ function TeacherPreparePage() {
       <div className="space-y-6">
         <CoursewareImageWarning preview={preview} />
 
-        <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-          <div className="space-y-4">
-            <GraphTreePanel
-              tree={tree}
-              search={treeSearch}
-              selectedNodeIds={pptNodeIds}
-              expandedNodeIds={expandedNodeIds}
-              isLoading={isGraphLoading}
-              nodeCount={nodes.length}
-              relationCount={relationships.length}
-              onSearch={setTreeSearch}
-              onSelect={selectPptNode}
-              onToggle={toggleNode}
-            />
-            <GraphContextPanel
-              isLoading={pptContextLoading}
-              context={pptNodeContext}
-              emptyText="第一步选择课程树，系统会按所选子树生成 PPT/TeX 页面内容。"
-            />
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Network size={18} />
-              讲解范围确认
+        {shouldLoadGraphScope ? (
+          <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            <div className="space-y-4">
+              <GraphTreePanel
+                tree={tree}
+                search={treeSearch}
+                selectedNodeIds={pptNodeIds}
+                expandedNodeIds={expandedNodeIds}
+                isLoading={isGraphLoading}
+                nodeCount={nodes.length}
+                relationCount={relationships.length}
+                onSearch={setTreeSearch}
+                onSelect={selectPptNode}
+                onToggle={toggleNode}
+              />
+              <GraphContextPanel
+                isLoading={pptContextLoading}
+                context={pptNodeContext}
+                emptyText="第一步选择课程树，系统会按所选子树生成 PPT/TeX 页面内容。"
+              />
             </div>
-            <GraphTreePanel
-              tree={tree}
-              search={treeSearch}
-              selectedNodeIds={lectureNodeIds}
-              expandedNodeIds={expandedNodeIds}
-              isLoading={isGraphLoading}
-              nodeCount={nodes.length}
-              relationCount={relationships.length}
-              onSearch={setTreeSearch}
-              onSelect={selectLectureNode}
-              onToggle={toggleNode}
-            />
-            <GraphContextPanel
-              isLoading={lectureContextLoading}
-              context={lectureNodeContext}
-              emptyText="默认继承第一步选择；也可以在生成讲解前收窄范围以减少漂移。"
-            />
-          </div>
-        </section>
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Network size={18} />
+                讲解范围确认
+              </div>
+              <GraphTreePanel
+                tree={tree}
+                search={treeSearch}
+                selectedNodeIds={lectureNodeIds}
+                expandedNodeIds={expandedNodeIds}
+                isLoading={isGraphLoading}
+                nodeCount={nodes.length}
+                relationCount={relationships.length}
+                onSearch={setTreeSearch}
+                onSelect={selectLectureNode}
+                onToggle={toggleNode}
+              />
+              <GraphContextPanel
+                isLoading={lectureContextLoading}
+                context={lectureNodeContext}
+                emptyText="默认继承第一步选择；也可以在生成讲解前收窄范围以减少漂移。"
+              />
+            </div>
+          </section>
+        ) : (
+          <section className="rounded-lg border bg-card p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 font-medium">
+                  <Network size={18} />
+                  图谱范围
+                </div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                  已保存课程会先打开课件和文案；需要重新选择图谱范围时再加载章节树。
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGraphScopeEnabled(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent"
+              >
+                <Network size={16} />
+                加载图谱范围
+              </button>
+            </div>
+          </section>
+        )}
 
         <section className="rounded-lg border bg-card p-4">
           <div className="mb-3 flex items-center gap-2 font-medium">

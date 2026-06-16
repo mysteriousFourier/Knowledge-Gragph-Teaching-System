@@ -114,7 +114,7 @@ export const useEducationGraph = () => {
   })
 }
 
-export const useGraphNodeContext = (nodeIds: string | string[]) => {
+export const useGraphNodeContext = (nodeIds: string | string[], enabled = true) => {
   const selectedIds = Array.isArray(nodeIds) ? nodeIds.filter(Boolean) : nodeIds ? [nodeIds] : []
   const selectedKey = selectedIds.join("|")
   return useQuery({
@@ -127,7 +127,7 @@ export const useGraphNodeContext = (nodeIds: string | string[]) => {
             .join("&")}`,
         )
         .then((r) => r.data),
-    enabled: selectedIds.length > 0,
+    enabled: enabled && selectedIds.length > 0,
   })
 }
 
