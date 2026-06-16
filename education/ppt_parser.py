@@ -23,6 +23,7 @@ MAX_INLINE_IMAGE_BYTES = 800 * 1024
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".svg"}
 LATEX_IMAGE_COMMAND_DEFAULT_OPTIONS = {
     "safecontentimage": r"width=0.7\textwidth",
+    "safeverticalimage": r"width=\textwidth",
 }
 TEXT_COURSEWARE_EXTENSIONS = {".tex", ".md", ".markdown", ".txt", ".rst", ".csv", ".json", ".html", ".htm", ".rtf"}
 PPT_COURSEWARE_EXTENSIONS = {".pptx", ".ppt"}

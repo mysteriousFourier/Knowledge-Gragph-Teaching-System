@@ -202,6 +202,38 @@ class CoursewareParserTest(unittest.TestCase):
         self.assertNotIn("fig/27.1.png", slide["content"])
         self.assertNotIn("Missing image", slide["content"])
 
+    def test_tex_zip_custom_safeverticalimage_is_treated_as_image(self):
+        tex = r"""
+\documentclass{beamer}
+\newcommand{\safeverticalimage}[1]{\IfFileExists{#1}{\includegraphics[width=\textwidth]{#1}}{\fbox{Missing image}}}
+\begin{document}
+\begin{frame}{Figure 5.1}
+  \begin{columns}[T]
+    \begin{column}{0.45\textwidth}
+      Selection can maintain polymorphism under overdominance.
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \centering
+      \safeverticalimage{fig/chart.png}
+    \end{column}
+  \end{columns}
+\end{frame}
+\end{document}
+"""
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as archive:
+            archive.writestr("main.tex", tex)
+            archive.writestr("fig/chart.png", TINY_PNG)
+
+        parsed = parse_courseware(payload.getvalue(), "lecture.zip")
+        slide = build_ppt_lecture_prompt_data(parsed)["slide_details"][0]
+
+        self.assertEqual(parsed["missing_image_refs"], [])
+        self.assertEqual(slide["image_count"], 1)
+        self.assertEqual(slide["images"][0]["source_path"], "fig/chart.png")
+        self.assertTrue(str(slide["images"][0]["data_uri"]).startswith("data:image/png;base64,"))
+        self.assertEqual(slide["layout"]["columns"][1]["image_count"], 1)
+
     def test_tex_zip_image_paths_match_common_root_without_extension(self):
         tex = r"""
 \documentclass{beamer}
