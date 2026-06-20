@@ -4,11 +4,33 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LaTeX Beamer 演示文稿生成器</title>
-  <link rel="stylesheet" href="/beamer-generator/static/style.css?v=20260607-outline-progress-v97">
+  <link rel="stylesheet" href="/beamer-generator/static/style.css?v=20260620-manual-outline-v100">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
-</head>
+  <script>
+    (function () {
+      function parentHasDarkTheme() {
+        try {
+          if (window.parent && window.parent !== window && window.parent.document.documentElement.classList.contains("dark")) return true;
+        } catch (error) {}
+        try {
+          var storedTheme = window.parent && window.parent.localStorage ? window.parent.localStorage.getItem("kgts_theme") : localStorage.getItem("kgts_theme");
+          if (storedTheme === "dark") return true;
+          if (storedTheme === "light") return false;
+        } catch (error) {}
+        return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      }
+      function applyTheme() {
+        document.documentElement.classList.toggle("kgts-dark", parentHasDarkTheme());
+        if (document.body) document.body.classList.toggle("kgts-dark", parentHasDarkTheme());
+      }
+      applyTheme();
+      window.addEventListener("storage", applyTheme);
+      window.addEventListener("message", applyTheme);
+      window.setInterval(applyTheme, 1000);
+    })();
+  </script></head>
 <body>
 
 <div class="container">
@@ -103,8 +125,10 @@
 
     <div class="generate-actions">
       <button id="btnGenerateOutline" class="btn-secondary">生成纪要</button>
+      <button id="btnCreateManualOutline" class="btn-secondary">手动填写纪要</button>
       <button id="btnLoadSavedOutlineInput" class="btn-secondary">调用已保存纪要</button>
     </div>
+    <div class="manual-outline-hint">手动填写纪要会跳过 GPT 纪要规划；在右侧为每个大节设置页数，并逐页填写 frame 标题、概要和要点后再生成 LaTeX。</div>
     <div id="outlineProgressPanel" class="outline-progress-panel" style="display:none;" aria-live="polite">
       <div class="outline-progress-head">
         <span id="outlineProgressMessage">纪要生成准备中...</span>
@@ -315,7 +339,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/stex/stex.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script src="/beamer-generator/static/app.js?v=20260607-outline-progress-v97"></script>
+<script src="/beamer-generator/static/app.js?v=20260620-manual-outline-v100"></script>
 
 </body>
 </html>

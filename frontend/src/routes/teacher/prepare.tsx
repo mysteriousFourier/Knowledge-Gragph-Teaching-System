@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+﻿import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
@@ -2556,6 +2556,7 @@ function TeacherPreparePage() {
                 context={pptNodeContext}
                 emptyText="第一步选择课程树，系统会按所选子树生成 PPT/TeX 页面内容。"
               />
+              <EmbeddedPptGeneratePanel />
             </div>
 
             <div className="space-y-4">
@@ -2580,6 +2581,7 @@ function TeacherPreparePage() {
                 context={lectureNodeContext}
                 emptyText="默认继承第一步选择；也可以在生成讲解前收窄范围以减少漂移。"
               />
+              <EmbeddedPptLatexPanel />
             </div>
           </section>
         ) : (
@@ -2912,6 +2914,200 @@ function TeacherPreparePage() {
         </section>
       </div>
     </div>
+  )
+}
+
+function EmbeddedPptGeneratePanel() {
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const frameClassName = isFullscreen ? "h-[calc(100dvh-64px)] w-full border-0" : "h-[760px] w-full border-0"
+
+  return (
+    <section
+      className={cn(
+        "overflow-hidden rounded-lg border bg-card",
+        isFullscreen && "fixed inset-0 z-50 rounded-none bg-background p-4",
+      )}
+    >
+      <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
+        <h2 className="text-sm font-semibold">PPT 生成</h2>
+        <button
+          type="button"
+          onClick={() => setIsFullscreen((value) => !value)}
+          className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent"
+          aria-label={isFullscreen ? "退出全屏 PPT 生成" : "全屏 PPT 生成"}
+        >
+          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          {isFullscreen ? "退出全屏" : "放大"}
+        </button>
+      </div>
+      <iframe
+        title="PPT 生成"
+        src="/beamer-generator/index.html?v=20260620-manual-outline-v100"
+        className={frameClassName}
+        allow="clipboard-read; clipboard-write"
+        allowFullScreen
+      />
+    </section>
+  )
+}
+function EmbeddedPptLatexPanel() {
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const frameClassName = isFullscreen ? "h-[calc(100dvh-64px)] w-full border-0" : "h-[760px] w-full border-0"
+
+  return (
+    <section
+      className={cn(
+        "overflow-hidden rounded-lg border bg-card",
+        isFullscreen && "fixed inset-0 z-50 rounded-none bg-background p-4",
+      )}
+    >
+      <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
+        <h2 className="text-sm font-semibold">PPT 转化为 LaTeX</h2>
+        <button
+          type="button"
+          onClick={() => setIsFullscreen((value) => !value)}
+          className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent"
+          aria-label={isFullscreen ? "退出全屏 PPT 转化为 LaTeX" : "全屏 PPT 转化为 LaTeX"}
+        >
+          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          {isFullscreen ? "退出全屏" : "放大"}
+        </button>
+      </div>
+      <iframe
+        title="PPT 转化为 LaTeX"
+        src="/beamer-generator/index.html?mode=latex-import&v=20260620-manual-outline-v100"
+        className={frameClassName}
+        allow="clipboard-read; clipboard-write"
+        allowFullScreen
+      />
+    </section>
+  )
+}
+function EmbeddedPptWorkspaceCompact() {
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const frameClassName = isFullscreen
+    ? "h-[calc(100dvh-132px)] min-h-[640px] w-full border-0"
+    : "h-[700px] min-h-[620px] w-full border-0"
+
+  return (
+    <section
+      className={cn(
+        "embedded-ppt-compact overflow-hidden rounded-lg border bg-card",
+        isFullscreen && "fixed inset-0 z-50 overflow-auto rounded-none bg-background p-4",
+      )}
+    >
+      <div className="flex items-center justify-between gap-3 border-b p-3">
+        <h2 className="text-sm font-semibold">PPT 生成与展示</h2>
+        <button
+          type="button"
+          onClick={() => setIsFullscreen((value) => !value)}
+          className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent"
+        >
+          {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          {isFullscreen ? "退出全屏" : "全屏"}
+        </button>
+      </div>
+
+      <div className={cn("max-h-[900px] space-y-4 overflow-y-auto p-4", isFullscreen && "mx-auto max-h-none max-w-[1800px]")}>
+        <section id="embedded-ppt-generate" className="overflow-hidden rounded-lg border bg-background">
+          <div className="border-b px-3 py-2">
+            <h3 className="text-sm font-semibold">PPT 生成</h3>
+          </div>
+          <iframe
+            title="PPT 生成"
+            src="/beamer-generator/index.html?v=20260527-min-pages-figpath-v75"
+            className={frameClassName}
+            allowFullScreen
+          />
+        </section>
+
+        <section id="embedded-ppt-display" className="overflow-hidden rounded-lg border bg-background">
+          <div className="border-b px-3 py-2">
+            <h3 className="text-sm font-semibold">PPT 展示</h3>
+          </div>
+          <iframe
+            title="PPT 展示"
+            src="/beamer-generator/index.html?mode=latex-import&v=20260527-min-pages-figpath-v75"
+            className={frameClassName}
+            allowFullScreen
+          />
+        </section>
+      </div>
+    </section>
+  )
+}
+
+function EmbeddedPptWorkspace() {
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  const frameClassName = isFullscreen
+    ? "h-[calc(100dvh-108px)] min-h-[640px] w-full border-0"
+    : "h-[720px] min-h-[640px] w-full border-0"
+
+  return (
+    <section
+      className={cn(
+        "overflow-hidden rounded-lg border bg-card",
+        isFullscreen && "fixed inset-0 z-50 overflow-auto rounded-none bg-background p-4",
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
+        <div>
+          <h2 className="font-semibold">PPT 生成与展示</h2>
+          <p className="mt-1 text-xs text-muted-foreground">嵌入旧版 PPT 工作台，生成和展示版面保持原样。</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => document.getElementById("embedded-ppt-generate")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent"
+          >
+            PPT 生成
+          </button>
+          <button
+            type="button"
+            onClick={() => document.getElementById("embedded-ppt-display")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent"
+          >
+            PPT 展示
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsFullscreen((value) => !value)}
+            className="inline-flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent"
+          >
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            {isFullscreen ? "退出全屏" : "全屏"}
+          </button>
+        </div>
+      </div>
+
+      <div className={cn("space-y-4 p-4", isFullscreen && "mx-auto max-w-[1800px]")}>
+        <section id="embedded-ppt-generate" className="scroll-mt-6 overflow-hidden rounded-lg border bg-background">
+          <div className="border-b p-4">
+            <h3 className="text-lg font-semibold">PPT 生成</h3>
+          </div>
+          <iframe
+            title="LaTeX Beamer 生成器"
+            src="/beamer-generator/index.html?v=20260527-min-pages-figpath-v75"
+            className={frameClassName}
+            allowFullScreen
+          />
+        </section>
+
+        <section id="embedded-ppt-display" className="scroll-mt-6 overflow-hidden rounded-lg border bg-background">
+          <div className="border-b p-4">
+            <h3 className="text-lg font-semibold">PPT 展示</h3>
+          </div>
+          <iframe
+            title="导入 LaTeX 生成可编辑 PPT"
+            src="/beamer-generator/index.html?mode=latex-import&v=20260527-min-pages-figpath-v75"
+            className={frameClassName}
+            allowFullScreen
+          />
+        </section>
+      </div>
+    </section>
   )
 }
 

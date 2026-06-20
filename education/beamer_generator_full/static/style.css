@@ -1,4 +1,4 @@
-/* ========== 全局重置 ========== */
+﻿/* ========== 全局重置 ========== */
 * {
   margin: 0;
   padding: 0;
@@ -76,6 +76,13 @@ html {
   grid-template-columns: 1fr;
   gap: 10px;
   margin-bottom: 8px;
+}
+
+.manual-outline-hint {
+  margin: -2px 0 12px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .outline-progress-panel {
@@ -319,15 +326,29 @@ html {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .outline-section-head input,
 .outline-frame-head input {
   flex: 1;
+  min-width: 180px;
+}
+
+.outline-frame-layout {
+  flex: 0 0 180px;
+  min-width: 150px;
 }
 
 .outline-section-head .outline-section-count {
   flex: 0 0 86px;
+}
+
+.outline-section-head .btn-secondary,
+.outline-frame-head .btn-secondary,
+.outline-latex-snippet-head .btn-secondary {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .outline-section textarea,
@@ -389,6 +410,102 @@ html {
   color: #64748b;
   font-size: 12px;
   font-weight: 600;
+}
+
+.outline-latex-snippet-block {
+  margin: 10px 0 12px;
+  border: 1px solid #dce4ef;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.outline-latex-snippet-block.error {
+  border-color: #fecaca;
+}
+
+body.outline-latex-expanded-active {
+  overflow: hidden;
+}
+
+.outline-latex-snippet-block.outline-latex-expanded {
+  position: fixed;
+  inset: 18px;
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-color: #0f766e;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.32);
+}
+
+.outline-latex-snippet-block.outline-latex-expanded .outline-latex-snippet-head {
+  flex: 0 0 auto;
+}
+
+.outline-latex-snippet-block.outline-latex-expanded .outline-latex-progress {
+  flex: 0 0 auto;
+}
+
+.outline-latex-snippet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e5edf6;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.outline-latex-snippet-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.outline-latex-progress {
+  height: 6px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.outline-latex-progress-fill {
+  width: 0;
+  height: 100%;
+  background: #0f766e;
+  transition: width 0.25s ease;
+}
+
+.outline-latex-progress-text {
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.outline-latex-snippet {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 0;
+  resize: vertical;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.outline-latex-snippet-block.outline-latex-expanded .outline-latex-snippet {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  resize: none;
 }
 
 .outline-frame-tools,
@@ -4802,3 +4919,244 @@ body.ppt-exporting .slide-free-formula-source {
   }
   .slide-thumb { min-width: 160px; }
 }
+
+/* KGTS embedded theme overrides: match the host app paper/signal palette. */
+:root {
+  --kgts-paper: rgb(242 238 227);
+  --kgts-paper-2: rgb(230 223 206);
+  --kgts-field: rgb(216 222 215);
+  --kgts-field-strong: rgb(174 185 176);
+  --kgts-ink: #151713;
+  --kgts-muted-ink: rgb(21 23 19 / 0.64);
+  --kgts-line: rgb(21 23 19 / 0.18);
+  --kgts-line-strong: rgb(21 23 19 / 0.36);
+  --kgts-signal: rgb(22 75 64);
+  --kgts-signal-soft: rgb(22 75 64 / 0.10);
+  --kgts-signal-border: rgb(22 75 64 / 0.34);
+  --kgts-signal-contrast: rgb(242 238 227);
+}
+
+html.kgts-dark,
+body.kgts-dark {
+  --kgts-paper: rgb(39 43 37);
+  --kgts-paper-2: rgb(50 55 47);
+  --kgts-field: rgb(18 24 22);
+  --kgts-field-strong: rgb(76 91 82);
+  --kgts-ink: #edf1e7;
+  --kgts-muted-ink: rgb(237 241 231 / 0.68);
+  --kgts-line: rgb(237 241 231 / 0.16);
+  --kgts-line-strong: rgb(237 241 231 / 0.32);
+  --kgts-signal: rgb(153 205 172);
+  --kgts-signal-soft: rgb(153 205 172 / 0.14);
+  --kgts-signal-border: rgb(153 205 172 / 0.38);
+  --kgts-signal-contrast: rgb(18 24 22);
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--kgts-field) !important;
+  color: var(--kgts-ink) !important;
+}
+
+.container,
+.panel,
+.panel-input,
+.panel-output,
+.outline-panel,
+.outline-section,
+.outline-section-nav,
+.outline-section-detail,
+.api-config-panel,
+.lecture-preview-box,
+.markdown-import-list,
+.markdown-selection-summary,
+.latex-import-panel,
+.import-preview-panel,
+.page-checklist-panel,
+.ppt-import-panel,
+.ppt-latex-preview-panel,
+.equation-source-panel,
+.saved-ppt-section,
+.saved-ppt-chapter-list,
+.saved-ppt-slide-gallery,
+.package-image-panel,
+.supplement-chapter-panel,
+#editorWrapper,
+.CodeMirror {
+  background: var(--kgts-paper) !important;
+  color: var(--kgts-ink) !important;
+  border-color: var(--kgts-line-strong) !important;
+}
+
+.output-header,
+.outline-panel-header,
+.equation-source-panel-head,
+.equation-source-panel-actions,
+.import-preview-header,
+.ppt-latex-preview-header,
+.slide-toolbar,
+.saved-ppt-section-title,
+.lecture-preview-title-row,
+.page-checklist-toolbar {
+  background: var(--kgts-paper-2) !important;
+  color: var(--kgts-ink) !important;
+  border-color: var(--kgts-line) !important;
+}
+
+input,
+textarea,
+select,
+.source-content-store,
+#editor,
+.ppt-save-title-input,
+.saved-ppt-chapter-select,
+.inline-number-range input {
+  background: rgb(216 222 215 / 0.42) !important;
+  color: var(--kgts-ink) !important;
+  border-color: var(--kgts-line-strong) !important;
+}
+
+body.kgts-dark input,
+body.kgts-dark textarea,
+body.kgts-dark select,
+body.kgts-dark .source-content-store,
+body.kgts-dark #editor,
+body.kgts-dark .ppt-save-title-input,
+body.kgts-dark .saved-ppt-chapter-select,
+body.kgts-dark .inline-number-range input {
+  background: rgb(18 24 22 / 0.72) !important;
+}
+
+small,
+.outline-panel-summary,
+.latex-import-meta,
+.import-preview-meta,
+.markdown-selection-summary,
+.status,
+.slide-placeholder,
+.empty-state,
+.inline-number-range span,
+.saved-ppt-section-title,
+.ppt-latex-preview-meta,
+.lecture-preview-title,
+.lecture-preview-box .muted {
+  color: var(--kgts-muted-ink) !important;
+}
+
+.btn-primary,
+.btn-accent,
+.generate-actions .btn-primary,
+.latex-import-actions .btn-primary,
+.ppt-import-dropzone .btn-primary,
+#btnGenerate,
+#btnConvertPpt,
+#btnDownloadPptx,
+#btnSaveProject,
+#btnReferenceSelectedEquations,
+#btnAddSelectedSupplementChapters,
+.outline-progress-fill,
+.resize-handle,
+.input-collapse-toggle:hover,
+.slide-insert-dropzone::before,
+.kg-mini-page,
+.slide-page-number,
+.status.info::before {
+  background: var(--kgts-signal) !important;
+  color: var(--kgts-signal-contrast) !important;
+  border-color: var(--kgts-signal) !important;
+}
+
+.btn-primary,
+.btn-accent,
+.outline-progress-fill {
+  background-image: none !important;
+}
+
+.btn-secondary,
+.tab-btn,
+.saved-ppt-refresh,
+.saved-ppt-chapter-toggle,
+.page-checklist-toolbar button,
+.latex-actions button,
+.ppt-actions button,
+.api-config-actions button,
+.outline-panel-actions button,
+.equation-source-panel-actions button {
+  background: var(--kgts-paper-2) !important;
+  color: var(--kgts-ink) !important;
+  border-color: var(--kgts-line-strong) !important;
+}
+
+.btn-secondary:hover,
+.tab-btn:hover,
+.tab-btn.active,
+.saved-ppt-refresh:hover,
+.saved-ppt-chapter-toggle:hover,
+.page-checklist-toolbar button:hover,
+.latex-actions button:hover,
+.ppt-actions button:hover,
+.outline-section-nav-item:hover,
+.outline-section-nav-item.active,
+.markdown-import-item:hover,
+.saved-ppt-chapter-item:hover,
+.saved-ppt-chapter-item.active,
+.slide-thumb.active,
+.slide-thumb:hover,
+.ppt-import-dropzone:hover {
+  background: var(--kgts-signal-soft) !important;
+  color: var(--kgts-signal) !important;
+  border-color: var(--kgts-signal-border) !important;
+}
+
+.api-config-title,
+.outline-progress-head,
+.outline-panel-title,
+.latex-import-title,
+.import-preview-title,
+.equation-source-panel-title,
+.equation-source-column-title,
+.ppt-import-title,
+.ppt-latex-preview-title,
+.status.info,
+.status.success,
+a,
+.slide-thumb.active .slide-thumb-title {
+  color: var(--kgts-signal) !important;
+}
+
+.outline-progress-panel,
+.latex-import-panel-inline,
+.saved-ppt-chapter-item.active,
+.ppt-import-dropzone,
+.import-preview-card,
+.package-image-item,
+.equation-source-item,
+.markdown-import-item,
+.slide-thumb {
+  background: var(--kgts-signal-soft) !important;
+  border-color: var(--kgts-signal-border) !important;
+}
+
+.resize-handle,
+.inner-resize-handle {
+  background: var(--kgts-signal) !important;
+}
+
+.resize-handle-grip,
+.input-collapse-toggle {
+  color: var(--kgts-signal-contrast) !important;
+}
+
+body.kgts-dark .slide-canvas,
+body.kgts-dark .slide-list,
+body.kgts-dark .slide-editor,
+body.kgts-dark .ppt-editor,
+body.kgts-dark #viewLatex,
+body.kgts-dark #viewPpt,
+body.kgts-dark #viewOutline {
+  background: var(--kgts-field) !important;
+  color: var(--kgts-ink) !important;
+  border-color: var(--kgts-line) !important;
+}
+

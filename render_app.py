@@ -54,6 +54,7 @@ from backend.maintenance.structured_sync import scan_structured_sources  # noqa:
 # behavior, while this file only adapts how they are served on Render.
 from backend.education import api_server as education_api  # noqa: E402
 from backend.maintenance import api_server as maintenance_api  # noqa: E402
+from education.beamer_full_router import router as beamer_generator_router  # noqa: E402
 from core.bridge import delete_generated_lecture_nodes, _is_generated_shell_chapter_node  # noqa: E402
 from education.tts_router import router as tts_router  # noqa: E402
 from core.path_policy import project_local_only  # noqa: E402
@@ -630,8 +631,24 @@ async def update_graph_relation(payload: dict[str, Any]) -> dict[str, Any]:
 
 _append_api_routes(education_api.app, skip_paths={"/api/health"})
 _append_api_routes(maintenance_api.app, skip_paths={"/api/health"})
+app.include_router(beamer_generator_router)
 
 if FRONTEND_DIR.exists():
+    beamer_static_dir = ROOT_DIR / "education" / "beamer_generator_full" / "static"
+    beamer_upload_dir = ROOT_DIR / "education" / "beamer_generator_full" / "uploads"
+    if beamer_static_dir.exists():
+        app.mount(
+            "/beamer-generator/static",
+            StaticFiles(directory=beamer_static_dir),
+            name="beamer-generator-static",
+        )
+    if beamer_upload_dir.exists():
+        app.mount(
+            "/beamer-generator/uploads",
+            StaticFiles(directory=beamer_upload_dir),
+            name="beamer-generator-uploads",
+        )
+
     assets_dir = FRONTEND_DIR / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")

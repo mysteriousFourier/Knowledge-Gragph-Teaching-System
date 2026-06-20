@@ -31,6 +31,13 @@
   var currentCustomRequirements = "";
   var generatedOutline = null;
   var activeOutlineSectionIndex = 0;
+  var frameLatexCache = {};
+  var sectionLatexCache = {};
+  var frameStandaloneLatexCache = {};
+  var sectionStandaloneLatexCache = {};
+  var frameLatexProgress = {};
+  var sectionLatexProgress = {};
+  var latexSnippetProgressTimers = {};
   var pageChecklistText = "";
   var pageChecklistTimer = null;
   var GPT_CONFIG_STORAGE_KEY = "beamer_generator_gpt_config_v1";
@@ -3171,6 +3178,7 @@
       .text(state ? "生成中..." : "生成 LaTeX");
     $("#btnGenerateOutline").prop("disabled", state)
       .text(state ? "生成中..." : "生成纪要");
+    $("#btnCreateManualOutline").prop("disabled", state);
     if (!state) {
       var has = !!fullLatex;
       $("#btnCopy, #btnDownloadTex, #btnOpenOverleaf, #btnConvertPpt").prop("disabled", !has);
@@ -4750,7 +4758,6 @@
   function buildFallbackPreamble(meta) {
     return [
       "\\documentclass[10pt, aspectratio=169]{ctexbeamer}",
-      "\\usetheme{Madrid}",
       "\\usepackage{amsmath, amssymb, amsthm}",
       "\\usepackage{graphicx}",
       "\\usepackage{booktabs}",
@@ -4762,36 +4769,40 @@
       "\\usetikzlibrary{shapes, positioning}",
       "\\definecolor{myline}{RGB}{0,116,112}",
       "\\definecolor{myblue}{RGB}{40,100,180}",
+      "\\definecolor{kgSSWMCream}{RGB}{247,244,238}",
+      "\\definecolor{kgSSWMCard}{RGB}{232,228,220}",
+      "\\definecolor{kgSSWMDark}{RGB}{20,73,55}",
+      "\\definecolor{kgSSWMMuted}{RGB}{92,124,111}",
+      "\\definecolor{kgSSWMGold}{RGB}{181,125,47}",
+      "\\definecolor{kgSSWMWhite}{RGB}{255,253,248}",
       "\\setbeamertemplate{frametitle}{%",
-      "  \\vspace*{0.2cm}%",
-      "  \\begin{beamercolorbox}[wd=\\paperwidth, leftskip=0.5cm, rightskip=0.5cm, ht=0.3cm, dp=0pt]{whitebg}%",
-      "    \\usebeamerfont{frametitle}\\textcolor{black}{\\insertframetitle}%",
-      "  \\end{beamercolorbox}%",
-      "  \\vspace{0pt}%",
       "  \\begin{tikzpicture}[remember picture, overlay]",
-      "    \\draw[myline, line width=1.5pt]",
-      "      ([yshift=-1.3cm] current page.north west) -- ([yshift=-1.3cm] current page.north east);",
+      "    \\fill[kgSSWMCream] (current page.south west) rectangle (current page.north east);",
+      "    \\fill[kgSSWMDark] (current page.north west) rectangle ([yshift=-0.08cm] current page.north east);",
+      "    \\node[anchor=north west, font=\\Large\\bfseries, text=kgSSWMDark]",
+      "      at ([xshift=0.55cm,yshift=-0.52cm] current page.north west) {\\insertframetitle};",
+      "    \\node[anchor=south east, font=\\scriptsize, text=kgSSWMMuted]",
+      "      at ([xshift=-0.45cm,yshift=0.23cm] current page.south east) {\\insertframenumber};",
       "  \\end{tikzpicture}%",
-      "  \\vspace{0.1cm}%",
+      "  \\vspace*{1.05cm}%",
       "}",
       "\\setbeamertemplate{title page}{%",
       "  \\begin{tikzpicture}[remember picture, overlay]",
-      "    \\draw[line width=1.5pt, color=myline]",
-      "      ([yshift=-40pt] current page.north west) -- ([yshift=-40pt] current page.north east);",
-      "    \\node[anchor=north west, inner sep=0, minimum width=0.25\\paperwidth,",
-      "          minimum height=39pt, fill=gray!30, text=black, align=center]",
-      "          at (current page.north west) {Public course in BIMSA in 2026 spring semester};",
+      "    \\fill[kgSSWMCream] (current page.south west) rectangle (current page.north east);",
+      "    \\fill[kgSSWMDark] (current page.north west) rectangle ([yshift=-0.12cm] current page.north east);",
+      "    \\node[anchor=south east, font=\\scriptsize, text=kgSSWMMuted]",
+      "      at ([xshift=-0.45cm,yshift=0.23cm] current page.south east) {\\insertframenumber};",
       "  \\end{tikzpicture}%",
-      "  \\vspace*{36pt}",
+      "  \\vspace*{1.45cm}",
       "  \\begin{center}",
       "    \\begin{tikzpicture}",
-      "      \\node[draw=none, inner sep=8pt, fill=white, text=black,",
+      "      \\node[draw=none, inner sep=8pt, text=kgSSWMDark,",
       "            align=center, font=\\Huge\\bfseries] (titlebox) {\\inserttitle};",
-      "      \\node[draw=none, rounded corners=2pt,",
-      "            inner sep=8pt, fill=white, text=black,",
+      "      \\node[draw=none,",
+      "            inner sep=8pt, text=kgSSWMMuted,",
       "            align=center, font=\\large,",
       "            below=5pt of titlebox] (subtitlebox) {\\insertsubtitle};",
-      "      \\node[below=5pt of subtitlebox.south east, anchor=north east, align=center, text=black] {",
+      "      \\node[below=11pt of subtitlebox.south east, anchor=north east, align=center, text=kgSSWMMuted] {",
       "        \\insertauthor \\\\[3pt]",
       "        \\insertdate",
       "      };",
@@ -6335,7 +6346,7 @@
       content: content,
       api_key: config.api_key,
       base_url: config.base_url,
-      style: $("#style").val(),
+      style: "academic",
       custom_requirements: currentCustomRequirements,
       slide_count: Math.max(1, Math.min(80, parseInt($("#slideCount").val(), 10) || 7)),
       section_slide_min: sectionSlideRange.min,
@@ -6396,6 +6407,468 @@
       throw new Error("后端返回的纪要没有 frame 页面");
     }
     return normalized;
+  }
+
+  function outlineLayoutOptionsHtml(selected) {
+    var options = [
+      ["normal", "normal"],
+      ["sswm_card_grid", "SSWM Card Grid"],
+      ["sswm_two_panel_compare", "SSWM Two Panel Compare"],
+      ["sswm_flow_with_panels", "SSWM Flow"],
+      ["sswm_three_column_cards", "SSWM Three Columns"],
+      ["sswm_dark_insight_panel", "SSWM Insight"],
+      ["sswm_summary_split", "SSWM Summary Split"],
+      ["sswm_formula_strip", "SSWM Formula Strip"],
+      ["sswm_formula_compare", "SSWM Formula Compare"],
+    ];
+    selected = String(selected || "normal").trim() || "normal";
+    return options.map(function (item) {
+      return '<option value="' + htmlEscape(item[0]) + '"' + (item[0] === selected ? " selected" : "") + '>' + htmlEscape(item[1]) + '</option>';
+    }).join("");
+  }
+
+  function firstMarkdownHeading(text, fallback) {
+    var match = String(text || "").match(/^#\s+(.+?)\s*$/m);
+    return match ? match[1].replace(/\s+#+\s*$/, "").trim() : fallback;
+  }
+
+  function allMarkdownSectionsForManualOutline() {
+    var selected = getSelectedMarkdownSections();
+    if (selected.length) return selected;
+    var sections = [];
+    importedMarkdownFiles.forEach(function (item, fileIndex) {
+      if (!item || !item.content || item.error) return;
+      (item.sections || []).forEach(function (section, sectionIndex) {
+        sections.push({
+          id: section.id || markdownSectionId(fileIndex, sectionIndex),
+          fileIndex: fileIndex,
+          sectionIndex: sectionIndex,
+          fileTitle: item.path || item.name || ("知识图谱 " + (fileIndex + 1)),
+          title: section.title || ("小节 " + (sectionIndex + 1)),
+          content: section.content || "",
+        });
+      });
+    });
+    return sections;
+  }
+
+  function manualSectionNumber(title, index) {
+    var match = String(title || "").match(/(?:chapter\d+_)?(\d{3})\b/i);
+    return match ? match[1] : String(index + 1).padStart(3, "0");
+  }
+
+  function compactManualSummary(text, fallback) {
+    var lines = String(text || "")
+      .replace(/\r\n/g, "\n")
+      .split("\n")
+      .map(function (line) { return line.replace(/^#{1,6}\s*/, "").trim(); })
+      .filter(Boolean);
+    return (lines.slice(0, 3).join("；") || fallback || "").slice(0, 260);
+  }
+
+  function makeManualFrames(count) {
+    var frames = [];
+    for (var i = 0; i < count; i++) {
+      frames.push({
+        title: "Frame " + (i + 1),
+        summary: "",
+        layout_type: "normal",
+        key_points: [],
+      });
+    }
+    return frames;
+  }
+
+  function buildManualOutlineSeed() {
+    var sectionRange = readSectionSlideRange();
+    var initialFrameCount = Math.max(1, Math.min(80, sectionRange.min || 1));
+    var sections = allMarkdownSectionsForManualOutline();
+    var sourceTitle = firstMarkdownHeading($("#content").val(), "Manual PPT Outline");
+    if (!sections.length) {
+      sections = [{
+        title: "Manual Section",
+        content: "",
+        fileTitle: sourceTitle,
+      }];
+    }
+    var outline = {
+      title: sourceTitle || "Manual PPT Outline",
+      target_slide_count: 0,
+      sections: sections.map(function (section, index) {
+        var title = section.title || ("Manual Section " + (index + 1));
+        return {
+          id: manualSectionNumber(title, index),
+          title: title,
+          summary: compactManualSummary(section.content, "手动填写本大节概要。"),
+          slide_count: initialFrameCount,
+          frames: makeManualFrames(initialFrameCount),
+        };
+      }),
+    };
+    return normalizeOutlineFrameCounts(outline);
+  }
+
+  function outlineToSourceContent(outline) {
+    outline = outline || {};
+    var lines = ["# " + (outline.title || "Manual PPT Outline"), ""];
+    (outline.sections || []).forEach(function (section) {
+      lines.push("## " + (section.id || "") + " " + (section.title || "Section"));
+      if (section.summary) lines.push(section.summary);
+      (section.frames || []).forEach(function (frame, index) {
+        lines.push("");
+        lines.push("### Page " + (index + 1) + ": " + (frame.title || "Frame"));
+        if (frame.summary) lines.push(frame.summary);
+        (frame.key_points || []).forEach(function (point) {
+          lines.push("- " + point);
+        });
+      });
+      lines.push("");
+    });
+    return lines.join("\n").trim();
+  }
+
+  function validateOutlineForGeneration(outline) {
+    outline = normalizeOutlineFrameCounts(outline);
+    if (!outline.sections.length) return { ok: false, message: "请先填写至少一个大节。" };
+    if (outline.target_slide_count < 1) return { ok: false, message: "纪要中没有 frame 页面。" };
+    if (outline.target_slide_count > 80) return { ok: false, message: "当前最多支持 80 页，请减少手动纪要页数。" };
+    var seenTitles = {};
+    for (var s = 0; s < outline.sections.length; s++) {
+      var section = outline.sections[s] || {};
+      if (!String(section.title || "").trim()) {
+        return { ok: false, message: "第 " + (s + 1) + " 个大节缺少标题。" };
+      }
+      for (var f = 0; f < (section.frames || []).length; f++) {
+        var frame = section.frames[f] || {};
+        var title = String(frame.title || "").trim();
+        var key = title.toLowerCase();
+        if (key && seenTitles[key]) {
+          return { ok: false, message: "frame 标题重复：" + title + "。请为每页填写不同标题。" };
+        }
+        if (key) seenTitles[key] = true;
+      }
+    }
+    return { ok: true, message: "" };
+  }
+
+  function frameLatexCacheKey(sectionIndex, frameIndex) {
+    return sectionIndex + ":" + frameIndex;
+  }
+
+  function latexSnippetTimerKey(kind, key) {
+    return kind + ":" + key;
+  }
+
+  function clearLatexSnippetTimer(kind, key) {
+    var timerKey = latexSnippetTimerKey(kind, key);
+    if (latexSnippetProgressTimers[timerKey]) {
+      clearInterval(latexSnippetProgressTimers[timerKey]);
+      delete latexSnippetProgressTimers[timerKey];
+    }
+  }
+
+  function clearAllLatexSnippetTimers() {
+    Object.keys(latexSnippetProgressTimers).forEach(function (key) {
+      clearInterval(latexSnippetProgressTimers[key]);
+    });
+    latexSnippetProgressTimers = {};
+  }
+
+  function snippetProgressStore(kind) {
+    return kind === "section" ? sectionLatexProgress : frameLatexProgress;
+  }
+
+  function updateSnippetProgressDom(kind, key) {
+    var state = snippetProgressStore(kind)[String(key)];
+    if (!state) return;
+    var selector = '.outline-latex-snippet-block[data-snippet-kind="' + kind + '"][data-snippet-key="' + String(key).replace(/"/g, '\\"') + '"]';
+    var $block = $(selector).first();
+    if (!$block.length) return;
+    var percent = Math.max(0, Math.min(100, state.percent || 0));
+    $block.find(".outline-latex-progress-fill").css("width", percent + "%");
+    $block.find(".outline-latex-progress-text").text(state.status || "正在生成...");
+    var cachedText = kind === "section" ? sectionLatexCache[String(key)] : frameLatexCache[String(key)];
+    if (!cachedText || state.error) {
+      $block.find(".outline-latex-snippet").val(state.placeholder || "正在请求 GPT 生成 LaTeX...");
+    }
+  }
+
+  function startLatexSnippetProgress(kind, key, status) {
+    clearLatexSnippetTimer(kind, key);
+    var store = snippetProgressStore(kind);
+    store[String(key)] = {
+      percent: 8,
+      status: status || "正在连接 GPT...",
+      placeholder: "正在请求 GPT 生成 LaTeX，请等待...",
+    };
+    updateSnippetProgressDom(kind, key);
+    var timerKey = latexSnippetTimerKey(kind, key);
+    latexSnippetProgressTimers[timerKey] = setInterval(function () {
+      var state = store[String(key)];
+      if (!state) {
+        clearLatexSnippetTimer(kind, key);
+        return;
+      }
+      var next = Math.min(88, (state.percent || 8) + (state.percent < 45 ? 7 : 3));
+      state.percent = next;
+      if (next >= 75) {
+        state.status = "GPT 正在整理 LaTeX 片段并套用生成规则...";
+      } else if (next >= 35) {
+        state.status = "GPT 正在根据纪要生成 LaTeX...";
+      }
+      updateSnippetProgressDom(kind, key);
+    }, 1100);
+  }
+
+  function finishLatexSnippetProgress(kind, key) {
+    clearLatexSnippetTimer(kind, key);
+    delete snippetProgressStore(kind)[String(key)];
+  }
+
+  function failLatexSnippetProgress(kind, key, message) {
+    clearLatexSnippetTimer(kind, key);
+    snippetProgressStore(kind)[String(key)] = {
+      percent: 100,
+      status: "生成失败：" + message,
+      placeholder: "生成失败：" + message,
+      error: true,
+    };
+  }
+
+  function latexSnippetBlockHtml(kind, key, title, latex, progress, refreshClass, copyClass, refreshText, copyText) {
+    var hasProgress = !!progress;
+    var percent = hasProgress ? Math.max(0, Math.min(100, progress.percent || 0)) : 100;
+    var text = hasProgress ? (latex || progress.placeholder || "正在请求 GPT 生成 LaTeX，请等待...") : (latex || "");
+    var status = hasProgress ? (progress.status || "正在生成...") : "";
+    var html = "";
+    html += '<div class="outline-latex-snippet-block' + (progress && progress.error ? " error" : "") + '" data-snippet-kind="' + htmlEscape(kind) + '" data-snippet-key="' + htmlEscape(key) + '">';
+    html += '<div class="outline-latex-snippet-head"><span>' + htmlEscape(title) + '</span>';
+    html += '<div class="outline-latex-snippet-actions">';
+    if (!hasProgress || progress.error) {
+      html += '<button type="button" class="btn-secondary ' + htmlEscape(refreshClass) + '">' + htmlEscape(refreshText) + '</button>';
+      html += '<button type="button" class="btn-secondary ' + htmlEscape(copyClass) + '">' + htmlEscape(copyText) + '</button>';
+      html += '<button type="button" class="btn-secondary outline-expand-latex-snippet">放大查看</button>';
+    } else {
+      html += '<span class="outline-latex-progress-text">' + htmlEscape(status) + '</span>';
+      html += '<button type="button" class="btn-secondary outline-expand-latex-snippet">放大查看</button>';
+    }
+    html += '</div></div>';
+    if (hasProgress) {
+      html += '<div class="outline-latex-progress"><div class="outline-latex-progress-fill" style="width:' + percent + '%"></div></div>';
+    }
+    html += '<textarea class="outline-latex-snippet" readonly>' + htmlEscape(text) + '</textarea>';
+    html += '</div>';
+    return html;
+  }
+
+  function resetLatexSnippetCache() {
+    clearAllLatexSnippetTimers();
+    frameLatexCache = {};
+    sectionLatexCache = {};
+    frameStandaloneLatexCache = {};
+    sectionStandaloneLatexCache = {};
+    frameLatexProgress = {};
+    sectionLatexProgress = {};
+  }
+
+  function validateSnippetTarget(outline, sectionIndex, frameIndex) {
+    outline = normalizeOutlineFrameCounts(outline);
+    var section = outline.sections[sectionIndex];
+    if (!section) return { ok: false, message: "目标大节不存在。" };
+    var frames = section.frames || [];
+    if (!frames.length) return { ok: false, message: "目标大节没有 frame。" };
+    var start = frameIndex == null ? 0 : frameIndex;
+    var end = frameIndex == null ? frames.length : frameIndex + 1;
+    for (var i = start; i < end; i++) {
+      var frame = frames[i] || {};
+      if (!frame || typeof frame !== "object") return { ok: false, message: "第 " + (i + 1) + " 页 frame 格式无效。" };
+    }
+    return { ok: true, message: "" };
+  }
+
+  function buildSnippetGenerationPayload(outline) {
+    var content = $("#content").val().trim() || outlineToSourceContent(outline);
+    var payload = buildBaseGenerationPayload(content);
+    if (!payload) return null;
+    payload.outline = outline;
+    payload.slide_count = outline.target_slide_count || 1;
+    return payload;
+  }
+
+  function copyTextToClipboard(text, successMessage) {
+    if (!text) {
+      setStatus("没有可复制的 LaTeX。", "error");
+      return;
+    }
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(function () {
+        setStatus(successMessage || "LaTeX 已复制。", "success");
+      }).catch(function () {
+        var $t = $("<textarea>").appendTo("body").val(text).select();
+        document.execCommand("copy");
+        $t.remove();
+        setStatus(successMessage || "LaTeX 已复制。", "success");
+      });
+    } else {
+      var $textarea = $("<textarea>").appendTo("body").val(text).select();
+      document.execCommand("copy");
+      $textarea.remove();
+      setStatus(successMessage || "LaTeX 已复制。", "success");
+    }
+  }
+
+  function requestLatexSnippet(url, payload, $button, busyText, doneText) {
+    setGenerating(true);
+    if ($button && $button.length) {
+      $button.prop("disabled", true).text(busyText);
+    }
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(function (resp) {
+        return resp.json().then(function (data) {
+          if (!resp.ok || data.error || data.detail || data.success === false) {
+            throw new Error(data.detail || data.error || resp.statusText);
+          }
+          return data;
+        });
+      })
+      .finally(function () {
+        setGenerating(false);
+        if ($button && $button.length) {
+          $button.prop("disabled", false).text(doneText);
+        }
+      });
+  }
+
+  function generateSingleFrameLatex(sectionIndex, frameIndex, $button) {
+    var outline = collectOutlineFromEditor();
+    var validation = validateSnippetTarget(outline, sectionIndex, frameIndex);
+    if (!validation.ok) {
+      setStatus(validation.message, "error");
+      return;
+    }
+    var payload = buildSnippetGenerationPayload(outline);
+    if (!payload) return;
+    payload.section_index = sectionIndex;
+    payload.frame_index = frameIndex;
+    generatedOutline = outline;
+    activeOutlineSectionIndex = sectionIndex;
+    var frameKey = frameLatexCacheKey(sectionIndex, frameIndex);
+    startLatexSnippetProgress("frame", frameKey, "正在连接 GPT，准备生成本页 LaTeX...");
+    renderOutlineEditor(generatedOutline);
+    setStatus("正在生成第 " + (frameIndex + 1) + " 页 LaTeX 片段...", "info");
+    requestLatexSnippet(
+      "/beamer-generator/api/generate-frame-latex",
+      payload,
+      $(),
+      "生成中...",
+      "生成本页"
+    ).then(function (data) {
+      finishLatexSnippetProgress("frame", frameKey);
+      frameLatexCache[frameKey] = data.latex || "";
+      frameStandaloneLatexCache[frameKey] = data.standalone_latex || data.latex || "";
+      activeOutlineSectionIndex = sectionIndex;
+      renderOutlineEditor(generatedOutline);
+      setStatus("本页 LaTeX 已生成，可复制完整可编译版本。", "success");
+    }).catch(function (err) {
+      failLatexSnippetProgress("frame", frameKey, err.message);
+      activeOutlineSectionIndex = sectionIndex;
+      renderOutlineEditor(generatedOutline);
+      setStatus("本页 LaTeX 生成失败: " + err.message, "error");
+    });
+  }
+
+  function generateSectionLatex(sectionIndex, $button) {
+    var outline = collectOutlineFromEditor();
+    var validation = validateSnippetTarget(outline, sectionIndex, null);
+    if (!validation.ok) {
+      setStatus(validation.message, "error");
+      return;
+    }
+    var payload = buildSnippetGenerationPayload(outline);
+    if (!payload) return;
+    payload.section_index = sectionIndex;
+    generatedOutline = outline;
+    activeOutlineSectionIndex = sectionIndex;
+    var sectionKey = String(sectionIndex);
+    startLatexSnippetProgress("section", sectionKey, "正在连接 GPT，准备生成本节所有 frame...");
+    renderOutlineEditor(generatedOutline);
+    setStatus("正在生成本节所有 frame 的 LaTeX 片段...", "info");
+    requestLatexSnippet(
+      "/beamer-generator/api/generate-section-latex",
+      payload,
+      $(),
+      "生成中...",
+      "生成本节"
+    ).then(function (data) {
+      finishLatexSnippetProgress("section", sectionKey);
+      sectionLatexCache[sectionKey] = data.latex || "";
+      sectionStandaloneLatexCache[sectionKey] = data.standalone_latex || data.latex || "";
+      activeOutlineSectionIndex = sectionIndex;
+      renderOutlineEditor(generatedOutline);
+      setStatus("本节 LaTeX 已生成，可复制完整可编译版本。", "success");
+    }).catch(function (err) {
+      failLatexSnippetProgress("section", sectionKey, err.message);
+      activeOutlineSectionIndex = sectionIndex;
+      renderOutlineEditor(generatedOutline);
+      setStatus("本节 LaTeX 生成失败: " + err.message, "error");
+    });
+  }
+
+  function regenerateSingleFrameOutline(sectionIndex, frameIndex, $button, modeLabel) {
+    var outline = collectOutlineFromEditor();
+    if (!outline.sections[sectionIndex] || !outline.sections[sectionIndex].frames[frameIndex]) return;
+    var content = $("#content").val().trim() || outlineToSourceContent(outline);
+    var payload = buildBaseGenerationPayload(content);
+    if (!payload) return;
+    payload.outline = outline;
+    payload.section_index = sectionIndex;
+    payload.frame_index = frameIndex;
+    setStatus("正在" + modeLabel + "第 " + (frameIndex + 1) + " 页纪要...", "info");
+    setGenerating(true);
+    $button.prop("disabled", true).text(modeLabel + "中...");
+    fetch("/beamer-generator/api/regenerate-outline-frame", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(function (resp) {
+        return resp.json().then(function (data) {
+          if (!resp.ok || data.error || data.detail || data.success === false) {
+            throw new Error(data.detail || data.error || resp.statusText);
+          }
+          return data;
+        });
+      })
+      .then(function (data) {
+        if (!data.frame) throw new Error("后端未返回 frame 纪要");
+        outline.sections[sectionIndex].frames[frameIndex] = {
+          title: data.frame.title || ("Frame " + (frameIndex + 1)),
+          summary: data.frame.summary || "",
+          layout_type: data.frame.layout_type || data.frame.layout || "normal",
+          key_points: Array.isArray(data.frame.key_points) ? data.frame.key_points : [],
+        };
+        generatedOutline = normalizeOutlineFrameCounts(outline);
+        activeOutlineSectionIndex = sectionIndex;
+        delete frameLatexCache[frameLatexCacheKey(sectionIndex, frameIndex)];
+        delete frameStandaloneLatexCache[frameLatexCacheKey(sectionIndex, frameIndex)];
+        delete frameLatexProgress[frameLatexCacheKey(sectionIndex, frameIndex)];
+        delete sectionLatexCache[String(sectionIndex)];
+        delete sectionStandaloneLatexCache[String(sectionIndex)];
+        delete sectionLatexProgress[String(sectionIndex)];
+        renderOutlineEditor(generatedOutline);
+        setStatus("本页纪要已" + modeLabel + "。", "success");
+      })
+      .catch(function (err) {
+        setStatus("本页纪要" + modeLabel + "失败: " + err.message, "error");
+      })
+      .finally(function () {
+        setGenerating(false);
+        $button.prop("disabled", false).text(modeLabel + "本页纪要");
+      });
   }
 
   function refreshOutlineMathPreviews($scope) {
@@ -6464,24 +6937,60 @@
     html += '<input class="outline-section-id" value="' + htmlEscape(activeSection.id || "") + '" placeholder="001" />';
     html += '<input class="outline-section-title" value="' + htmlEscape(activeSection.title || "") + '" placeholder="大节标题" />';
     html += '<input class="outline-section-count" type="number" min="1" value="' + ((activeSection.frames || []).length) + '" title="大节页数" />';
-    html += '<button type="button" class="btn-secondary outline-refresh-section">刷新本节</button>';
+    html += '<button type="button" class="btn-secondary outline-generate-section-outline">生成本节纪要</button>';
+    html += '<button type="button" class="btn-secondary outline-refresh-section">刷新本节纪要</button>';
+    html += '<button type="button" class="btn-secondary outline-generate-section-latex">' + (sectionLatexCache[String(activeOutlineSectionIndex)] ? "重新生成本节 LaTeX" : "生成本节 LaTeX") + '</button>';
+    html += '<button type="button" class="btn-secondary outline-copy-section-latex">复制本节完整 LaTeX</button>';
     html += '<button type="button" class="btn-secondary outline-add-frame">新增 frame</button>';
     html += '<button type="button" class="btn-secondary outline-save-section">保存本节</button>';
     html += '</div>';
     html += '<textarea class="outline-section-summary" placeholder="大节内容概要">' + htmlEscape(activeSection.summary || "") + '</textarea>';
     html += '<div class="outline-math-preview-label">大节概要公式预览</div>';
     html += '<div class="outline-math-preview outline-section-summary-preview"></div>';
+    var sectionSnippetKey = String(activeOutlineSectionIndex);
+    if (sectionLatexCache[sectionSnippetKey] || sectionLatexProgress[sectionSnippetKey]) {
+      html += latexSnippetBlockHtml(
+        "section",
+        sectionSnippetKey,
+        "本节 LaTeX 片段",
+        sectionLatexCache[sectionSnippetKey],
+        sectionLatexProgress[sectionSnippetKey],
+        "outline-refresh-section-latex",
+        "outline-copy-section-latex",
+        "重新生成本节 LaTeX",
+        "复制本节完整 LaTeX"
+      );
+    }
     html += '<div class="outline-frames">';
     (activeSection.frames || []).forEach(function (frame, frameIndex) {
+      var frameKey = frameLatexCacheKey(activeOutlineSectionIndex, frameIndex);
       html += '<div class="outline-frame" data-frame="' + frameIndex + '" id="outline-frame-' + activeOutlineSectionIndex + '-' + frameIndex + '">';
       html += '<div class="outline-frame-head">';
       html += '<input class="outline-frame-title" value="' + htmlEscape(frame.title || "") + '" placeholder="frame 主题" />';
+      html += '<select class="outline-frame-layout" title="版式类型">' + outlineLayoutOptionsHtml(frame.layout_type || frame.layout || "normal") + '</select>';
+      html += '<button type="button" class="btn-secondary outline-generate-frame-outline">生成本页纪要</button>';
+      html += '<button type="button" class="btn-secondary outline-refresh-frame-outline">刷新本页纪要</button>';
+      html += '<button type="button" class="btn-secondary outline-generate-frame-latex">' + (frameLatexCache[frameKey] ? "重新生成本页 LaTeX" : "生成本页 LaTeX") + '</button>';
+      html += '<button type="button" class="btn-secondary outline-copy-frame-latex">复制本页完整 LaTeX</button>';
       html += '<button type="button" class="btn-secondary outline-remove-frame">删除</button>';
       html += '</div>';
       html += '<textarea class="outline-frame-summary" placeholder="本页内容概要">' + htmlEscape(frame.summary || "") + '</textarea>';
       html += '<textarea class="outline-frame-points" placeholder="每行一个要点">' + htmlEscape((frame.key_points || []).join("\n")) + '</textarea>';
       html += '<div class="outline-math-preview-label">本页要点公式预览</div>';
       html += '<div class="outline-math-preview outline-frame-points-preview"></div>';
+      if (frameLatexCache[frameKey] || frameLatexProgress[frameKey]) {
+        html += latexSnippetBlockHtml(
+          "frame",
+          frameKey,
+          "本页 LaTeX 片段",
+          frameLatexCache[frameKey],
+          frameLatexProgress[frameKey],
+          "outline-refresh-frame-latex",
+          "outline-copy-frame-latex",
+          "重新生成本页 LaTeX",
+          "复制本页完整 LaTeX"
+        );
+      }
       html += '</div>';
     });
     html += '</div>';
@@ -6516,6 +7025,7 @@
             return {
               title: frame.title || "",
               summary: frame.summary || "",
+              layout_type: frame.layout_type || frame.layout || "normal",
               key_points: (frame.key_points || []).slice(),
             };
           }),
@@ -6535,6 +7045,7 @@
         frames.push({
           title: String($frame.find(".outline-frame-title").val() || "").trim(),
           summary: String($frame.find(".outline-frame-summary").val() || "").trim(),
+          layout_type: String($frame.find(".outline-frame-layout").val() || "normal").trim() || "normal",
           key_points: points,
         });
       });
@@ -6556,12 +7067,13 @@
   $("#btnAddOutlineSection").on("click", function () {
     var outline = collectOutlineFromEditor();
     var nextIndex = outline.sections.length + 1;
+    resetLatexSnippetCache();
     outline.sections.push({
       id: String(nextIndex).padStart(3, "0"),
       title: "New Section",
       summary: "",
       slide_count: 1,
-      frames: [{ title: "New Frame", summary: "", key_points: [] }],
+      frames: [{ title: "New Frame", summary: "", layout_type: "normal", key_points: [] }],
     });
     activeOutlineSectionIndex = outline.sections.length - 1;
     renderOutlineEditor(outline);
@@ -6587,6 +7099,20 @@
     loadSavedOutlineIntoEditor();
   });
 
+  $("#btnCreateManualOutline").on("click", function () {
+    if (isGenerating) return;
+    try {
+      resetLatexSnippetCache();
+      activeOutlineSectionIndex = 0;
+      renderOutlineEditor(buildManualOutlineSeed());
+      $("#tabOutline").prop("disabled", false);
+      setActiveTab("outline");
+      setStatus("已进入手动纪要模式：请设置每个大节页数，并逐页填写 frame 标题、概要和要点。", "success");
+    } catch (err) {
+      setStatus("创建手动纪要失败: " + err.message, "error");
+    }
+  });
+
   function loadSavedOutlineIntoEditor() {
     try {
       var outline = loadOutlineFromBrowser();
@@ -6594,6 +7120,7 @@
         setStatus("本机浏览器中没有已保存纪要。", "error");
         return;
       }
+      resetLatexSnippetCache();
       activeOutlineSectionIndex = 0;
       renderOutlineEditor(requireRenderableOutline(outline));
       setStatus("已调用保存的纪要，可继续编辑或生成 LaTeX。", "success");
@@ -6652,10 +7179,12 @@
     var outline = collectOutlineFromEditor();
     var sectionIndex = parseInt($(this).closest(".outline-section").data("section"), 10);
     if (outline.sections[sectionIndex]) {
+      resetLatexSnippetCache();
       var nextFrame = outline.sections[sectionIndex].frames.length + 1;
       outline.sections[sectionIndex].frames.push({
         title: "User Added Frame " + nextFrame,
         summary: "用户新增 frame：请根据本大节 Markdown 内容生成这一页。",
+        layout_type: "normal",
         key_points: ["保留该新增 frame", "结合本大节知识点展开"],
       });
     }
@@ -6668,9 +7197,10 @@
     var sectionIndex = parseInt($section.data("section"), 10);
     var frameIndex = parseInt($(this).closest(".outline-frame").data("frame"), 10);
     if (outline.sections[sectionIndex]) {
+      resetLatexSnippetCache();
       outline.sections[sectionIndex].frames.splice(frameIndex, 1);
       if (!outline.sections[sectionIndex].frames.length) {
-        outline.sections[sectionIndex].frames.push({ title: "New Frame", summary: "", key_points: [] });
+        outline.sections[sectionIndex].frames.push({ title: "New Frame", summary: "", layout_type: "normal", key_points: [] });
       }
     }
     renderOutlineEditor(outline);
@@ -6679,6 +7209,7 @@
   $("#outlineEditor").on("click", ".outline-remove-section", function () {
     var outline = collectOutlineFromEditor();
     var sectionIndex = parseInt($(this).closest(".outline-section").data("section"), 10);
+    resetLatexSnippetCache();
     outline.sections.splice(sectionIndex, 1);
     activeOutlineSectionIndex = Math.max(0, Math.min(sectionIndex, outline.sections.length - 1));
     renderOutlineEditor(outline);
@@ -6698,11 +7229,13 @@
     var outline = collectOutlineFromEditor();
     var section = outline.sections[sectionIndex];
     if (!section) return;
+    resetLatexSnippetCache();
     section.frames = section.frames || [];
     while (section.frames.length < nextCount) {
       section.frames.push({
         title: "New Frame " + (section.frames.length + 1),
         summary: "",
+        layout_type: "normal",
         key_points: [],
       });
     }
@@ -6715,10 +7248,7 @@
     setStatus("本节页数已调整为 " + nextCount + " 页。", "success");
   });
 
-  $("#outlineEditor").on("click", ".outline-refresh-section", function () {
-    if (isGenerating) return;
-    var $button = $(this);
-    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+  function regenerateSectionOutline(sectionIndex, $button, modeLabel) {
     var outline = collectOutlineFromEditor();
     var section = outline.sections[sectionIndex];
     if (!section) return;
@@ -6731,9 +7261,9 @@
     if (!payload) return;
     payload.section_id = section.id;
     payload.slide_count = Math.max(1, Math.min(80, (section.frames && section.frames.length) || section.slide_count || 1));
+    setStatus("正在" + modeLabel + "大节 " + (section.id || sectionIndex + 1) + " 的纪要...", "info");
     setGenerating(true);
-    $button.prop("disabled", true).text("刷新中...");
-    setStatus("正在刷新大节 " + (section.id || sectionIndex + 1) + " 的纪要...", "info");
+    $button.prop("disabled", true).text(modeLabel + "中...");
     fetch("/beamer-generator/api/regenerate-outline-section", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -6746,19 +7276,144 @@
         });
       })
       .then(function (data) {
+        resetLatexSnippetCache();
         outline.sections[sectionIndex] = data.section;
         renderOutlineEditor(normalizeOutlineFrameCounts(outline));
-        setStatus("大节纪要已刷新。", "success");
+        setStatus("大节纪要已" + modeLabel + "。", "success");
       })
       .catch(function (err) {
-        setStatus("大节纪要刷新失败: " + err.message, "error");
+        setStatus("大节纪要" + modeLabel + "失败: " + err.message, "error");
       })
       .finally(function () {
         setGenerating(false);
+        $button.prop("disabled", false).text(modeLabel + "本节纪要");
       });
+  }
+
+  $("#outlineEditor").on("click", ".outline-generate-section-outline", function () {
+    if (isGenerating) return;
+    var $button = $(this);
+    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+    if (Number.isNaN(sectionIndex)) return;
+    regenerateSectionOutline(sectionIndex, $button, "生成");
+  });
+
+  $("#outlineEditor").on("click", ".outline-refresh-section", function () {
+    if (isGenerating) return;
+    var $button = $(this);
+    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+    if (Number.isNaN(sectionIndex)) return;
+    regenerateSectionOutline(sectionIndex, $button, "刷新");
+  });
+
+  $("#outlineEditor").on("click", ".outline-generate-frame-outline", function () {
+    if (isGenerating) return;
+    var $button = $(this);
+    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+    var frameIndex = parseInt($button.closest(".outline-frame").data("frame"), 10);
+    if (Number.isNaN(sectionIndex) || Number.isNaN(frameIndex)) return;
+    regenerateSingleFrameOutline(sectionIndex, frameIndex, $button, "生成");
+  });
+
+  $("#outlineEditor").on("click", ".outline-refresh-frame-outline", function () {
+    if (isGenerating) return;
+    var $button = $(this);
+    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+    var frameIndex = parseInt($button.closest(".outline-frame").data("frame"), 10);
+    if (Number.isNaN(sectionIndex) || Number.isNaN(frameIndex)) return;
+    regenerateSingleFrameOutline(sectionIndex, frameIndex, $button, "刷新");
+  });
+
+  $("#outlineEditor").on("click", ".outline-generate-frame-latex", function () {
+    if (isGenerating) return;
+    var $button = $(this);
+    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+    var frameIndex = parseInt($button.closest(".outline-frame").data("frame"), 10);
+    if (Number.isNaN(sectionIndex) || Number.isNaN(frameIndex)) return;
+    generateSingleFrameLatex(sectionIndex, frameIndex, $button);
+  });
+
+  $("#outlineEditor").on("click", ".outline-refresh-frame-latex", function () {
+    if (isGenerating) return;
+    var $button = $(this);
+    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+    var frameIndex = parseInt($button.closest(".outline-frame").data("frame"), 10);
+    if (Number.isNaN(sectionIndex) || Number.isNaN(frameIndex)) return;
+    generateSingleFrameLatex(sectionIndex, frameIndex, $button);
+  });
+
+  $("#outlineEditor").on("click", ".outline-generate-section-latex", function () {
+    if (isGenerating) return;
+    var $button = $(this);
+    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+    if (Number.isNaN(sectionIndex)) return;
+    generateSectionLatex(sectionIndex, $button);
+  });
+
+  $("#outlineEditor").on("click", ".outline-refresh-section-latex", function () {
+    if (isGenerating) return;
+    var $button = $(this);
+    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+    if (Number.isNaN(sectionIndex)) return;
+    generateSectionLatex(sectionIndex, $button);
+  });
+
+  $("#outlineEditor").on("click", ".outline-copy-frame-latex", function () {
+    var $button = $(this);
+    var sectionIndex = parseInt($button.closest(".outline-section").data("section"), 10);
+    var frameIndex = parseInt($button.closest(".outline-frame").data("frame"), 10);
+    if (Number.isNaN(sectionIndex) || Number.isNaN(frameIndex)) return;
+    var frameKey = frameLatexCacheKey(sectionIndex, frameIndex);
+    copyTextToClipboard(
+      frameStandaloneLatexCache[frameKey] || frameLatexCache[frameKey] || "",
+      "本页完整可编译 LaTeX 已复制。"
+    );
+  });
+
+  $("#outlineEditor").on("click", ".outline-copy-section-latex", function () {
+    var sectionIndex = parseInt($(this).closest(".outline-section").data("section"), 10);
+    if (Number.isNaN(sectionIndex)) return;
+    var sectionKey = String(sectionIndex);
+    copyTextToClipboard(
+      sectionStandaloneLatexCache[sectionKey] || sectionLatexCache[sectionKey] || "",
+      "本节完整可编译 LaTeX 已复制。"
+    );
+  });
+
+  function closeExpandedLatexSnippet() {
+    $(".outline-latex-snippet-block.outline-latex-expanded")
+      .removeClass("outline-latex-expanded")
+      .find(".outline-expand-latex-snippet")
+      .text("放大查看");
+    $("body").removeClass("outline-latex-expanded-active");
+  }
+
+  $("#outlineEditor").on("click", ".outline-expand-latex-snippet", function () {
+    var $button = $(this);
+    var $block = $button.closest(".outline-latex-snippet-block");
+    if (!$block.length) return;
+    if ($block.hasClass("outline-latex-expanded")) {
+      closeExpandedLatexSnippet();
+      return;
+    }
+    closeExpandedLatexSnippet();
+    $block.addClass("outline-latex-expanded");
+    $("body").addClass("outline-latex-expanded-active");
+    $button.text("恢复大小");
+    setTimeout(function () {
+      $block.find(".outline-latex-snippet").focus();
+    }, 0);
+  });
+
+  $(document).on("keydown", function (event) {
+    if (event.key === "Escape") {
+      closeExpandedLatexSnippet();
+    }
   });
 
   $("#outlineEditor").on("input change", "input, textarea", function () {
+    resetLatexSnippetCache();
+    $("#outlineEditor .outline-latex-snippet-block").remove();
     generatedOutline = collectOutlineFromEditor();
     updateOutlineSummary();
     refreshOutlineMathPreviews($(this).closest(".outline-section"));
@@ -6792,6 +7447,7 @@
       .then(function (data) {
         setOutlineProgress(94, "已收到纪要，正在渲染可编辑目录...");
         var outline = requireRenderableOutline(data && data.outline);
+        resetLatexSnippetCache();
         activeOutlineSectionIndex = 0;
         renderOutlineEditor(outline);
         $("#tabOutline").prop("disabled", false);
@@ -6812,25 +7468,29 @@
   $("#btnGenerate").on("click", function () {
     if (isGenerating) return;
 
-    var content = $("#content").val().trim();
-    if (!content) {
-      setStatus("请先导入 .md/.markdown 知识图谱文件", "error");
-      return;
-    }
     if (!generatedOutline || !generatedOutline.sections || !generatedOutline.sections.length) {
-      setStatus("请先点击“生成纪要”，确认或修改后再生成演示文稿。", "error");
-      $("#btnGenerateOutline").focus();
+      setStatus("请先生成纪要，或点击“手动填写纪要”自行填写完整纪要。", "error");
+      $("#btnCreateManualOutline").focus();
       return;
     }
+    generatedOutline = collectOutlineFromEditor();
+    var validation = validateOutlineForGeneration(generatedOutline);
+    if (!validation.ok) {
+      setStatus(validation.message, "error");
+      setActiveTab("outline");
+      return;
+    }
+    $("#slideCount").val(String(generatedOutline.target_slide_count));
+    var content = $("#content").val().trim() || outlineToSourceContent(generatedOutline);
 
     var previousLatex = fullLatex;
     var generatedLatex = "";
     var receivedFirstChunk = false;
     $("#tabPpt").prop("disabled", true);
-    generatedOutline = collectOutlineFromEditor();
     var payload = buildBaseGenerationPayload(content);
     if (!payload) return;
     payload.outline = generatedOutline;
+    payload.slide_count = generatedOutline.target_slide_count;
     setGenerating(true);
     updateLatexGenerateProgress(5, "正在根据已确认纪要生成 LaTeX...");
 
@@ -6860,7 +7520,7 @@
       .then(function (resp) {
         if (!resp.ok) throw new Error("HTTP " + resp.status);
         resetTimeout();
-        updateLatexGenerateProgress(12, "已连接 GPT，正在等待生成...");
+        updateLatexGenerateProgress(12, "已连接 GPT 5.5，正在等待生成...");
         var reader = resp.body.getReader();
         var decoder = new TextDecoder();
         var buffer = "";
@@ -6873,7 +7533,7 @@
                     setGenerating(false);
                     fullLatex = previousLatex;
                     updateLatexEditor(previousLatex);
-                    setStatus("GPT 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
+                    setStatus("GPT 5.5 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
                   } else {
                     updateLatexGenerateProgress(100, "生成完成，共 " + fullLatex.length + " 字符");
                     setGenerating(false);
@@ -6905,7 +7565,7 @@
 
               if (d.type === "heartbeat") {
                 var heartbeatProgress = Math.max(latexGenerateProgress, receivedFirstChunk ? latexGenerateProgress : 18);
-                updateLatexGenerateProgress(heartbeatProgress, d.content || "已连接，等待 GPT 生成...");
+                updateLatexGenerateProgress(heartbeatProgress, d.content || "已连接，等待 GPT 5.5 生成...");
               } else if (d.type === "chunk") {
                 if (!receivedFirstChunk) {
                   receivedFirstChunk = true;
@@ -6925,7 +7585,7 @@
                   setGenerating(false);
                   fullLatex = previousLatex;
                   updateLatexEditor(previousLatex);
-                  setStatus("GPT 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
+                  setStatus("GPT 5.5 未返回内容，请检查 API Key、Base URL、模型名或网络", "error");
                   return;
                 }
                 fullLatex = applyCustomRequirementOverrides(generatedLatex, currentCustomRequirements);
