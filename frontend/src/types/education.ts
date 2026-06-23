@@ -37,7 +37,7 @@ export interface GenerateLectureResponse {
 export interface TtsStatusResponse {
   success: boolean
   enabled: boolean
-  provider: "disabled" | "genie" | "genie_server" | "gpt_sovits_local" | "gpt_sovits_server" | string
+  provider: "disabled" | "genie" | "genie_server" | "azure_speech" | "gpt_sovits_local" | "gpt_sovits_server" | string
   available: boolean
   model_loaded?: boolean
   runtime_root?: string

@@ -88,6 +88,7 @@ function getProviderLabel(provider: PlaybackProvider) {
   if (provider === "gpt_sovits_server") return "GPT-SoVITS 服务推理"
   if (provider === "genie") return "Genie-TTS 本地推理"
   if (provider === "genie_server") return "Genie-TTS 服务推理"
+  if (provider === "azure_speech") return "Azure Speech 云端语音"
   if (provider === "loading") return "语音状态检测中"
   if (provider === "none") return "语音接口未接入"
   return provider

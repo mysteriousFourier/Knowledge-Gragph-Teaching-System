@@ -1396,6 +1396,20 @@ def get_tts_status() -> dict[str, Any]:
     if settings.provider == "gpt_sovits_local":
         status.update(get_gpt_sovits_runtime_status(settings))
         return status
+    if settings.provider == "azure_speech":
+        key_configured = bool(os.getenv("KGTS_TTS_AZURE_SPEECH_KEY", "").strip())
+        region = os.getenv("KGTS_TTS_AZURE_SPEECH_REGION", "").strip()
+        endpoint = os.getenv("KGTS_TTS_AZURE_SPEECH_ENDPOINT", "").strip()
+        status["available"] = key_configured and bool(region or endpoint)
+        status["azure_region"] = region or None
+        status["azure_endpoint_configured"] = bool(endpoint)
+        status["voice"] = os.getenv("KGTS_TTS_AZURE_SPEECH_VOICE", "").strip() or "zh-CN-XiaoxiaoNeural"
+        status["detail"] = (
+            "Using Azure Speech neural text-to-speech."
+            if status["available"]
+            else "Azure Speech is not configured. Set KGTS_TTS_AZURE_SPEECH_KEY and KGTS_TTS_AZURE_SPEECH_REGION."
+        )
+        return status
     if settings.provider == "genie_server":
         status["server_url"] = settings.server_url
         status["available"] = False

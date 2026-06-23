@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import hashlib
 import json
+import os
 import re
 import shutil
 import time
@@ -559,6 +561,78 @@ async def _synthesize_via_gpt_sovits_server(payload: TtsSynthesizeRequest) -> Pa
     return audio_path
 
 
+def _azure_speech_voice(language: str | None) -> str:
+    voice = os.getenv("KGTS_TTS_AZURE_SPEECH_VOICE", "").strip()
+    if voice:
+        return voice
+    lang = (language or "").lower()
+    if lang.startswith("en"):
+        return "en-US-JennyNeural"
+    return "zh-CN-XiaoxiaoNeural"
+
+
+def _azure_speech_ssml_language(language: str | None, default_language: str) -> str:
+    lang = (language or default_language or "zh").lower()
+    if lang.startswith("en"):
+        return "en-US"
+    if lang.startswith("zh") or "zh" in lang:
+        return "zh-CN"
+    return "zh-CN"
+
+
+async def _synthesize_via_azure_speech(payload: TtsSynthesizeRequest) -> Path:
+    settings = get_tts_settings()
+    key = os.getenv("KGTS_TTS_AZURE_SPEECH_KEY", "").strip()
+    region = os.getenv("KGTS_TTS_AZURE_SPEECH_REGION", "").strip()
+    endpoint = os.getenv("KGTS_TTS_AZURE_SPEECH_ENDPOINT", "").strip()
+    output_format = os.getenv("KGTS_TTS_AZURE_SPEECH_FORMAT", "riff-24khz-16bit-mono-pcm").strip()
+    if not key:
+        raise HTTPException(status_code=503, detail="Azure Speech key is not configured.")
+    if not endpoint:
+        if not region:
+            raise HTTPException(status_code=503, detail="Azure Speech region is not configured.")
+        endpoint = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1"
+
+    settings.output_dir.mkdir(parents=True, exist_ok=True)
+    normalized = _normalize_payload_text(payload.text, settings.language, payload.language, payload.speech_cues)
+    effective_language = _effective_tts_language(settings.provider, normalized.normalized_text, normalized.text_lang, settings.language)
+    voice = _azure_speech_voice(effective_language)
+    ssml_language = _azure_speech_ssml_language(effective_language, settings.language)
+    ssml = (
+        "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
+        f"xml:lang='{html.escape(ssml_language)}'>"
+        f"<voice name='{html.escape(voice)}'>{html.escape(normalized.normalized_text)}</voice>"
+        "</speak>"
+    )
+    headers = {
+        "Ocp-Apim-Subscription-Key": key,
+        "Content-Type": "application/ssml+xml",
+        "X-Microsoft-OutputFormat": output_format,
+        "User-Agent": "KGTS",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(endpoint, content=ssml.encode("utf-8"), headers=headers)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Azure Speech request failed: {exc}") from exc
+    if response.status_code >= 400:
+        detail = response.text[:500] if response.text else response.reason_phrase
+        raise HTTPException(status_code=502, detail=f"Azure Speech returned HTTP {response.status_code}: {detail}")
+    content = response.content
+    if not content:
+        raise HTTPException(status_code=502, detail="Azure Speech returned an empty audio response.")
+
+    audio_path = settings.output_dir / f"tts-azure-{hashlib.sha256(content).hexdigest()[:24]}.wav"
+    audio_path.write_bytes(content)
+    try:
+        validate_wav_audio_file(audio_path, label="Azure Speech response")
+    except RuntimeError as exc:
+        audio_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    genie_tts_service.cleanup_audio_dir(settings.output_dir, settings.max_audio_files)
+    return audio_path
+
+
 @router.get("/status")
 async def tts_status() -> dict[str, Any]:
     return get_tts_status()
@@ -789,6 +863,8 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
             }
         if settings.provider == "genie_server":
             audio_path = await _synthesize_via_server(payload.model_copy(update={"text": text}))
+        elif settings.provider == "azure_speech":
+            audio_path = await _synthesize_via_azure_speech(payload.model_copy(update={"text": text}))
         elif settings.provider == "gpt_sovits_server":
             audio_path = await _synthesize_via_gpt_sovits_server(payload.model_copy(update={"text": text}))
         elif settings.provider == "genie":
