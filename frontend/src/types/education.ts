@@ -108,6 +108,42 @@ export interface TtsSegmentsResponse {
   detail?: string
 }
 
+export interface TtsCourseJobSlide {
+  slide_index: number
+  position: number
+  text: string
+  speech_cues?: SpeechCue[]
+}
+
+export interface TtsCourseJobRequest {
+  chapter_id: string
+  slides: TtsCourseJobSlide[]
+  max_chars?: number
+  language?: string
+}
+
+export interface TtsCourseJobResponse {
+  success: boolean
+  job_id: string
+  chapter_id?: string
+  status: "queued" | "running" | "stopping" | "completed" | "failed" | "cancelled" | string
+  stage?: string
+  message?: string
+  created_at?: string
+  updated_at?: string
+  started_at?: string | null
+  slide_count: number
+  current_slide: number
+  current_slide_index?: number | null
+  current_chunk?: number
+  ready_chunks: number
+  total_chunks: number
+  cache_hits: number
+  max_chars?: number
+  elapsed_seconds?: number
+  error?: string
+}
+
 export interface GraphContextTreeNode {
   id: string
   label: string

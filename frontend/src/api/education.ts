@@ -22,6 +22,8 @@ import type {
   PptTexGenerateRequest,
   PptTexGenerateResponse,
   PptUploadResponse,
+  TtsCourseJobRequest,
+  TtsCourseJobResponse,
   TtsStatusResponse,
   TtsSegmentRequest,
   TtsSegmentsResponse,
@@ -430,5 +432,26 @@ export const splitTtsSegments = (data: TtsSegmentRequest) =>
   educationClient
     .post<TtsSegmentsResponse>("/api/tts/segments", data, {
       timeout: 60000,
+    })
+    .then((r) => r.data)
+
+export const createCourseTtsJob = (data: TtsCourseJobRequest) =>
+  educationClient
+    .post<TtsCourseJobResponse>("/api/tts/course-jobs", data, {
+      timeout: 30000,
+    })
+    .then((r) => r.data)
+
+export const getCourseTtsJob = (jobId: string) =>
+  educationClient
+    .get<TtsCourseJobResponse>(`/api/tts/course-jobs/${encodeURIComponent(jobId)}`, {
+      timeout: 0,
+    })
+    .then((r) => r.data)
+
+export const stopCourseTtsJob = (jobId: string) =>
+  educationClient
+    .post<TtsCourseJobResponse>(`/api/tts/course-jobs/${encodeURIComponent(jobId)}/stop`, {}, {
+      timeout: 30000,
     })
     .then((r) => r.data)

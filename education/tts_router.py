@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import re
 import shutil
 import time
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +33,11 @@ from KGTS.core.tts_text import resolve_genie_tts_language
 router = APIRouter(prefix="/api/tts", tags=["tts"])
 
 DEFAULT_SEGMENT_CHARS = 260
+DEFAULT_COURSE_JOB_SEGMENT_CHARS = 120
 COURSE_AUDIO_DIR = "course"
 SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+COURSE_TTS_JOBS: dict[str, dict[str, Any]] = {}
+COURSE_TTS_JOB_LOCK = asyncio.Lock()
 
 
 def _tts_log(message: str) -> None:
@@ -84,6 +91,20 @@ class TtsSegmentRequest(BaseModel):
     language: str | None = None
     max_chars: int | None = Field(default=None, ge=80, le=800)
     speech_cues: list[TtsSpeechCue] | None = None
+
+
+class TtsCourseSlideRequest(BaseModel):
+    slide_index: int
+    position: int = Field(..., ge=0)
+    text: str = Field(..., min_length=1)
+    speech_cues: list[TtsSpeechCue] | None = None
+
+
+class TtsCourseJobRequest(BaseModel):
+    chapter_id: str = Field(..., min_length=1)
+    slides: list[TtsCourseSlideRequest] = Field(..., min_length=1)
+    max_chars: int = Field(DEFAULT_COURSE_JOB_SEGMENT_CHARS, ge=80, le=800)
+    language: str | None = None
 
 
 class TtsUnloadCharacterRequest(BaseModel):
@@ -150,6 +171,34 @@ def _safe_id(value: str | None, fallback: str) -> str:
     return safe or fallback
 
 
+def _stable_text_hash(text: str) -> str:
+    # Match the frontend FNV-1a hash over JavaScript charCodeAt values.
+    hash_value = 2166136261
+    encoded = text.encode("utf-16-le", errors="surrogatepass")
+    for index in range(0, len(encoded), 2):
+        code_unit = encoded[index] | (encoded[index + 1] << 8)
+        hash_value ^= code_unit
+        hash_value = (hash_value * 16777619) & 0xFFFFFFFF
+    return f"{hash_value:08x}"
+
+
+def _stable_speech_cue_hash(speech_cues: list[TtsSpeechCue] | None) -> str:
+    if not speech_cues:
+        return "no-cues"
+    normalized: list[dict[str, Any]] = []
+    for cue in speech_cues:
+        item: dict[str, Any] = {
+            "type": cue.type,
+            "target_text": cue.target_text,
+        }
+        if cue.style is not None:
+            item["style"] = cue.style
+        if cue.priority is not None:
+            item["priority"] = cue.priority
+        normalized.append(item)
+    return _stable_text_hash(json.dumps(normalized, ensure_ascii=False, separators=(",", ":")))
+
+
 def _effective_tts_language(provider: str, text: str, normalized_language: str, default_language: str) -> str:
     if provider in {"genie", "genie_server"}:
         return resolve_genie_tts_language(text, normalized_language, default_language)
@@ -182,6 +231,196 @@ def _copy_to_course_audio(audio_path: Path, persistent_path: Path) -> Path:
     if audio_path.resolve() != persistent_path.resolve():
         shutil.copyfile(audio_path, persistent_path)
     return persistent_path
+
+
+def _course_job_dir() -> Path:
+    return get_tts_settings().output_dir / "course-jobs"
+
+
+def _course_job_path(job_id: str) -> Path:
+    safe_job_id = _safe_id(job_id, "job")
+    return _course_job_dir() / f"{safe_job_id}.json"
+
+
+def _public_course_job(job: dict[str, Any]) -> dict[str, Any]:
+    hidden = {"task", "cancel_requested"}
+    return {key: value for key, value in job.items() if key not in hidden}
+
+
+def _write_course_job(job: dict[str, Any]) -> None:
+    path = _course_job_path(str(job.get("job_id") or "job"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(_public_course_job(job), ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _load_course_job(job_id: str) -> dict[str, Any] | None:
+    path = _course_job_path(job_id)
+    if not path.is_file():
+        return None
+    try:
+        job = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if job.get("status") in {"queued", "running", "stopping"}:
+        job["status"] = "failed"
+        job["stage"] = "failed"
+        job["error"] = "语音任务所在服务已重启，请重新启动全课语音生成"
+        job["message"] = job["error"]
+        job["updated_at"] = datetime.now().isoformat()
+        _write_course_job(job)
+    return job
+
+
+def _update_course_job(job: dict[str, Any], **patch: Any) -> None:
+    job.update(patch)
+    job["updated_at"] = datetime.now().isoformat()
+    _write_course_job(job)
+
+
+def _course_job_elapsed_seconds(job: dict[str, Any]) -> int:
+    started_at = job.get("started_at") or job.get("created_at")
+    if not started_at:
+        return 0
+    try:
+        started = datetime.fromisoformat(str(started_at))
+    except ValueError:
+        return 0
+    return max(0, int((datetime.now() - started).total_seconds()))
+
+
+async def _run_course_tts_job(job_id: str, request: TtsCourseJobRequest) -> None:
+    job = COURSE_TTS_JOBS[job_id]
+    async with COURSE_TTS_JOB_LOCK:
+        if job.get("cancel_requested"):
+            _update_course_job(job, status="cancelled", stage="cancelled", message="全课语音生成已停止")
+            return
+        _update_course_job(
+            job,
+            status="running",
+            stage="starting",
+            message="正在准备全课语音生成",
+            started_at=datetime.now().isoformat(),
+        )
+        ready_chunks = 0
+        total_chunks = 0
+        cache_hits = 0
+        results: list[dict[str, Any]] = []
+        try:
+            for slide in request.slides:
+                if job.get("cancel_requested"):
+                    break
+                speech_cues = [cue for cue in slide.speech_cues or [] if cue.target_text.strip()]
+                should_split = len(slide.text) > request.max_chars
+                if should_split:
+                    _update_course_job(
+                        job,
+                        stage="splitting",
+                        current_slide=slide.position + 1,
+                        current_slide_index=slide.slide_index,
+                        message=f"正在切分第 {slide.slide_index} 页讲稿",
+                    )
+                    segment_payload = TtsSegmentRequest(
+                        text=slide.text,
+                        language=request.language,
+                        max_chars=request.max_chars,
+                        speech_cues=speech_cues,
+                    )
+                    segment_result = await split_segments(segment_payload)
+                    chunks = segment_result.get("segments") or []
+                else:
+                    chunks = [{"index": 0, "text": slide.text, "length": len(slide.text)}]
+                if not chunks:
+                    raise RuntimeError(f"第 {slide.slide_index} 页语音分段失败")
+
+                total_chunks += len(chunks)
+                _update_course_job(
+                    job,
+                    stage="synthesizing",
+                    current_slide=slide.position + 1,
+                    current_slide_index=slide.slide_index,
+                    total_chunks=total_chunks,
+                    ready_chunks=ready_chunks,
+                    cache_hits=cache_hits,
+                    message=f"正在生成第 {slide.slide_index} 页语音",
+                )
+
+                for chunk in chunks:
+                    if job.get("cancel_requested"):
+                        break
+                    chunk_index = int(chunk.get("index") or 0)
+                    chunk_text = str(chunk.get("text") or "").strip()
+                    if not chunk_text:
+                        continue
+                    cue_hash = _stable_speech_cue_hash(None if should_split else speech_cues)
+                    text_hash = _stable_text_hash(chunk_text)
+                    synth_payload = TtsSynthesizeRequest(
+                        text=chunk_text,
+                        split_sentence=True,
+                        chapter_id=request.chapter_id,
+                        segment_id=f"slide-{slide.slide_index}-chunk-{chunk_index + 1}",
+                        content_hash=f"{text_hash}-{cue_hash}",
+                        speech_cues=None if should_split else speech_cues,
+                        language=request.language,
+                    )
+                    _update_course_job(
+                        job,
+                        stage="synthesizing",
+                        current_chunk=chunk_index + 1,
+                        message=f"正在生成第 {slide.slide_index} 页第 {chunk_index + 1} 段语音",
+                    )
+                    result = await synthesize(synth_payload)
+                    if not result.get("success") or not result.get("audio_url"):
+                        raise RuntimeError(str(result.get("detail") or result.get("error") or "语音生成失败"))
+                    ready_chunks += 1
+                    if result.get("cache_hit"):
+                        cache_hits += 1
+                    results.append(
+                        {
+                            "slide_index": slide.slide_index,
+                            "chunk_index": chunk_index,
+                            "audio_url": result.get("audio_url"),
+                            "cache_hit": bool(result.get("cache_hit")),
+                        }
+                    )
+                    _update_course_job(
+                        job,
+                        ready_chunks=ready_chunks,
+                        total_chunks=total_chunks,
+                        cache_hits=cache_hits,
+                        results=results,
+                    )
+
+            if job.get("cancel_requested"):
+                _update_course_job(
+                    job,
+                    status="cancelled",
+                    stage="cancelled",
+                    message=f"已停止全课语音生成，已完成 {ready_chunks}/{total_chunks} 段",
+                    ready_chunks=ready_chunks,
+                    total_chunks=total_chunks,
+                    cache_hits=cache_hits,
+                    results=results,
+                )
+                return
+            _update_course_job(
+                job,
+                status="completed",
+                stage="completed",
+                current_slide=request.slides[-1].position + 1,
+                ready_chunks=ready_chunks,
+                total_chunks=total_chunks,
+                cache_hits=cache_hits,
+                results=results,
+                message=f"已生成全课语音：{ready_chunks}/{total_chunks} 段，缓存命中 {cache_hits} 段",
+            )
+        except HTTPException as exc:
+            detail = str(exc.detail)
+            _update_course_job(job, status="failed", stage="failed", error=detail, message=detail)
+        except Exception as exc:
+            message = str(exc).strip() or exc.__class__.__name__
+            _update_course_job(job, status="failed", stage="failed", error=message, message=message)
 
 
 def _resolve_audio_path(file_name: str) -> Path:
@@ -348,6 +587,77 @@ async def split_segments(payload: TtsSegmentRequest) -> dict[str, Any]:
         "normalized_text_length": len(normalized.normalized_text),
         "text_lang": effective_language,
         "max_chars": max_chars,
+    }
+
+
+@router.post("/course-jobs")
+async def create_course_tts_job(payload: TtsCourseJobRequest) -> dict[str, Any]:
+    _ensure_tts_enabled()
+    status = get_tts_status()
+    if not status.get("available"):
+        raise HTTPException(status_code=503, detail=status.get("detail") or "语音接口未接入")
+
+    job_id = f"course_tts_{uuid.uuid4().hex[:12]}"
+    job = {
+        "success": True,
+        "job_id": job_id,
+        "chapter_id": payload.chapter_id,
+        "status": "queued",
+        "stage": "queued",
+        "message": "全课语音生成任务已排队，关闭网页后会继续生成",
+        "created_at": datetime.now().isoformat(),
+        "updated_at": datetime.now().isoformat(),
+        "started_at": None,
+        "slide_count": len(payload.slides),
+        "current_slide": 0,
+        "current_slide_index": None,
+        "current_chunk": 0,
+        "ready_chunks": 0,
+        "total_chunks": 0,
+        "cache_hits": 0,
+        "max_chars": payload.max_chars,
+        "results": [],
+        "error": "",
+        "cancel_requested": False,
+    }
+    COURSE_TTS_JOBS[job_id] = job
+    _write_course_job(job)
+    job["task"] = asyncio.create_task(_run_course_tts_job(job_id, payload))
+    return {
+        **_public_course_job(job),
+        "elapsed_seconds": 0,
+    }
+
+
+@router.get("/course-jobs/{job_id}")
+async def get_course_tts_job(job_id: str) -> dict[str, Any]:
+    job = COURSE_TTS_JOBS.get(job_id) or _load_course_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="全课语音任务不存在或已过期")
+    return {
+        **_public_course_job(job),
+        "success": True,
+        "elapsed_seconds": _course_job_elapsed_seconds(job),
+    }
+
+
+@router.post("/course-jobs/{job_id}/stop")
+async def stop_course_tts_job(job_id: str) -> dict[str, Any]:
+    job = COURSE_TTS_JOBS.get(job_id) or _load_course_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="全课语音任务不存在或已过期")
+    if job.get("status") in {"completed", "failed", "cancelled"}:
+        return {
+            **_public_course_job(job),
+            "success": True,
+            "elapsed_seconds": _course_job_elapsed_seconds(job),
+        }
+    job["cancel_requested"] = True
+    _update_course_job(job, status="stopping", stage="stopping", message="正在停止全课语音生成，当前段完成后停止")
+    return {
+        **_public_course_job(job),
+        "success": True,
+        "elapsed_seconds": _course_job_elapsed_seconds(job),
     }
 
 

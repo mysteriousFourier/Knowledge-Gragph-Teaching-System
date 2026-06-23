@@ -43,10 +43,11 @@ import {
   useSaveCoursewareProject,
   useUploadCoursewareAssets,
   useUploadCoursewareStyleReference,
+  createCourseTtsJob,
+  getCourseTtsJob,
   getSlideLectureJob,
   getTtsStatus,
-  splitTtsSegments,
-  synthesizeTts,
+  stopCourseTtsJob,
 } from "@/api/education"
 import { useGraphScopeTree } from "@/api/graph"
 import { useSaveChapter, useSaveLecture, useTeacherChapter } from "@/api/teacher"
@@ -61,7 +62,7 @@ import {
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
 import { PlaybackProgress } from "@/components/common/PlaybackProgress"
 import { RichTextContent } from "@/components/renderers/RichTextContent"
-import { LONG_TEXT_THRESHOLD, TTS_CHUNK_CHARS, stableSpeechCueHash, stableTextHash, useLecturePlayback } from "@/hooks/useLecturePlayback"
+import { TTS_CHUNK_CHARS, useLecturePlayback } from "@/hooks/useLecturePlayback"
 import type {
   GraphSourceScope,
   CoursewareAsset,
@@ -75,6 +76,7 @@ import type {
   SourceDriftReport,
   CoursewareProject,
   SpeechCue,
+  TtsCourseJobResponse,
 } from "@/types/education"
 import type { Chapter } from "@/types/chapter"
 import { getRuntimeConfig } from "@/lib/config"
@@ -121,12 +123,20 @@ const CANVAS_HEIGHT = 562.5
 const DEFAULT_LECTURE_DURATION_MINUTES = 10
 const DEFAULT_SPEECH_RATE_CPM = 250
 const SLIDE_LECTURE_JOB_STORAGE_KEY = "kgts.prepare.slideLectureJob.v1"
+const COURSE_TTS_JOB_STORAGE_KEY = "kgts.prepare.courseTtsJob.v1"
 
 type StoredSlideLectureJob = {
   jobId: string
   title: string
   createdAt: string
   selectedIndex?: number
+}
+
+type StoredCourseAudioJob = {
+  jobId: string
+  chapterId: string
+  title: string
+  createdAt: string
 }
 
 type CourseAudioProgress = {
@@ -136,6 +146,7 @@ type CourseAudioProgress = {
   readyChunks: number
   totalChunks: number
   cacheHits: number
+  message?: string
   error?: string
 }
 
@@ -224,6 +235,33 @@ function writeStoredSlideLectureJob(job: StoredSlideLectureJob | null) {
   window.localStorage.setItem(SLIDE_LECTURE_JOB_STORAGE_KEY, JSON.stringify(job))
 }
 
+function readStoredCourseAudioJob(): StoredCourseAudioJob | null {
+  if (typeof window === "undefined") return null
+  try {
+    const raw = window.localStorage.getItem(COURSE_TTS_JOB_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<StoredCourseAudioJob>
+    if (!parsed.jobId) return null
+    return {
+      jobId: String(parsed.jobId),
+      chapterId: String(parsed.chapterId || ""),
+      title: String(parsed.title || "全课语音"),
+      createdAt: String(parsed.createdAt || new Date().toISOString()),
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeStoredCourseAudioJob(job: StoredCourseAudioJob | null) {
+  if (typeof window === "undefined") return
+  if (!job) {
+    window.localStorage.removeItem(COURSE_TTS_JOB_STORAGE_KEY)
+    return
+  }
+  window.localStorage.setItem(COURSE_TTS_JOB_STORAGE_KEY, JSON.stringify(job))
+}
+
 const emptyCourseAudioProgress: CourseAudioProgress = {
   running: false,
   currentSlide: 0,
@@ -239,7 +277,24 @@ function courseAudioStatusText(progress: CourseAudioProgress) {
     return `全课语音已生成：${progress.readyChunks}/${progress.totalChunks} 段，缓存命中 ${progress.cacheHits} 段`
   }
   if (!progress.running) return "全课语音未生成"
-  return `全课语音生成中：第 ${progress.currentSlide}/${progress.slideCount} 页，${progress.readyChunks}/${progress.totalChunks || "?"} 段，缓存命中 ${progress.cacheHits} 段`
+  const prefix = progress.message || "全课语音生成中"
+  return `${prefix}：第 ${progress.currentSlide}/${progress.slideCount} 页，${progress.readyChunks}/${progress.totalChunks || "?"} 段，缓存命中 ${progress.cacheHits} 段`
+}
+
+function courseAudioProgressFromJob(job: TtsCourseJobResponse): CourseAudioProgress {
+  const running = ["queued", "running", "stopping"].includes(job.status)
+  const failed = job.status === "failed"
+  const cancelled = job.status === "cancelled"
+  return {
+    running,
+    currentSlide: running && job.slide_count > 0 ? Math.max(1, job.current_slide || 1) : job.current_slide || 0,
+    slideCount: job.slide_count || 0,
+    readyChunks: job.ready_chunks || 0,
+    totalChunks: job.total_chunks || 0,
+    cacheHits: job.cache_hits || 0,
+    message: job.message || undefined,
+    error: failed ? `全课语音生成失败：${job.error || job.message || "任务失败"}` : cancelled ? job.message || "已停止全课语音生成" : undefined,
+  }
 }
 
 function estimateSlideDurationMinutes(slide: PptSlideDetail, allSlides: PptSlideDetail[], targetDurationMinutes: number) {
@@ -1245,6 +1300,7 @@ function TeacherPreparePage() {
   const [driftReport, setDriftReport] = useState<SourceDriftReport | null>(null)
   const [isGeneratingSlideLecturesBatch, setIsGeneratingSlideLecturesBatch] = useState(false)
   const [activeSlideLectureJob, setActiveSlideLectureJob] = useState<StoredSlideLectureJob | null>(() => readStoredSlideLectureJob())
+  const [activeCourseAudioJob, setActiveCourseAudioJob] = useState<StoredCourseAudioJob | null>(() => readStoredCourseAudioJob())
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false)
   const [courseAudioProgress, setCourseAudioProgress] = useState<CourseAudioProgress>(emptyCourseAudioProgress)
   const [graphScopeEnabled, setGraphScopeEnabled] = useState(() => !chapterId || Boolean(nodeId))
@@ -1504,6 +1560,51 @@ function TeacherPreparePage() {
   }, [activeSlideLectureJob, selectedIndex])
 
   useEffect(() => {
+    if (!activeCourseAudioJob) {
+      writeStoredCourseAudioJob(null)
+      return
+    }
+    writeStoredCourseAudioJob(activeCourseAudioJob)
+    let cancelled = false
+    let timer: number | undefined
+
+    const poll = async () => {
+      try {
+        const job = await getCourseTtsJob(activeCourseAudioJob.jobId)
+        if (cancelled) return
+        const progress = courseAudioProgressFromJob(job)
+        setCourseAudioProgress(progress)
+        if (job.status === "completed") {
+          setStatus(job.message || `已生成全课语音：${job.ready_chunks}/${job.total_chunks} 段，缓存命中 ${job.cache_hits} 段`)
+          setActiveCourseAudioJob(null)
+          writeStoredCourseAudioJob(null)
+          return
+        }
+        if (job.status === "failed" || job.status === "cancelled") {
+          setStatus(progress.error || job.message || "全课语音任务已结束")
+          setActiveCourseAudioJob(null)
+          writeStoredCourseAudioJob(null)
+          return
+        }
+        setStatus(job.message || "全课语音生成中，关闭网页后会继续生成")
+        timer = window.setTimeout(poll, 3000)
+      } catch (error) {
+        if (cancelled) return
+        const message = `全课语音任务恢复失败，稍后重试：${errorMessage(error)}`
+        setStatus(message)
+        setCourseAudioProgress((previous) => ({ ...previous, running: true, message }))
+        timer = window.setTimeout(poll, 5000)
+      }
+    }
+
+    void poll()
+    return () => {
+      cancelled = true
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [activeCourseAudioJob])
+
+  useEffect(() => {
     if (!isPreviewFullscreen) return
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setIsPreviewFullscreen(false)
@@ -1519,7 +1620,12 @@ function TeacherPreparePage() {
   const resetGeneratedLectures = () => {
     lecturePlayback.pause()
     courseAudioAbortRef.current = true
+    if (activeCourseAudioJob) {
+      void stopCourseTtsJob(activeCourseAudioJob.jobId).catch(() => undefined)
+    }
     setCourseAudioProgress(emptyCourseAudioProgress)
+    setActiveCourseAudioJob(null)
+    writeStoredCourseAudioJob(null)
     setActiveSlideLectureJob(null)
     setSlideLectures([])
     setLectureSourceScope(null)
@@ -1888,10 +1994,20 @@ function TeacherPreparePage() {
     }
   }
 
-  const handleStopCourseAudio = () => {
+  const handleStopCourseAudio = async () => {
     courseAudioAbortRef.current = true
-    setCourseAudioProgress((previous) => ({ ...previous, running: false, error: "已停止全课语音生成" }))
-    setStatus("已停止全课语音生成")
+    if (!activeCourseAudioJob) {
+      setCourseAudioProgress((previous) => ({ ...previous, running: false, error: "已停止全课语音生成" }))
+      setStatus("已停止全课语音生成")
+      return
+    }
+    try {
+      const job = await stopCourseTtsJob(activeCourseAudioJob.jobId)
+      setCourseAudioProgress(courseAudioProgressFromJob(job))
+      setStatus(job.message || "正在停止全课语音生成，当前段完成后停止")
+    } catch (error) {
+      setStatus(`停止全课语音失败：${errorMessage(error)}`)
+    }
   }
 
   const handleGenerateCourseAudio = async () => {
@@ -1921,6 +2037,7 @@ function TeacherPreparePage() {
       ...emptyCourseAudioProgress,
       running: true,
       slideCount: lectureItems.length,
+      message: "正在启动全课语音后台任务",
     })
 
     try {
@@ -1929,73 +2046,27 @@ function TeacherPreparePage() {
         throw new Error(ttsStatus.detail || "语音接口未接入")
       }
 
-      let readyChunks = 0
-      let totalChunks = 0
-      let cacheHits = 0
       const chapterKey = chapterId || preview?.chapter_title || effectiveCoursewareTitle()
-
-      for (const item of lectureItems) {
-        if (courseAudioAbortRef.current) break
-        const shouldSplit = item.text.length > LONG_TEXT_THRESHOLD
-        const speechCues = item.speechCues as SpeechCue[]
-        const splitResult = shouldSplit
-          ? await splitTtsSegments({ text: item.text, max_chars: TTS_CHUNK_CHARS, speech_cues: speechCues })
-          : {
-              success: true,
-              segments: [{ index: 0, text: item.text, length: item.text.length }],
-            }
-        if (!splitResult.success || !splitResult.segments.length) {
-          throw new Error(`第 ${item.slide.index} 页语音分段失败`)
-        }
-        totalChunks += splitResult.segments.length
-        setCourseAudioProgress({
-          running: true,
-          currentSlide: item.position + 1,
-          slideCount: lectureItems.length,
-          readyChunks,
-          totalChunks,
-          cacheHits,
-        })
-
-        for (const chunk of splitResult.segments) {
-          if (courseAudioAbortRef.current) break
-          const cueHash = stableSpeechCueHash(shouldSplit ? undefined : speechCues)
-          const textHash = stableTextHash(chunk.text.trim())
-          const result = await synthesizeTts({
-            text: chunk.text,
-            split_sentence: true,
-            chapter_id: chapterKey,
-            segment_id: `slide-${item.slide.index}-chunk-${chunk.index + 1}`,
-            content_hash: `${textHash}-${cueHash}`,
-            speech_cues: shouldSplit ? undefined : speechCues,
-          })
-          if (!result.success || !result.audio_url) {
-            throw new Error(result.detail || result.error || `第 ${item.slide.index} 页第 ${chunk.index + 1} 段语音生成失败`)
-          }
-          readyChunks += 1
-          if (result.cache_hit) cacheHits += 1
-          setCourseAudioProgress({
-            running: true,
-            currentSlide: item.position + 1,
-            slideCount: lectureItems.length,
-            readyChunks,
-            totalChunks,
-            cacheHits,
-          })
-        }
-      }
-
-      const stopped = courseAudioAbortRef.current
-      setCourseAudioProgress({
-        running: false,
-        currentSlide: stopped ? Math.min(lectureItems.length, Math.max(1, lectureItems.findIndex((item) => item.slide.index === selectedIndex) + 1)) : lectureItems.length,
-        slideCount: lectureItems.length,
-        readyChunks,
-        totalChunks,
-        cacheHits,
-        error: stopped ? "已停止全课语音生成" : undefined,
+      const job = await createCourseTtsJob({
+        chapter_id: chapterKey,
+        max_chars: TTS_CHUNK_CHARS,
+        slides: lectureItems.map((item) => ({
+          slide_index: Number(item.slide.index),
+          position: item.position,
+          text: item.text,
+          speech_cues: item.speechCues as SpeechCue[],
+        })),
       })
-      setStatus(stopped ? "已停止全课语音生成" : `已生成全课语音：${readyChunks}/${totalChunks} 段，缓存命中 ${cacheHits} 段`)
+      const storedJob = {
+        jobId: job.job_id,
+        chapterId: chapterKey,
+        title: effectiveCoursewareTitle(),
+        createdAt: job.created_at || new Date().toISOString(),
+      }
+      setActiveCourseAudioJob(storedJob)
+      writeStoredCourseAudioJob(storedJob)
+      setCourseAudioProgress(courseAudioProgressFromJob(job))
+      setStatus(job.message || "全课语音后台任务已启动，关闭网页后会继续生成")
     } catch (error) {
       const message = `全课语音生成失败：${errorMessage(error)}`
       setCourseAudioProgress((previous) => ({ ...previous, running: false, error: message }))
