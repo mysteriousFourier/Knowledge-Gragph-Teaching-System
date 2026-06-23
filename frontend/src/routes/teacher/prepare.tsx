@@ -45,6 +45,7 @@ import {
   useUploadCoursewareStyleReference,
   createCourseTtsJob,
   getCourseTtsJob,
+  getLatestCourseTtsJob,
   getSlideLectureJob,
   getTtsStatus,
   stopCourseTtsJob,
@@ -1306,6 +1307,7 @@ function TeacherPreparePage() {
   const [graphScopeEnabled, setGraphScopeEnabled] = useState(() => !chapterId || Boolean(nodeId))
   const [status, setStatus] = useState("")
   const courseAudioAbortRef = useRef(false)
+  const recoveredCourseAudioKeyRef = useRef("")
 
   const previewPpt = usePreviewPpt()
   const previewTex = usePreviewTex()
@@ -1603,6 +1605,46 @@ function TeacherPreparePage() {
       if (timer) window.clearTimeout(timer)
     }
   }, [activeCourseAudioJob])
+
+  useEffect(() => {
+    if (activeCourseAudioJob) return
+    const chapterKey = (chapterId || preview?.chapter_title || chapterTitle || "").trim()
+    if (!chapterKey || recoveredCourseAudioKeyRef.current === chapterKey) return
+    recoveredCourseAudioKeyRef.current = chapterKey
+    let cancelled = false
+
+    const recover = async () => {
+      try {
+        const response = await getLatestCourseTtsJob(chapterKey)
+        if (cancelled || !response.job) return
+        const job = response.job
+        const progress = courseAudioProgressFromJob(job)
+        setCourseAudioProgress(progress)
+        if (["queued", "running", "stopping"].includes(job.status)) {
+          const storedJob = {
+            jobId: job.job_id,
+            chapterId: chapterKey,
+            title: chapterTitle || preview?.chapter_title || "全课语音",
+            createdAt: job.created_at || new Date().toISOString(),
+          }
+          setActiveCourseAudioJob(storedJob)
+          writeStoredCourseAudioJob(storedJob)
+          setStatus(job.message || "已恢复正在生成的全课语音任务")
+          return
+        }
+        if (job.status === "completed") {
+          setStatus(job.message || `已生成全课语音：${job.ready_chunks}/${job.total_chunks} 段，缓存命中 ${job.cache_hits} 段`)
+        }
+      } catch {
+        // Recovery is opportunistic; normal generation remains available.
+      }
+    }
+
+    void recover()
+    return () => {
+      cancelled = true
+    }
+  }, [activeCourseAudioJob, chapterId, chapterTitle, preview?.chapter_title])
 
   useEffect(() => {
     if (!isPreviewFullscreen) return

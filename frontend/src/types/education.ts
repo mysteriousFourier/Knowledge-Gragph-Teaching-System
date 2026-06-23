@@ -144,6 +144,11 @@ export interface TtsCourseJobResponse {
   error?: string
 }
 
+export interface TtsLatestCourseJobResponse {
+  success: boolean
+  job: TtsCourseJobResponse | null
+}
+
 export interface GraphContextTreeNode {
   id: string
   label: string

@@ -273,6 +273,17 @@ def _load_course_job(job_id: str) -> dict[str, Any] | None:
     return job
 
 
+def _iter_course_jobs() -> list[dict[str, Any]]:
+    jobs: dict[str, dict[str, Any]] = {str(job.get("job_id")): job for job in COURSE_TTS_JOBS.values() if job.get("job_id")}
+    job_dir = _course_job_dir()
+    if job_dir.is_dir():
+        for path in job_dir.glob("*.json"):
+            job = _load_course_job(path.stem)
+            if job and job.get("job_id"):
+                jobs.setdefault(str(job["job_id"]), job)
+    return list(jobs.values())
+
+
 def _update_course_job(job: dict[str, Any], **patch: Any) -> None:
     job.update(patch)
     job["updated_at"] = datetime.now().isoformat()
@@ -638,6 +649,26 @@ async def get_course_tts_job(job_id: str) -> dict[str, Any]:
         **_public_course_job(job),
         "success": True,
         "elapsed_seconds": _course_job_elapsed_seconds(job),
+    }
+
+
+@router.get("/course-jobs/latest/by-chapter")
+async def get_latest_course_tts_job(chapter_id: str) -> dict[str, Any]:
+    chapter = str(chapter_id or "").strip()
+    if not chapter:
+        raise HTTPException(status_code=400, detail="缺少课程 id")
+    matches = [job for job in _iter_course_jobs() if str(job.get("chapter_id") or "") == chapter]
+    matches.sort(key=lambda job: str(job.get("created_at") or job.get("updated_at") or ""), reverse=True)
+    if not matches:
+        return {"success": True, "job": None}
+    job = matches[0]
+    return {
+        "success": True,
+        "job": {
+            **_public_course_job(job),
+            "success": True,
+            "elapsed_seconds": _course_job_elapsed_seconds(job),
+        },
     }
 
 

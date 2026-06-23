@@ -24,6 +24,7 @@ import type {
   PptUploadResponse,
   TtsCourseJobRequest,
   TtsCourseJobResponse,
+  TtsLatestCourseJobResponse,
   TtsStatusResponse,
   TtsSegmentRequest,
   TtsSegmentsResponse,
@@ -445,6 +446,14 @@ export const createCourseTtsJob = (data: TtsCourseJobRequest) =>
 export const getCourseTtsJob = (jobId: string) =>
   educationClient
     .get<TtsCourseJobResponse>(`/api/tts/course-jobs/${encodeURIComponent(jobId)}`, {
+      timeout: 0,
+    })
+    .then((r) => r.data)
+
+export const getLatestCourseTtsJob = (chapterId: string) =>
+  educationClient
+    .get<TtsLatestCourseJobResponse>("/api/tts/course-jobs/latest/by-chapter", {
+      params: { chapter_id: chapterId },
       timeout: 0,
     })
     .then((r) => r.data)
