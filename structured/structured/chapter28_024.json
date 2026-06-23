@@ -2,7 +2,7 @@
   "id": "chapter28_024",
   "metadata": {
     "chapter": "chapter28",
-    "section": "Maintenance of Quantitative Genetic Variation: Introduction",
+    "section": "MUTATION-STABILIZING SELECTION BALANCE: BASIC MODELS",
     "subsections": [
       "Summary: Implications of Gaussian Versus HCA Approximations"
     ],
@@ -23,25 +23,30 @@
       "28.26g",
       "28.26h",
       "28.27a",
-      "28.27b"
+      "28.27b",
+      "28.27c",
+      "28.27d",
+      "28.27e",
+      "28.28a",
+      "28.28b",
+      "28.28c",
+      "28.28d",
+      "28.28e",
+      "28.28f"
     ],
     "table_references": [],
-    "section_level_1": "Maintenance of Quantitative Genetic Variation: Introduction",
+    "section_level_1": "MUTATION-STABILIZING SELECTION BALANCE: BASIC MODELS",
     "section_level_2": "Summary: Implications of Gaussian Versus HCA Approximations",
     "heading_path": [
-      "Maintenance of Quantitative Genetic Variation: Introduction",
+      "MUTATION-STABILIZING SELECTION BALANCE: BASIC MODELS",
       "Summary: Implications of Gaussian Versus HCA Approximations"
     ],
     "display_heading": "Summary: Implications of Gaussian Versus HCA Approximations"
   },
   "blocks": [
     {
-      "type": "discussion",
-      "content": "Thus, if many alleles are segregating, the differences between the frequencies of adjacent allele are small, we can approximate the rightmost term in Equation 28.24c by the second derivation of $p_j$ with respect to $t$, and Equation 28.24c becomes Kimura's Gaussian approximation (28.22c). Conversely, if selection is strong relative to mutation, there are typically only three alleles (one that is favored and the two single-step mutations), where $p_0$ is large and $p_{-1} = p_1$ are small. This is Turelli's triallelic model (Equation 28.13a), yielding $p_{-1} = p_1 = V_s\\mu/a^2$ (Equation 28.13b), for a variance of $\\sigma^2(x) = 2V_s\\mu$, thus recovering the HCA results."
-    },
-    {
       "type": "example",
-      "content": "[[SEE_EXAMPLE:28.7]]"
+      "content": "[[EXAMPLE:28.7]]"
     }
   ]
 }

@@ -41,7 +41,7 @@
     },
     {
       "type": "discussion",
-      "content": "Under the HCA setting (wherein selection dominates mutation), both traits are near their optimum ($ \\overline{z} \\simeq \\theta $), meaning that a change in any direction is likely deleterious. Thus, any new mutations influencing trait 1 will also change trait 2, further lowering fitness. The stronger selection is on trait 2, the greater the additional reduction in fitness for a mutation that also affects trait 1. When most of the selection on new mutations at locus i is on trait 1 ($ \\beta_i \\ll 1 $), Equation 28.41a is close to the single-trait HCA value (Equation 28.18a). Conversely, when there is much stronger selection on trait 2 ($ \\beta_i \\gg 1 $), the amount of variation maintained for trait 1 is considerably below its single-trait HCA prediction. If a large number of traits are under multivariate Gaussian selection, one can easily construct a single synthetic trait (a linear combination of the remaining traits) to reduce this to a two-trait (focal plus synthetic) model (Example 28.10). Hence, for most traits we expect selection on the “other” trait to be larger, and likely considerably so, resulting in an overprediction of trait 1’s genetic variance using the univariate HCA result (Equation 28.18a)."
+      "content": "Under the HCA setting (wherein selection dominates mutation), both traits are near their optimum ($ \\overline{z} \\simeq \\theta $), meaning that a change in any direction is likely deleterious. Thus, any new mutations influencing trait 1 will also change trait 2, further lowering fitness. The stronger selection is on trait 2, the greater the additional reduction in fitness for a mutation that also affects trait 1. When most of the selection on new mutations at locus i is on trait 1 ($ \\beta_i \\ll 1 $), Equation 28.41a is close to the single-trait HCA value (Equation 28.18a). Conversely, when there is much stronger selection on trait 2 ($ \\beta_i \\gg 1 $), the amount of variation maintained for trait 1 is considerably below its single-trait HCA prediction. If a large number of traits are under multivariate Gaussian selection, one can easily construct a single synthetic trait (a linear combination of the remaining traits) to reduce this to a two-trait (focal plus synthetic) model ([[SEE_EXAMPLE:28.10]]). Hence, for most traits we expect selection on the “other” trait to be larger, and likely considerably so, resulting in an overprediction of trait 1’s genetic variance using the univariate HCA result (Equation 28.18a)."
     },
     {
       "type": "discussion",
@@ -61,7 +61,7 @@
     },
     {
       "type": "example",
-      "content": "[[SEE_EXAMPLE:28.10]]"
+      "content": "[[EXAMPLE:28.10]]"
     }
   ]
 }

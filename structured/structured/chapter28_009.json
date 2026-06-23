@@ -42,11 +42,11 @@
     },
     {
       "type": "discussion",
-      "content": "Barton (1990) suggests there may be a modest number of phenotypic dimensions experiencing significant real stabilizing selection, which results in apparent stabilizing selection on any trait phenotypically correlated to one, or more, of these dimensions (Example 28.1). Further, we have shown that stabilizing selection per se, be it on a single or multiple traits, is unlikely to account for significant additive variance. Coupling these points suggests that stabilizing selection, by itself, is unlikely to explain more than a trivial amount of the genetic variance for a trait that appears to be under stabilizing selection, and that additional factors (such as mutation and pleiotropy) are critical. As succinctly stated by Barton “heritable variation in any one trait is maintained as a side effect of polymorphisms which have nothing to do with selection on that trait,” an idea more fully explored throughout this chapter."
+      "content": "Barton (1990) suggests there may be a modest number of phenotypic dimensions experiencing significant real stabilizing selection, which results in apparent stabilizing selection on any trait phenotypically correlated to one, or more, of these dimensions ([[SEE_EXAMPLE:28.1]]). Further, we have shown that stabilizing selection per se, be it on a single or multiple traits, is unlikely to account for significant additive variance. Coupling these points suggests that stabilizing selection, by itself, is unlikely to explain more than a trivial amount of the genetic variance for a trait that appears to be under stabilizing selection, and that additional factors (such as mutation and pleiotropy) are critical. As succinctly stated by Barton “heritable variation in any one trait is maintained as a side effect of polymorphisms which have nothing to do with selection on that trait,” an idea more fully explored throughout this chapter."
     },
     {
       "type": "example",
-      "content": "[[SEE_EXAMPLE:28.1]]"
+      "content": "[[EXAMPLE:28.1]]"
     }
   ]
 }

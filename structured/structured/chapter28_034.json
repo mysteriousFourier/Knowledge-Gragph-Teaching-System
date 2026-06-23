@@ -30,19 +30,19 @@
     },
     {
       "type": "discussion",
-      "content": "5. Increasing the kurtosis (generating a thicker tail, and therefore more outliers relative to a normal) has opposite effects for trait and fitness mutations. The equilibrium additive variance for the focal trait increases with the kurtosis of the fitness effects, s, (and can be much larger than that for a constant-s model), but decreases with the kurtosis of trait mutational effects, $ \\alpha $. Increased kurtosis in the distribution of fitness effects of mutations implies more nearly neutral mutations (and hence higher equilibrium frequencies), while increased trait kurtosis implies a larger fraction of small trait-effect mutations (with a smaller variance contribution per mutation). Recall that Example 28.10 showed that if the pleiotropic effects are the result of stabilizing selection on a number of independent traits, the distribution of s values approaches a normal, so that the resulting fitness distribution is not leptokurtic and does not generate extra variation."
+      "content": "5. Increasing the kurtosis (generating a thicker tail, and therefore more outliers relative to a normal) has opposite effects for trait and fitness mutations. The equilibrium additive variance for the focal trait increases with the kurtosis of the fitness effects, s, (and can be much larger than that for a constant-s model), but decreases with the kurtosis of trait mutational effects, $ \\alpha $. Increased kurtosis in the distribution of fitness effects of mutations implies more nearly neutral mutations (and hence higher equilibrium frequencies), while increased trait kurtosis implies a larger fraction of small trait-effect mutations (with a smaller variance contribution per mutation). Recall that [[SEE_EXAMPLE:28.10]] showed that if the pleiotropic effects are the result of stabilizing selection on a number of independent traits, the distribution of s values approaches a normal, so that the resulting fitness distribution is not leptokurtic and does not generate extra variation."
     },
     {
       "type": "example",
-      "content": "[[SEE_EXAMPLE:28.11]]"
+      "content": "[[EXAMPLE:28.11]]"
     },
     {
       "type": "example",
-      "content": "[[SEE_EXAMPLE:28.12]]"
+      "content": "[[EXAMPLE:28.12]]"
     },
     {
       "type": "example",
-      "content": "[[SEE_EXAMPLE:28.13]]"
+      "content": "[[EXAMPLE:28.13]]"
     }
   ]
 }

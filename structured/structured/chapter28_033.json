@@ -44,7 +44,7 @@
     },
     {
       "type": "discussion",
-      "content": "When $ s $ (and $ \\alpha $) vary over mutations, Equation 28.44a shows that the expected additive variation from a locus is $ 2\\mu E[\\alpha^2/s] $, and Equation 28.44b shows that in order to approximate $ E[\\alpha^2/s] $, one must (at least) specify both the correlation, $ \\rho $, between $ s $ and $ \\alpha^2 $, as well as the kurtosis of the distribution of trait mutational effects, $ \\sigma^2(\\alpha^2) $. Further, different families of bivariate distributions that otherwise have the same values for $ \\rho $ and $ \\sigma^2(\\alpha^2) $ can give very different results, making the outcome extremely model-dependent (Hill and Keightley 1988; Caballero and Keightley 1990; Keightley and Hill 1990; Johnson and Barton 2005), see Example 28.12."
+      "content": "When $ s $ (and $ \\alpha $) vary over mutations, Equation 28.44a shows that the expected additive variation from a locus is $ 2\\mu E[\\alpha^2/s] $, and Equation 28.44b shows that in order to approximate $ E[\\alpha^2/s] $, one must (at least) specify both the correlation, $ \\rho $, between $ s $ and $ \\alpha^2 $, as well as the kurtosis of the distribution of trait mutational effects, $ \\sigma^2(\\alpha^2) $. Further, different families of bivariate distributions that otherwise have the same values for $ \\rho $ and $ \\sigma^2(\\alpha^2) $ can give very different results, making the outcome extremely model-dependent (Hill and Keightley 1988; Caballero and Keightley 1990; Keightley and Hill 1990; Johnson and Barton 2005), see [[SEE_EXAMPLE:28.12]]."
     },
     {
       "type": "discussion",

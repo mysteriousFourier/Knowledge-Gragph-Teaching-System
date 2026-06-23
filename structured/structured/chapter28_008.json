@@ -25,7 +25,7 @@
   "blocks": [
     {
       "type": "discussion",
-      "content": "In Chapter 5 we examined constant-fitness population-genetic models for alleles under strict selection (no mutation or drift) and showed that while heterozygote advantage can stably maintain both alleles at a diallelic locus, most forms of selection tend to remove variation. At first glance, an additive QTL for a trait under stabilizing selection seems to be an example of such a heterozygote advantage, as the heterozygote is intermediate in phenotype and an intermediate phenotype is preferred by selection. However, it is critical to recall that this is not the case. Example 5.6 showed that a QTL underlying a trait under stabilizing selection generally experiences selective underdominance, and hence the removal, rather than the maintenance, of variation by selection."
+      "content": "In Chapter 5 we examined constant-fitness population-genetic models for alleles under strict selection (no mutation or drift) and showed that while heterozygote advantage can stably maintain both alleles at a diallelic locus, most forms of selection tend to remove variation. At first glance, an additive QTL for a trait under stabilizing selection seems to be an example of such a heterozygote advantage, as the heterozygote is intermediate in phenotype and an intermediate phenotype is preferred by selection. However, it is critical to recall that this is not the case. [[SEE_EXAMPLE:5.6]] showed that a QTL underlying a trait under stabilizing selection generally experiences selective underdominance, and hence the removal, rather than the maintenance, of variation by selection."
     },
     {
       "type": "derivation",
@@ -33,7 +33,7 @@
     },
     {
       "type": "derivation",
-      "content": "(derived in Example 5.6). A useful way to understand these dynamics is to express them in the form of a weakly selected allele with additive effects (Equation 5.2), $ \\Delta p \\simeq s_i p_i(1 - p_i) $, where the selection coefficient becomes [[SEE_FORMULA:28.4b]]"
+      "content": "(derived in [[SEE_EXAMPLE:5.6]]). A useful way to understand these dynamics is to express them in the form of a weakly selected allele with additive effects (Equation 5.2), $ \\Delta p \\simeq s_i p_i(1 - p_i) $, where the selection coefficient becomes [[SEE_FORMULA:28.4b]]"
     },
     {
       "type": "derivation",
@@ -49,7 +49,7 @@
     },
     {
       "type": "discussion",
-      "content": "Example 5.11 detailed Bürger and Gimelfarb's (1999) analysis of the general two-locus model under quadratic selection, and Willensdorfer and Bürger (2003) presented a similar analysis for Gaussian selection. The conditions under which stabilizing selection on a single trait can maintain polymorphisms at multiple loci are fairly stringent and generally result in high negative levels of disequilibrium, and hence small additive variances (Gimelfarb 1989; Zhivotovsky and Gavrilets 1992). Further, the genetic variance that can be maintained under such models generally decreases very rapidly with the number of loci, reflecting diminished selection coefficients on the individual loci (Bürger and Gimelfarb 1999). One subtle issue is the granularity of these models, in that if no genotype exists whose value exactly equals the optimal value under stabilizing selection, then small amounts of directional selection ($ | \\theta - \\overline{z}| > 0 $) can be present at equilibrium, and multilocus polymorphism (often with alleles at extreme values, and hence contributing little variation) can be maintained (Barton 1986)."
+      "content": "[[SEE_EXAMPLE:5.11]] detailed Bürger and Gimelfarb's (1999) analysis of the general two-locus model under quadratic selection, and Willensdorfer and Bürger (2003) presented a similar analysis for Gaussian selection. The conditions under which stabilizing selection on a single trait can maintain polymorphisms at multiple loci are fairly stringent and generally result in high negative levels of disequilibrium, and hence small additive variances (Gimelfarb 1989; Zhivotovsky and Gavrilets 1992). Further, the genetic variance that can be maintained under such models generally decreases very rapidly with the number of loci, reflecting diminished selection coefficients on the individual loci (Bürger and Gimelfarb 1999). One subtle issue is the granularity of these models, in that if no genotype exists whose value exactly equals the optimal value under stabilizing selection, then small amounts of directional selection ($ | \\theta - \\overline{z}| > 0 $) can be present at equilibrium, and multilocus polymorphism (often with alleles at extreme values, and hence contributing little variation) can be maintained (Barton 1986)."
     },
     {
       "type": "discussion",
