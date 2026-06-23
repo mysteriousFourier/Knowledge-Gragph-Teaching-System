@@ -46,8 +46,8 @@ export interface AudioPlaybackPosition {
   seekable: boolean
 }
 
-export const LONG_TEXT_THRESHOLD = 420
-export const TTS_CHUNK_CHARS = 260
+export const LONG_TEXT_THRESHOLD = 120
+export const TTS_CHUNK_CHARS = 120
 const PREFETCH_AHEAD = 2
 const SILENT_WAV_DATA_URI =
   "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="
