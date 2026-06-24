@@ -480,6 +480,65 @@ def _replace_single_argument_command(expr: str, command: str, replacement: str =
     return expr
 
 
+def _read_latex_group(expr: str, start: int) -> tuple[str, int] | None:
+    index = start
+    while index < len(expr) and expr[index].isspace():
+        index += 1
+    if index >= len(expr) or expr[index] != "{":
+        return None
+    depth = 0
+    content_start = index + 1
+    while index < len(expr):
+        char = expr[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return expr[content_start:index], index + 1
+        index += 1
+    return None
+
+
+def _replace_latex_group_command(expr: str, command: str, arity: int, replacement: str) -> str:
+    marker = f"\\{command}"
+    output: list[str] = []
+    index = 0
+    changed = False
+    while index < len(expr):
+        if expr.startswith(marker, index):
+            next_index = index + len(marker)
+            if next_index < len(expr) and expr[next_index].isalpha():
+                output.append(expr[index])
+                index += 1
+                continue
+            cursor = next_index
+            groups: list[str] = []
+            for _ in range(arity):
+                group = _read_latex_group(expr, cursor)
+                if group is None:
+                    groups = []
+                    break
+                group_text, cursor = group
+                groups.append(group_text)
+            if len(groups) == arity:
+                output.append(replacement.format(*groups))
+                index = cursor
+                changed = True
+                continue
+        output.append(expr[index])
+        index += 1
+    return "".join(output) if changed else expr
+
+
+def _replace_latex_group_command_recursive(expr: str, command: str, arity: int, replacement: str) -> str:
+    previous = None
+    while previous != expr:
+        previous = expr
+        expr = _replace_latex_group_command(expr, command, arity, replacement)
+    return expr
+
+
 def _env_flag(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None or value.strip() == "":
@@ -620,9 +679,15 @@ def _legacy_latex_to_speech(expr: str) -> str:
     expr = _strip_latex_wrappers(raw_expr)
     complex_expr = bool(re.search(r"\\(sum|prod|int|begin|matrix|cases)|\\\\|&", raw_expr))
 
+    expr = _replace_latex_group_command_recursive(expr, "frac", 2, "{} 除以 {}")
+    expr = _replace_latex_group_command_recursive(expr, "dfrac", 2, "{} 除以 {}")
+    expr = _replace_latex_group_command_recursive(expr, "tfrac", 2, "{} 除以 {}")
+    expr = _replace_latex_group_command_recursive(expr, "binom", 2, "{} 中取 {} 的组合数")
+    expr = _replace_latex_group_command_recursive(expr, "sqrt", 1, "{} 的平方根")
     expr = _replace_balanced_command(expr, "frac", "{} 除以 {}")
     expr = _replace_balanced_command(expr, "binom", "{} 中取 {} 的组合数")
     for command in ("mathbf", "mathrm", "text", "operatorname", "overline", "bar", "hat", "tilde"):
+        expr = _replace_latex_group_command_recursive(expr, command, 1, "{}")
         expr = _replace_single_argument_command(expr, command)
     expr = re.sub(r"\{([^{}]+)\\over\s+([^{}]+)\}", r"\1 除以 \2", expr)
     expr = re.sub(r"\\sqrt\s*\{([^{}]+)\}", r"\1 的平方根", expr)
@@ -640,7 +705,7 @@ def _legacy_latex_to_speech(expr: str) -> str:
     expr = re.sub(r"([A-Za-z0-9})])_\{([^{}]+)\}", r"\1 下标 \2", expr)
     expr = re.sub(r"([A-Za-z0-9})])_([A-Za-z0-9])", r"\1 下标 \2", expr)
     expr = re.sub(r"([A-Za-z0-9})])\^\{([^{}]+)\}", r"\1 的 \2 次方", expr)
-    expr = re.sub(r"([A-Za-z0-9})])\^([A-Za-z0-9+-]+)", r"\1 的 \2 次方", expr)
+    expr = re.sub(r"([A-Za-z0-9})])\^([+-]?[A-Za-z0-9]+)", r"\1 的 \2 次方", expr)
 
     replacements = {
         "<<": " 远小于 ",
@@ -700,6 +765,8 @@ def _legacy_latex_to_speech(expr: str) -> str:
     expr = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", expr)
     expr = re.sub(r"(?<=[A-Za-z])(?=\d)", " ", expr)
     expr = re.sub(r"\s+", " ", expr).strip()
+    expr = spell_latin_terms_for_chinese(expr, mode="formula")
+    expr = re.sub(r"\s+", " ", expr).strip()
     if not expr:
         return "这里有一个公式。"
     if complex_expr:
@@ -757,6 +824,13 @@ def _formula_id_to_speech(formula_id: str) -> str:
     return f"公式 {label}。"
 
 
+def _replace_bare_math_for_speech(match: re.Match[str]) -> str:
+    expr = match.group(1)
+    if re.fullmatch(r"[A-Za-z]+(?:-[A-Za-z]+)+", expr):
+        return expr
+    return latex_to_speech(expr, prefer_sre=False)
+
+
 def replace_formulas_for_speech(text: str) -> str:
     text = _replace_prose_dashes(text)
     text = re.sub(r"\[\[FORMULA:([^\]]+)\]\]", lambda match: _formula_id_to_speech(match.group(1).strip()), text)
@@ -765,7 +839,7 @@ def replace_formulas_for_speech(text: str) -> str:
     text = _replace_latex_matches_for_speech(text, r"\\\((.+?)\\\)", flags=re.DOTALL)
     text = _replace_latex_matches_for_speech(text, r"(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)")
     text = _replace_latex_matches_for_speech(text, r"\\frac\s*\{[^{}]+\}\s*\{[^{}]+\}", expr_group=None)
-    text = _BARE_MATH_EXPR_RE.sub(lambda match: latex_to_speech(match.group(1), prefer_sre=False), text)
+    text = _BARE_MATH_EXPR_RE.sub(_replace_bare_math_for_speech, text)
     text = _LATEX_SUBSUP_TOKEN_RE.sub(lambda match: latex_to_speech(match.group(1), prefer_sre=False), text)
     return text
 
@@ -905,21 +979,48 @@ def resolve_genie_tts_language(text: str, language: str | None, default_language
     return lang
 
 
-def spell_latin_terms_for_chinese(text: str) -> str:
+def _spell_latin_token(token: str) -> str:
+    parts: list[str] = []
+    for char in token:
+        lower = char.lower()
+        if lower in _LATIN_LETTER_SPEECH:
+            parts.append(_LATIN_LETTER_SPEECH[lower])
+        elif char in _LATIN_SYMBOL_SPEECH:
+            parts.append(_LATIN_SYMBOL_SPEECH[char])
+        elif char.isdigit():
+            parts.append(char)
+        else:
+            parts.append(" ")
+    return "".join(parts).strip()
+
+
+def _should_spell_latin_token(token: str, *, mode: str) -> bool:
+    compact = re.sub(r"[^A-Za-z0-9+#._-]", "", token)
+    if not compact or not re.search(r"[A-Za-z]", compact):
+        return False
+    letters = re.sub(r"[^A-Za-z]", "", compact)
+    if not letters:
+        return False
+    if mode == "formula":
+        return True
+    if compact.isupper() and len(letters) <= 8:
+        return True
+    if len(letters) == 1:
+        return True
+    if re.search(r"[\d_+#.]", compact) and len(letters) <= 8:
+        return True
+    if len(letters) <= 2 and (compact[0].isupper() or compact[-1].isupper()):
+        return True
+    return False
+
+
+def spell_latin_terms_for_chinese(text: str, *, mode: str = "prose") -> str:
     def replace_token(match: re.Match[str]) -> str:
         token = match.group(0)
-        parts: list[str] = []
-        for char in token:
-            lower = char.lower()
-            if lower in _LATIN_LETTER_SPEECH:
-                parts.append(_LATIN_LETTER_SPEECH[lower])
-            elif char in _LATIN_SYMBOL_SPEECH:
-                parts.append(_LATIN_SYMBOL_SPEECH[char])
-            elif char.isdigit():
-                parts.append(char)
-            else:
-                parts.append(" ")
-        return " " + "".join(parts).strip() + " "
+        if not _should_spell_latin_token(token, mode=mode):
+            return token
+        spoken = _spell_latin_token(token)
+        return f" {spoken} " if spoken else token
 
     return re.sub(r"(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z0-9+#._-]*)(?![A-Za-z0-9])", replace_token, text)
 
@@ -931,7 +1032,7 @@ def normalize_tts_text(text: str, default_language: str = "zh", language_overrid
     normalized = sanitize_gpt_sovits_text(normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
     text_lang = (language_override or "").strip().lower() or detect_tts_language(normalized, default_language)
-    if text_lang in {"all_zh", "all_yue"}:
+    if text_lang in {"zh", "zh-cn", "zh-tw", "zh-hans", "zh-hant", "chinese", "all_zh", "all_yue", _GENIE_HYBRID_ZH_EN_LANGUAGE}:
         normalized = spell_latin_terms_for_chinese(normalized)
         normalized = sanitize_gpt_sovits_text(normalized)
         normalized = re.sub(r"\s+", " ", normalized).strip()

@@ -85,6 +85,7 @@ class TtsSynthesizeRequest(BaseModel):
     chapter_id: str | None = None
     segment_id: str | None = None
     content_hash: str | None = None
+    force: bool = False
     speech_cues: list[TtsSpeechCue] | None = None
 
 
@@ -568,7 +569,7 @@ def _azure_speech_voice(language: str | None) -> str:
     lang = (language or "").lower()
     if lang.startswith("en"):
         return "en-US-JennyNeural"
-    return "zh-CN-XiaoxiaoNeural"
+    return "zh-CN-YunxiNeural"
 
 
 def _azure_speech_ssml_language(language: str | None, default_language: str) -> str:
@@ -808,7 +809,7 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
     if len(text) > settings.max_chars:
         raise _long_text_error(len(text), settings.max_chars)
     persistent_path = _course_audio_path(payload, text, effective_language)
-    if persistent_path and persistent_path.is_file():
+    if persistent_path and persistent_path.is_file() and not payload.force:
         return {
             "success": True,
             "provider": settings.provider,

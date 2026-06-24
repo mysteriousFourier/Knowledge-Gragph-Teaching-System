@@ -69,6 +69,10 @@ const initialAudioPosition: AudioPlaybackPosition = {
   seekable: false,
 }
 
+interface SynthesizeOptions {
+  force?: boolean
+}
+
 function getErrorMessage(error: unknown, fallback: string) {
   if (error && typeof error === "object" && "response" in error) {
     const response = (error as { response?: { status?: number; data?: { detail?: string; error?: string } } }).response
@@ -126,6 +130,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
   const requestIdRef = useRef(0)
   const synthesizedRef = useRef(new Map<string, Promise<TtsSynthesizeResponse>>())
   const currentSegmentRef = useRef(initialSegment)
+  const forceNextPlayRef = useRef(false)
 
   const hasSegments = segmentCount > 0
   const providerReady = provider !== "loading" && provider !== "none"
@@ -217,12 +222,12 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     })
   }, [])
 
-  const synthesizeCached = useCallback((text: string, segmentIndex?: number, chunkIndex?: number, speechCues?: SpeechCue[]) => {
+  const synthesizeCached = useCallback((text: string, segmentIndex?: number, chunkIndex?: number, speechCues?: SpeechCue[], options: SynthesizeOptions = {}) => {
     const key = text.trim()
     const segmentId = typeof segmentIndex === "number" ? getSegmentId?.(segmentIndex) || `segment-${segmentIndex + 1}` : undefined
     const cueHash = stableSpeechCueHash(speechCues)
     const scopedKey = chapterId ? `${chapterId}:${segmentId || "segment"}:${chunkIndex ?? 0}:${stableTextHash(key)}:${cueHash}` : `${key}:${cueHash}`
-    const existing = synthesizedRef.current.get(scopedKey)
+    const existing = options.force ? undefined : synthesizedRef.current.get(scopedKey)
     if (existing) return existing
     const promise = synthesizeTts({
       text: key,
@@ -230,6 +235,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
       chapter_id: chapterId,
       segment_id: segmentId ? `${segmentId}-chunk-${(chunkIndex ?? 0) + 1}` : undefined,
       content_hash: `${stableTextHash(key)}-${cueHash}`,
+      force: options.force,
       speech_cues: speechCues,
     }).catch((error) => {
       synthesizedRef.current.delete(scopedKey)
@@ -265,6 +271,8 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     }
     const speechCues = getSegmentSpeechCues?.(resolvedSegment)?.filter((cue) => cue.target_text?.trim()) || []
 
+    const forceSynthesis = forceNextPlayRef.current
+    forceNextPlayRef.current = false
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
     setIsPlaying(true)
@@ -322,7 +330,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
         prefetchedIndexes.add(index)
         pendingIndexes.add(index)
         syncProgress({ stage: "playing" })
-        void synthesizeCached(chunk.text, resolvedSegment, index, shouldSplit ? undefined : speechCues)
+        void synthesizeCached(chunk.text, resolvedSegment, index, shouldSplit ? undefined : speechCues, { force: forceSynthesis })
           .then((result) => {
             if (requestIdRef.current !== requestId || !result.success || !result.audio_url) return
             markReady(index, result)
@@ -350,7 +358,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
           return
         }
         pendingIndexes.add(chunkIndex)
-        const currentPromise = synthesizeCached(chunk.text, resolvedSegment, chunkIndex, shouldSplit ? undefined : speechCues)
+        const currentPromise = synthesizeCached(chunk.text, resolvedSegment, chunkIndex, shouldSplit ? undefined : speechCues, { force: forceSynthesis })
 
         setIsLoadingAudio(true)
         syncProgress({ stage: "synthesizing" })
@@ -440,6 +448,31 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     }, 0)
   }
 
+  const regenerate = (segment = currentSegment) => {
+    pause()
+    const clamped = Math.min(Math.max(segment, 0), Math.max(segmentCount - 1, 0))
+    const sourceText = getSegmentText?.(clamped)?.trim()
+    if (!sourceText) {
+      setPlaybackError("当前片段没有可朗读文本")
+      return
+    }
+    const speechCues = getSegmentSpeechCues?.(clamped)?.filter((cue) => cue.target_text?.trim()) || []
+    const cueHash = stableSpeechCueHash(speechCues)
+    const segmentId = getSegmentId?.(clamped) || `segment-${clamped + 1}`
+    const chunkKeyPrefix = chapterId ? `${chapterId}:${segmentId}:` : `${sourceText}:`
+    for (const key of Array.from(synthesizedRef.current.keys())) {
+      if (key.startsWith(chunkKeyPrefix) || key.includes(`${stableTextHash(sourceText)}:${cueHash}`)) {
+        synthesizedRef.current.delete(key)
+      }
+    }
+    currentSegmentRef.current = clamped
+    setCurrentSegmentState(clamped)
+    forceNextPlayRef.current = true
+    window.setTimeout(() => {
+      void play(clamped)
+    }, 0)
+  }
+
   useEffect(() => {
     return () => pause()
   }, [pause])
@@ -491,6 +524,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     provider,
     providerLabel,
     replay,
+    regenerate,
     reset,
     seekAudio,
     setCurrentSegment,

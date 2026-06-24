@@ -88,13 +88,17 @@ sudo systemctl enable kgts-tts
 sudo systemctl restart kgts-tts
 sleep 3
 
-if ! curl -fsS --max-time 10 http://127.0.0.1:9880/status; then
+if ! curl -fsS --max-time 10 http://127.0.0.1:9880/health; then
   echo
   echo "kgts-tts did not become reachable. Recent service status and logs follow:" >&2
   sudo systemctl status kgts-tts --no-pager || true
   sudo journalctl -u kgts-tts -n 80 --no-pager || true
   exit 3
 fi
+
+echo
+echo "TTS proxy resource status:"
+curl -fsS --max-time 10 http://127.0.0.1:9880/status || true
 
 sudo systemctl restart kgts
 sleep 2

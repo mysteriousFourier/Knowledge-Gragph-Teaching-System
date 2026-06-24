@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { BookOpen, ChevronLeft, ChevronRight, Edit3, Eye, Pause, Play, RotateCcw, Save, Trash2, X } from "lucide-react"
+import { BookOpen, ChevronLeft, ChevronRight, Edit3, Eye, Maximize2, Minimize2, Pause, Play, RefreshCw, RotateCcw, Save, Trash2, X } from "lucide-react"
 import { useDeleteChapter, useSaveLecture, useTeacherChapters } from "@/api/teacher"
 import { EvidenceSummary } from "@/components/common/EvidenceSummary"
 import { LectureReviewPanel } from "@/components/common/LectureReviewPanel"
@@ -46,6 +46,7 @@ function LecturePage() {
   const [editorMode, setEditorMode] = useState<"edit" | "preview">("edit")
   const [draftContent, setDraftContent] = useState("")
   const [saveMessage, setSaveMessage] = useState("")
+  const [isPresentationFullscreen, setIsPresentationFullscreen] = useState(false)
 
   const { data: chaptersData, isLoading } = useTeacherChapters()
   const saveLecture = useSaveLecture()
@@ -86,6 +87,7 @@ function LecturePage() {
 
   useEffect(() => {
     playback.reset(0)
+    setIsPresentationFullscreen(false)
   }, [selectedChapterId, isEditing, editorMode])
 
   useEffect(() => {
@@ -127,6 +129,15 @@ function LecturePage() {
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [canNavigateSlides, playback, segmentCount])
+
+  useEffect(() => {
+    if (!isPresentationFullscreen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsPresentationFullscreen(false)
+    }
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [isPresentationFullscreen])
 
   const handleStartEdit = () => {
     setDraftContent(selectedChapter?.lecture_content || "")
@@ -291,6 +302,15 @@ function LecturePage() {
                     {playback.isPlaying || playback.isLoadingAudio ? "暂停" : "播放"}
                   </button>
                   <button
+                    onClick={() => setIsPresentationFullscreen(true)}
+                    disabled={!isCoursewareChapter || !coursewareSlides.length}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border hover:bg-accent disabled:opacity-50 transition-colors"
+                    title={isCoursewareChapter && coursewareSlides.length ? "全屏显示当前 TeX 课件页" : "当前课程没有可全屏展示的 TeX 课件页"}
+                  >
+                    <Maximize2 size={14} />
+                    全屏授课
+                  </button>
+                  <button
                     onClick={() => playback.replay(currentSlide)}
                     disabled={!playback.hasSegments}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border hover:bg-accent disabled:opacity-50 transition-colors"
@@ -298,6 +318,15 @@ function LecturePage() {
                   >
                     <RotateCcw size={14} />
                     重播当前页
+                  </button>
+                  <button
+                    onClick={() => playback.regenerate(currentSlide)}
+                    disabled={!playback.hasSegments || playback.isLoadingAudio}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border hover:bg-accent disabled:opacity-50 transition-colors"
+                    title="重新生成当前页语音并覆盖缓存"
+                  >
+                    <RefreshCw size={14} className={playback.isLoadingAudio ? "animate-spin" : ""} />
+                    重新生成语音
                   </button>
                 </>
               )}
@@ -424,6 +453,20 @@ function LecturePage() {
               />
             </div>
           )}
+          {isPresentationFullscreen && currentCoursewareSlide ? (
+            <LectureFullscreenView
+              slide={currentCoursewareSlide}
+              assetMap={selectedChapter.asset_map || selectedChapter.editable_model?.assets || {}}
+              playback={playback}
+              current={currentSlide}
+              total={coursewareSlides.length}
+              onExit={() => setIsPresentationFullscreen(false)}
+              onPrev={() => playback.setCurrentSegment((prev) => prev - 1)}
+              onNext={() => playback.setCurrentSegment((prev) => prev + 1)}
+              onJump={(next) => playback.setCurrentSegment(next)}
+              onRegenerate={() => playback.regenerate(currentSlide)}
+            />
+          ) : null}
         </div>
       )}
     </div>
@@ -510,6 +553,144 @@ function SlideSideNav({ current, total, onPrev, onNext }: { current: number; tot
       >
         <ChevronRight size={24} />
       </button>
+    </div>
+  )
+}
+
+function LectureFullscreenView({
+  slide,
+  assetMap,
+  playback,
+  current,
+  total,
+  onExit,
+  onPrev,
+  onNext,
+  onJump,
+  onRegenerate,
+}: {
+  slide: PptSlideDetail
+  assetMap: Record<string, CoursewareAsset>
+  playback: ReturnType<typeof useLecturePlayback>
+  current: number
+  total: number
+  onExit: () => void
+  onPrev: () => void
+  onNext: () => void
+  onJump: (next: number) => void
+  onRegenerate: () => void
+}) {
+  const images = collectSlideImages(slide, assetMap)
+  const hasVisualContent = Boolean(slide.title || slide.content || slide.raw_text || images.length || slide.tables?.length)
+  const canSeek = Boolean(playback.audioPosition.seekable)
+
+  return (
+    <div className="fixed inset-0 z-[80] flex flex-col bg-slate-950 text-white">
+      <main className="flex min-h-0 flex-1 items-center justify-center p-3 sm:p-5">
+        <div className="relative aspect-video w-[min(100%,calc((100dvh-150px)*16/9))] max-h-[calc(100dvh-150px)] overflow-hidden rounded-sm bg-white text-slate-950 shadow-2xl ring-1 ring-white/15">
+          {hasVisualContent ? (
+            <ReadonlySlideFrame slide={slide} images={images} assetMap={assetMap} />
+          ) : (
+            <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-500">该页暂无可展示内容</div>
+          )}
+        </div>
+      </main>
+
+      <footer className="border-t border-white/10 bg-slate-950/95 px-3 py-3 shadow-2xl sm:px-5">
+        <div className="mx-auto grid max-w-7xl gap-3 lg:grid-cols-[auto_minmax(220px,1fr)_auto_auto_minmax(240px,0.65fr)_auto] lg:items-center">
+          <button
+            type="button"
+            onClick={onPrev}
+            disabled={current === 0}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/8 px-4 text-sm font-medium text-white transition hover:bg-white/15 disabled:opacity-35"
+          >
+            <ChevronLeft size={18} />
+            上一页
+          </button>
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center justify-between gap-3 text-xs text-white/70">
+              <span>第 {current + 1} 页</span>
+              <span>共 {total} 页</span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={Math.max(total, 1)}
+              step={1}
+              value={current + 1}
+              aria-label="全屏课件页面"
+              onChange={(event) => onJump(Number(event.target.value) - 1)}
+              className="h-2 w-full cursor-pointer accent-primary"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={current === total - 1}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-35"
+          >
+            下一页
+            <ChevronRight size={18} />
+          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={playback.toggle}
+              disabled={!playback.hasSegments}
+              className={cn(
+                "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition disabled:opacity-35",
+                playback.isPlaying ? "bg-amber-200 text-slate-950 hover:bg-amber-100" : "bg-white text-slate-950 hover:bg-white/90",
+              )}
+              title={playback.providerLabel}
+            >
+              {playback.isPlaying || playback.isLoadingAudio ? <Pause size={18} /> : <Play size={18} />}
+              {playback.isPlaying || playback.isLoadingAudio ? "暂停" : "播放"}
+            </button>
+            <button
+              type="button"
+              onClick={() => playback.replay(current)}
+              disabled={!playback.hasSegments}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/8 px-4 text-sm font-medium text-white transition hover:bg-white/15 disabled:opacity-35"
+              title={playback.providerLabel}
+            >
+              <RotateCcw size={17} />
+              重播
+            </button>
+            <button
+              type="button"
+              onClick={onRegenerate}
+              disabled={!playback.hasSegments || playback.isLoadingAudio}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/8 px-4 text-sm font-medium text-white transition hover:bg-white/15 disabled:opacity-35"
+              title="重新生成当前页语音并覆盖缓存"
+            >
+              <RefreshCw size={17} className={playback.isLoadingAudio ? "animate-spin" : ""} />
+              重生成
+            </button>
+          </div>
+          <div className="min-w-0 space-y-1">
+            <div className="truncate text-xs text-white/70">{playback.statusText}</div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={0.1}
+              value={playback.audioPosition.percent || 0}
+              disabled={!canSeek}
+              aria-label="全屏语音播放进度"
+              onChange={(event) => playback.seekAudio(Number(event.target.value))}
+              className="h-2 w-full cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-35"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={onExit}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/8 px-4 text-sm font-medium text-white transition hover:bg-white/15"
+          >
+            <Minimize2 size={17} />
+            退出
+          </button>
+        </div>
+      </footer>
     </div>
   )
 }

@@ -12,6 +12,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 import wave
 from dataclasses import dataclass
@@ -1417,15 +1419,31 @@ def get_tts_status() -> dict[str, Any]:
             status["detail"] = "Genie-TTS server proxy URL is not configured."
             return status
         try:
-            import urllib.request
+            def read_server_json(path: str, timeout: float) -> dict[str, Any]:
+                with urllib.request.urlopen(f"{settings.server_url}{path}", timeout=timeout) as response:
+                    return json.loads(response.read().decode("utf-8", errors="replace"))
 
-            with urllib.request.urlopen(f"{settings.server_url}/status", timeout=1.5) as response:
-                payload = json.loads(response.read().decode("utf-8", errors="replace"))
+            try:
+                status["server_health"] = read_server_json("/health", 1.5)
+            except urllib.error.HTTPError as exc:
+                if exc.code != 404:
+                    raise
+                status["server_health"] = {"success": True, "detail": "Proxy has no /health endpoint; fell back to /status."}
+
+            status["server_reachable"] = True
+            try:
+                payload = read_server_json("/status", 3.0)
+            except Exception as status_exc:
+                status["last_error"] = str(status_exc)
+                status["detail"] = "Genie-TTS server proxy is reachable, but its status endpoint failed."
+                return status
+
             status["available"] = bool(payload.get("available", payload.get("success", False)))
             status["server_status"] = payload
-            status["detail"] = "Using external Genie-TTS server proxy."
+            status["detail"] = payload.get("detail") or "Using external Genie-TTS server proxy."
         except Exception as exc:
             status["last_error"] = str(exc)
+            status["server_reachable"] = False
             status["detail"] = "Genie-TTS server proxy is configured but not reachable."
         return status
     if settings.provider == "gpt_sovits_server":

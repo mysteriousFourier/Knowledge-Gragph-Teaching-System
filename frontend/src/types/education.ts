@@ -68,6 +68,7 @@ export interface TtsSynthesizeRequest {
   chapter_id?: string
   segment_id?: string
   content_hash?: string
+  force?: boolean
   speech_cues?: SpeechCue[]
 }
 

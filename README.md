@@ -253,7 +253,7 @@ GitHub Actions 会安装 `requirements/vector-cpu.txt`，并继续排除 `backen
 
 ### 可选本地语音推理
 
-项目预留了 `/api/tts/*` 接口，本地可用 `genie` provider 加载项目内模型。Azure F1 主站不直接加载本地 TTS 权重，但 TTS 功能保持启用，通过 server provider 调用独立推理服务：
+项目预留了 `/api/tts/*` 接口，本地可用 `genie` provider 加载项目内模型。Azure App Service F1 主站不直接加载本地 TTS 权重，`startup.sh` 默认不会假定本机存在 `127.0.0.1:9880` TTS 代理。需要线上语音时，在 App Settings 中显式启用 server provider，并把 URL 指向真实可达的独立推理服务：
 
 ```text
 KGTS_TTS_ENABLED=1
