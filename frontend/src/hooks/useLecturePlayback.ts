@@ -98,6 +98,10 @@ function getProviderLabel(provider: PlaybackProvider) {
   return provider
 }
 
+function shouldUseSingleTtsRequest(provider: PlaybackProvider) {
+  return provider === "azure_speech" || provider === "genie_server" || provider === "gpt_sovits_server"
+}
+
 export function stableTextHash(text: string) {
   let hash = 2166136261
   for (let index = 0; index < text.length; index += 1) {
@@ -282,7 +286,7 @@ export function useLecturePlayback({ segmentCount, initialSegment = 0, getSegmen
     const gestureAudio = primeAudioForUserGesture()
 
     try {
-      const shouldSplit = sourceText.length > LONG_TEXT_THRESHOLD
+      const shouldSplit = sourceText.length > LONG_TEXT_THRESHOLD && !shouldUseSingleTtsRequest(provider)
       const splitResult = shouldSplit
         ? await splitTtsSegments({ text: sourceText, max_chars: TTS_CHUNK_CHARS, speech_cues: speechCues })
         : {

@@ -4,6 +4,7 @@ import { useAuth } from "@/hooks/useAuth"
 import { cn } from "@/lib/utils"
 
 const commandItems = [
+  { to: "/teacher/courses", label: "Courses", icon: BookOpen, role: "teacher" },
   { to: "/teacher/prepare", label: "Prepare", icon: PencilRuler, role: "teacher" },
   { to: "/teacher/lecture", label: "Lecture", icon: FileText, role: "teacher" },
   { to: "/teacher/exercises", label: "Exercises", icon: Brain, role: "teacher" },

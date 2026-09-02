@@ -1038,6 +1038,7 @@ class ChapterStore:
         content: Optional[str] = None,
         graph_data: Optional[Dict[str, Any]] = None,
         chapter_id: Optional[str] = None,
+        course_id: Optional[str] = None,
         source_type: Optional[str] = None,
         source_node_ids: Optional[List[str]] = None,
         source_scope: Optional[Dict[str, Any]] = None,
@@ -1046,6 +1047,9 @@ class ChapterStore:
         tex_content: Optional[str] = None,
         editable_model: Optional[Dict[str, Any]] = None,
         asset_map: Optional[Dict[str, Any]] = None,
+        rendered_pages: Optional[List[Dict[str, Any]]] = None,
+        render_source: Optional[str] = None,
+        render_error: Optional[str] = None,
         ppt_artifact: Optional[Dict[str, Any]] = None,
         ppt_source_node_ids: Optional[List[str]] = None,
         lecture_source_node_ids: Optional[List[str]] = None,
@@ -1070,6 +1074,7 @@ class ChapterStore:
         record.update(
             {
                 "id": resolved_id,
+                "course_id": course_id if course_id is not None else record.get("course_id", ""),
                 "title": title,
                 "content": content if content is not None else record.get("content", ""),
                 "graph_data": graph_data if graph_data is not None else record.get("graph_data"),
@@ -1088,6 +1093,9 @@ class ChapterStore:
                 "tex_content": tex_content if tex_content is not None else record.get("tex_content"),
                 "editable_model": editable_model if editable_model is not None else record.get("editable_model"),
                 "asset_map": asset_map if asset_map is not None else record.get("asset_map"),
+                "rendered_pages": rendered_pages if rendered_pages is not None else record.get("rendered_pages"),
+                "render_source": render_source if render_source is not None else record.get("render_source"),
+                "render_error": render_error if render_error is not None else record.get("render_error"),
                 "ppt_artifact": ppt_artifact if ppt_artifact is not None else record.get("ppt_artifact"),
                 "ppt_source_node_ids": ppt_source_node_ids if ppt_source_node_ids is not None else record.get("ppt_source_node_ids"),
                 "lecture_source_node_ids": lecture_source_node_ids if lecture_source_node_ids is not None else record.get("lecture_source_node_ids"),
@@ -1114,6 +1122,7 @@ class ChapterStore:
         self,
         *,
         chapter_id: str,
+        course_id: Optional[str] = None,
         lecture_content: str,
         graph_data: Optional[Dict[str, Any]] = None,
         source_type: Optional[str] = None,
@@ -1124,6 +1133,9 @@ class ChapterStore:
         tex_content: Optional[str] = None,
         editable_model: Optional[Dict[str, Any]] = None,
         asset_map: Optional[Dict[str, Any]] = None,
+        rendered_pages: Optional[List[Dict[str, Any]]] = None,
+        render_source: Optional[str] = None,
+        render_error: Optional[str] = None,
         ppt_artifact: Optional[Dict[str, Any]] = None,
         ppt_source_node_ids: Optional[List[str]] = None,
         lecture_source_node_ids: Optional[List[str]] = None,
@@ -1143,6 +1155,8 @@ class ChapterStore:
         resolved_id = canonical_chapter_id(resolved_id, chapter.get("title")) or resolved_id
         previous_lecture_content = chapter.get("lecture_content")
         chapter["lecture_content"] = lecture_content
+        if course_id is not None:
+            chapter["course_id"] = course_id
         chapter["updated_at"] = _now()
         if lecture_content != previous_lecture_content:
             _clear_tts_course_audio(resolved_id)
@@ -1166,6 +1180,12 @@ class ChapterStore:
             chapter["editable_model"] = editable_model
         if asset_map is not None:
             chapter["asset_map"] = asset_map
+        if rendered_pages is not None:
+            chapter["rendered_pages"] = rendered_pages
+        if render_source is not None:
+            chapter["render_source"] = render_source
+        if render_error is not None:
+            chapter["render_error"] = render_error
         if ppt_artifact is not None:
             chapter["ppt_artifact"] = ppt_artifact
         if ppt_source_node_ids is not None:
@@ -1187,6 +1207,7 @@ class ChapterStore:
             content=chapter.get("content", ""),
             graph_data=chapter.get("graph_data"),
             chapter_id=resolved_id,
+            course_id=chapter.get("course_id"),
             source_type=chapter.get("source_type"),
             source_node_ids=chapter.get("source_node_ids"),
             source_scope=chapter.get("source_scope"),
@@ -1195,6 +1216,9 @@ class ChapterStore:
             tex_content=chapter.get("tex_content"),
             editable_model=chapter.get("editable_model"),
             asset_map=chapter.get("asset_map"),
+            rendered_pages=chapter.get("rendered_pages"),
+            render_source=chapter.get("render_source"),
+            render_error=chapter.get("render_error"),
             ppt_artifact=chapter.get("ppt_artifact"),
             ppt_source_node_ids=chapter.get("ppt_source_node_ids"),
             lecture_source_node_ids=chapter.get("lecture_source_node_ids"),
@@ -1218,6 +1242,9 @@ class ChapterStore:
         saved["tex_content"] = chapter.get("tex_content", saved.get("tex_content"))
         saved["editable_model"] = chapter.get("editable_model", saved.get("editable_model"))
         saved["asset_map"] = chapter.get("asset_map", saved.get("asset_map"))
+        saved["rendered_pages"] = chapter.get("rendered_pages", saved.get("rendered_pages"))
+        saved["render_source"] = chapter.get("render_source", saved.get("render_source"))
+        saved["render_error"] = chapter.get("render_error", saved.get("render_error"))
         saved["ppt_artifact"] = chapter.get("ppt_artifact", saved.get("ppt_artifact"))
         saved["ppt_source_node_ids"] = chapter.get("ppt_source_node_ids", saved.get("ppt_source_node_ids"))
         saved["lecture_source_node_ids"] = chapter.get("lecture_source_node_ids", saved.get("lecture_source_node_ids"))
@@ -1413,9 +1440,10 @@ class ChapterStore:
         self._save_chapters(chapters)
         return chapter
 
-    def list_chapters(self) -> List[Dict[str, Any]]:
+    def list_chapters(self, course_id: Optional[str] = None) -> List[Dict[str, Any]]:
         chapters = self._load_chapters()
         deleted = self._load_deleted_chapter_ids()
+        course_filter = str(course_id).strip() if course_id is not None else ""
         merged_chapters: Dict[str, Dict[str, Any]] = {}
         changed = False
         for key, chapter in chapters.items():
@@ -1432,6 +1460,15 @@ class ChapterStore:
             current = merged_chapters.get(resolved_id)
             if current is None or _chapter_detail_score(record) > _chapter_detail_score(current):
                 merged_chapters[resolved_id] = record
+        if course_filter:
+            records = [
+                record
+                for record in merged_chapters.values()
+                if str(record.get("course_id") or "").strip() == course_filter
+            ]
+            records = _dedupe_chapters(records)
+            records.sort(key=_chapter_sort_value, reverse=True)
+            return records
         try:
             graph = build_frontend_graph()
         except Exception:

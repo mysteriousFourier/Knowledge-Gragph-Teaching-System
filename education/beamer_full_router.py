@@ -2082,6 +2082,11 @@ def _materialize_latex_assets(temp_dir: Path, latex: str, asset_urls: dict[str, 
     lookup = {str(key).replace("\\", "/").lower(): str(value) for key, value in (asset_urls or {}).items()}
     for target in _latex_graphic_targets(latex):
         normalized = target.lstrip("./")
+        output_path = (temp_dir / normalized).resolve()
+        try:
+            output_path.relative_to(temp_dir.resolve())
+        except ValueError:
+            continue
         candidates = [
             normalized,
             Path(normalized).name,
@@ -2092,13 +2097,15 @@ def _materialize_latex_assets(temp_dir: Path, latex: str, asset_urls: dict[str, 
             source_value = lookup.get(candidate.lower(), "")
             if source_value:
                 break
+        if source_value.startswith("data:") and "," in source_value:
+            try:
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(base64.b64decode(source_value.split(",", 1)[1], validate=False))
+            except Exception:
+                pass
+            continue
         source_path = _resolve_uploaded_asset_path(source_value) if source_value else _resolve_uploaded_asset_path(normalized)
         if not source_path:
-            continue
-        output_path = (temp_dir / normalized).resolve()
-        try:
-            output_path.relative_to(temp_dir.resolve())
-        except ValueError:
             continue
         output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source_path, output_path)
@@ -2109,11 +2116,12 @@ def _compile_latex_to_pdf_bytes(latex: str, asset_urls: dict[str, str] | None = 
     if not compiler:
         raise RuntimeError("当前服务器未安装 xelatex / pdflatex / tectonic，不能直接把 .tex 编译成高保真页面。请先安装 TeX Live/MiKTeX，或在此处导入对应 PDF。")
 
+    latex = _sanitize_unsafe_title_assets(latex or "")
     with tempfile.TemporaryDirectory(prefix="kg-beamer-render-") as temp_name:
         temp_dir = Path(temp_name)
         tex_path = temp_dir / "main.tex"
-        tex_path.write_text(latex or "", encoding="utf-8")
-        _materialize_latex_assets(temp_dir, latex or "", asset_urls)
+        tex_path.write_text(latex, encoding="utf-8")
+        _materialize_latex_assets(temp_dir, latex, asset_urls)
         last_output = ""
         for _ in range(2):
             proc = subprocess.run(
@@ -2450,6 +2458,8 @@ def _safe_title_background_template() -> str:
         "\\usebackgroundtemplate{%\n"
         "  \\begin{tikzpicture}[remember picture, overlay]\n"
         "    \\fill[gray!12] (current page.south west) rectangle (current page.north east);\n"
+        "    \\node[anchor=south west, inner sep=0pt] at (current page.south west) "
+        "{\\includegraphics[width=\\paperwidth]{fig/图片3.png}};\n"
         "  \\end{tikzpicture}%\n"
         "}"
     )
@@ -2486,9 +2496,10 @@ def _sanitize_unsafe_title_assets(latex: str) -> str:
         text,
     )
     text = re.sub(
-        r"\\setbeamertemplate\{footline\}\{[\s\S]*?fig/图片3\.png[\s\S]*?\n\}",
+        r"\\setbeamertemplate\{footline\}\{(?:(?!\\setbeamertemplate\{footline\}).)*?fig/图片3\.png(?:(?!\\setbeamertemplate\{footline\}).)*?\n\}",
         lambda _match: _safe_title_background_template(),
         text,
+        flags=re.S,
     )
     return text
 

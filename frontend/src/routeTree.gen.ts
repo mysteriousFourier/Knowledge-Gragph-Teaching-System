@@ -18,6 +18,7 @@ import { Route as TeacherPrepareRouteImport } from './routes/teacher/prepare'
 import { Route as TeacherPptRouteImport } from './routes/teacher/ppt'
 import { Route as TeacherLectureRouteImport } from './routes/teacher/lecture'
 import { Route as TeacherExercisesRouteImport } from './routes/teacher/exercises'
+import { Route as TeacherCoursesRouteImport } from './routes/teacher/courses'
 import { Route as StudentReviewRouteImport } from './routes/student/review'
 import { Route as StudentPracticeRouteImport } from './routes/student/practice'
 import { Route as StudentLearnRouteImport } from './routes/student/learn'
@@ -68,6 +69,11 @@ const TeacherExercisesRoute = TeacherExercisesRouteImport.update({
   path: '/teacher/exercises',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TeacherCoursesRoute = TeacherCoursesRouteImport.update({
+  id: '/teacher/courses',
+  path: '/teacher/courses',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StudentReviewRoute = StudentReviewRouteImport.update({
   id: '/student/review',
   path: '/student/review',
@@ -96,6 +102,7 @@ export interface FileRoutesByFullPath {
   '/student/learn': typeof StudentLearnRoute
   '/student/practice': typeof StudentPracticeRoute
   '/student/review': typeof StudentReviewRoute
+  '/teacher/courses': typeof TeacherCoursesRoute
   '/teacher/exercises': typeof TeacherExercisesRoute
   '/teacher/lecture': typeof TeacherLectureRoute
   '/teacher/ppt': typeof TeacherPptRoute
@@ -111,6 +118,7 @@ export interface FileRoutesByTo {
   '/student/learn': typeof StudentLearnRoute
   '/student/practice': typeof StudentPracticeRoute
   '/student/review': typeof StudentReviewRoute
+  '/teacher/courses': typeof TeacherCoursesRoute
   '/teacher/exercises': typeof TeacherExercisesRoute
   '/teacher/lecture': typeof TeacherLectureRoute
   '/teacher/ppt': typeof TeacherPptRoute
@@ -127,6 +135,7 @@ export interface FileRoutesById {
   '/student/learn': typeof StudentLearnRoute
   '/student/practice': typeof StudentPracticeRoute
   '/student/review': typeof StudentReviewRoute
+  '/teacher/courses': typeof TeacherCoursesRoute
   '/teacher/exercises': typeof TeacherExercisesRoute
   '/teacher/lecture': typeof TeacherLectureRoute
   '/teacher/ppt': typeof TeacherPptRoute
@@ -144,6 +153,7 @@ export interface FileRouteTypes {
     | '/student/learn'
     | '/student/practice'
     | '/student/review'
+    | '/teacher/courses'
     | '/teacher/exercises'
     | '/teacher/lecture'
     | '/teacher/ppt'
@@ -159,6 +169,7 @@ export interface FileRouteTypes {
     | '/student/learn'
     | '/student/practice'
     | '/student/review'
+    | '/teacher/courses'
     | '/teacher/exercises'
     | '/teacher/lecture'
     | '/teacher/ppt'
@@ -174,6 +185,7 @@ export interface FileRouteTypes {
     | '/student/learn'
     | '/student/practice'
     | '/student/review'
+    | '/teacher/courses'
     | '/teacher/exercises'
     | '/teacher/lecture'
     | '/teacher/ppt'
@@ -190,6 +202,7 @@ export interface RootRouteChildren {
   StudentLearnRoute: typeof StudentLearnRoute
   StudentPracticeRoute: typeof StudentPracticeRoute
   StudentReviewRoute: typeof StudentReviewRoute
+  TeacherCoursesRoute: typeof TeacherCoursesRoute
   TeacherExercisesRoute: typeof TeacherExercisesRoute
   TeacherLectureRoute: typeof TeacherLectureRoute
   TeacherPptRoute: typeof TeacherPptRoute
@@ -264,6 +277,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TeacherExercisesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/teacher/courses': {
+      id: '/teacher/courses'
+      path: '/teacher/courses'
+      fullPath: '/teacher/courses'
+      preLoaderRoute: typeof TeacherCoursesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/student/review': {
       id: '/student/review'
       path: '/student/review'
@@ -302,6 +322,7 @@ const rootRouteChildren: RootRouteChildren = {
   StudentLearnRoute: StudentLearnRoute,
   StudentPracticeRoute: StudentPracticeRoute,
   StudentReviewRoute: StudentReviewRoute,
+  TeacherCoursesRoute: TeacherCoursesRoute,
   TeacherExercisesRoute: TeacherExercisesRoute,
   TeacherLectureRoute: TeacherLectureRoute,
   TeacherPptRoute: TeacherPptRoute,

@@ -12,7 +12,7 @@ export function RichTextContent({ content, inline = false, className = "" }: Ric
   }
 
   if (inline) {
-    return <MarkdownRenderer content={content.replace(/\s+/g, " ").trim()} className={className} inline />
+    return <MarkdownRenderer content={content.trim()} className={className} inline />
   }
 
   return <MarkdownRenderer content={content} className={className} />

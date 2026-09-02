@@ -44,19 +44,27 @@ export const useTeacherLogin = () => {
   })
 }
 
-export const useTeacherChapters = () => {
+export const useTeacherChapters = (courseId?: string) => {
+  const normalizedCourseId = courseId?.trim() || ""
   return useQuery({
-    queryKey: ["teacher-chapters"],
-    queryFn: () => educationClient.get<{ success: boolean; chapters: Chapter[] }>("/api/education/list-chapters").then((r) => r.data),
+    queryKey: normalizedCourseId ? ["teacher-chapters", normalizedCourseId] : ["teacher-chapters"],
+    queryFn: () => {
+      const query = normalizedCourseId ? "?course_id=" + encodeURIComponent(normalizedCourseId) : ""
+      return educationClient
+        .get<{ success: boolean; chapters: Chapter[] }>("/api/education/list-chapters" + query)
+        .then((r) => r.data)
+    },
   })
 }
 
-export const useTeacherChapter = (chapterId: string) => {
+export const useTeacherChapter = (chapterId: string, includeAssets = false) => {
   return useQuery({
-    queryKey: ["teacher-chapter", chapterId],
+    queryKey: ["teacher-chapter", chapterId, includeAssets ? "assets" : "compact"],
     queryFn: () =>
       educationClient
-        .get<{ success: boolean; chapter?: Chapter; error?: string }>(`/api/education/get-chapter?chapter_id=${encodeURIComponent(chapterId)}`)
+        .get<{ success: boolean; chapter?: Chapter; error?: string }>(
+          `/api/education/get-chapter?chapter_id=${encodeURIComponent(chapterId)}${includeAssets ? "&include_assets=1" : ""}`,
+        )
         .then((r) => r.data),
     enabled: Boolean(chapterId),
   })

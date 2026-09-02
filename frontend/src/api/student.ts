@@ -85,6 +85,17 @@ export const useStudentChapters = () => {
   })
 }
 
+export const useStudentChapter = (chapterId: string) => {
+  return useQuery({
+    queryKey: ["student-chapter", chapterId],
+    queryFn: () =>
+      educationClient
+        .get<{ success: boolean; chapter?: Chapter; error?: string }>(`/api/education/get-chapter?chapter_id=${encodeURIComponent(chapterId)}`)
+        .then((r) => r.data),
+    enabled: Boolean(chapterId),
+  })
+}
+
 export const useStudentExercises = (chapterId: string, session = 0) => {
   return useQuery({
     queryKey: ["student-exercises", chapterId, session],

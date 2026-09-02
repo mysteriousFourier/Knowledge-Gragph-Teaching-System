@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { BookOpen, ChevronLeft, ChevronRight, Edit3, Eye, Maximize2, Minimize2, Pause, Play, RefreshCw, RotateCcw, Save, Trash2, X } from "lucide-react"
-import { useDeleteChapter, useSaveLecture, useTeacherChapters } from "@/api/teacher"
+import { useDeleteChapter, useSaveLecture, useTeacherChapter, useTeacherChapters } from "@/api/teacher"
 import { EvidenceSummary } from "@/components/common/EvidenceSummary"
 import { LectureReviewPanel } from "@/components/common/LectureReviewPanel"
 import { EmptyState } from "@/components/common/EmptyState"
@@ -18,6 +18,7 @@ export const Route = createFileRoute("/teacher/lecture")({
   component: LecturePage,
   validateSearch: (search: Record<string, unknown>) => ({
     chapterId: typeof search.chapterId === "string" ? search.chapterId : "",
+    courseId: typeof search.courseId === "string" && search.courseId ? search.courseId : undefined,
   }),
 })
 
@@ -39,7 +40,7 @@ const CANVAS_WIDTH = 1000
 const CANVAS_HEIGHT = 562.5
 
 function LecturePage() {
-  const { chapterId } = Route.useSearch()
+  const { chapterId, courseId } = Route.useSearch()
   const queryClient = useQueryClient()
   const [selectedChapterId, setSelectedChapterId] = useState("")
   const [isEditing, setIsEditing] = useState(false)
@@ -48,11 +49,13 @@ function LecturePage() {
   const [saveMessage, setSaveMessage] = useState("")
   const [isPresentationFullscreen, setIsPresentationFullscreen] = useState(false)
 
-  const { data: chaptersData, isLoading } = useTeacherChapters()
+  const { data: chaptersData, isLoading } = useTeacherChapters(courseId)
+  const { data: selectedChapterData } = useTeacherChapter(selectedChapterId)
   const saveLecture = useSaveLecture()
   const deleteChapter = useDeleteChapter()
   const chapters = chaptersData?.chapters || []
-  const selectedChapter = chapters.find((chapter) => chapter.id === selectedChapterId)
+  const selectedChapterSummary = chapters.find((chapter) => chapter.id === selectedChapterId)
+  const selectedChapter = selectedChapterData?.chapter || selectedChapterSummary
   const slideLectures = selectedChapter?.slide_lectures || []
   const lectureContent = isEditing ? draftContent : selectedChapter?.lecture_content || ""
   const coursewareSlides = useMemo(() => buildLectureSlides(selectedChapter), [selectedChapter])
@@ -93,7 +96,7 @@ function LecturePage() {
   useEffect(() => {
     if (!chapters.length || selectedChapterId) return
     const fromSearch = chapterId ? chapters.find((chapter) => chapter.id === chapterId) : undefined
-    const withLecture = chapters.find((chapter) => !!chapter.lecture_content)
+    const withLecture = chapters.find((chapter) => chapter.has_lecture_content || !!chapter.lecture_content)
     setSelectedChapterId((fromSearch || withLecture || chapters[0]).id)
   }, [chapterId, chapters, selectedChapterId])
 
@@ -159,6 +162,7 @@ function LecturePage() {
     if (!selectedChapter) return
     const result = await saveLecture.mutateAsync({
       chapter_id: selectedChapter.id,
+      course_id: courseId || selectedChapter.course_id,
       lecture_content: draftContent,
       learning_plan: selectedChapter.lecture_learning_plan,
     })
@@ -583,11 +587,18 @@ function LectureFullscreenView({
   const images = collectSlideImages(slide, assetMap)
   const hasVisualContent = Boolean(slide.title || slide.content || slide.raw_text || images.length || slide.tables?.length)
   const canSeek = Boolean(playback.audioPosition.seekable)
+  const pageAspect = renderedPageAspectNumber(slide.rendered_page)
 
   return (
     <div className="fixed inset-0 z-[80] flex flex-col bg-slate-950 text-white">
       <main className="flex min-h-0 flex-1 items-center justify-center p-3 sm:p-5">
-        <div className="relative aspect-video w-[min(100%,calc((100dvh-150px)*16/9))] max-h-[calc(100dvh-150px)] overflow-hidden rounded-sm bg-white text-slate-950 shadow-2xl ring-1 ring-white/15">
+        <div
+          className="relative max-h-[calc(100dvh-150px)] overflow-hidden rounded-sm bg-white text-slate-950 shadow-2xl ring-1 ring-white/15"
+          style={{
+            aspectRatio: renderedPageAspectRatio(slide.rendered_page),
+            width: `min(100%, calc((100dvh - 150px) * ${pageAspect}))`,
+          }}
+        >
           {hasVisualContent ? (
             <ReadonlySlideFrame slide={slide} images={images} assetMap={assetMap} />
           ) : (
@@ -719,7 +730,8 @@ function PptSlidePreview({
           role={onNext ? "button" : undefined}
           tabIndex={onNext ? 0 : undefined}
           onClick={onNext}
-          className="relative block aspect-video w-full overflow-hidden rounded-lg border bg-white text-left text-slate-950 shadow-sm transition hover:border-primary/70 focus:outline-none focus:ring-2 focus:ring-primary/30"
+          className="relative block w-full overflow-hidden rounded-lg border bg-white text-left text-slate-950 shadow-sm transition hover:border-primary/70 focus:outline-none focus:ring-2 focus:ring-primary/30"
+          style={{ aspectRatio: renderedPageAspectRatio(slide.rendered_page) }}
           title="点击课件区域进入下一页"
         >
           {hasVisualContent ? (
@@ -743,6 +755,9 @@ function PptSlidePreview({
 }
 
 function ReadonlySlideFrame({ slide, images, assetMap }: { slide: PptSlideDetail; images: SlideImage[]; assetMap: Record<string, CoursewareAsset> }) {
+  if (slide.rendered_page?.image) {
+    return <CompiledSlideFrame slide={slide} />
+  }
   if (slide.layout?.canvas?.items?.length) {
     return <CanvasSlidePreview slide={slide} images={images} assetMap={assetMap} />
   }
@@ -759,6 +774,31 @@ function ReadonlySlideFrame({ slide, images, assetMap }: { slide: PptSlideDetail
     return <ImageTextSlidePreview slide={slide} images={images} />
   }
   return <DefaultSlidePreview slide={slide} images={images} />
+}
+
+function CompiledSlideFrame({ slide }: { slide: PptSlideDetail }) {
+  return (
+    <div className="h-full w-full bg-white">
+      <img
+        src={slide.rendered_page?.image || ""}
+        alt={slide.title || `PDF rendered slide ${slide.index}`}
+        className="h-full w-full object-contain"
+        draggable={false}
+      />
+    </div>
+  )
+}
+
+function renderedPageAspectRatio(page: PptSlideDetail["rendered_page"]) {
+  const width = Number(page?.width)
+  const height = Number(page?.height)
+  return width > 0 && height > 0 ? `${width} / ${height}` : "16 / 9"
+}
+
+function renderedPageAspectNumber(page: PptSlideDetail["rendered_page"]) {
+  const width = Number(page?.width)
+  const height = Number(page?.height)
+  return width > 0 && height > 0 ? width / height : 16 / 9
 }
 
 function TitleSlidePreview({ slide, images }: { slide: PptSlideDetail; images: SlideImage[] }) {
@@ -1073,14 +1113,28 @@ function PptSlideImages({ slide }: { slide: PptSlideDetail }) {
 
 function buildLectureSlides(chapter?: Chapter): PptSlideDetail[] {
   if (!chapter) return []
-  if (chapter.ppt_slides?.length) return chapter.ppt_slides
+  if (chapter.ppt_slides?.length) return attachRenderedPagesToSlides(chapter.ppt_slides, chapter.rendered_pages)
   const editableSlides = chapter.editable_model?.slides || []
   if (editableSlides.length) {
     const assetMap = { ...(chapter.asset_map || {}), ...(chapter.editable_model?.assets || {}) }
-    return editableSlides.map((slide, index) => slideFromEditableSlide(slide, index + 1, assetMap))
+    return attachRenderedPagesToSlides(
+      editableSlides.map((slide, index) => slideFromEditableSlide(slide, index + 1, assetMap)),
+      chapter.rendered_pages,
+    )
   }
-  if (chapter.tex_content?.trim()) return parseTexSlides(chapter.tex_content)
+  if (chapter.tex_content?.trim()) return attachRenderedPagesToSlides(parseTexSlides(chapter.tex_content), chapter.rendered_pages)
   return []
+}
+
+function attachRenderedPagesToSlides(
+  slides: PptSlideDetail[],
+  renderedPages: NonNullable<Chapter["rendered_pages"]> | undefined,
+): PptSlideDetail[] {
+  if (!renderedPages?.length) return slides
+  return slides.map((slide, index) => ({
+    ...slide,
+    rendered_page: slide.rendered_page || renderedPages.find((page) => page.page_index === slide.index - 1) || renderedPages[index],
+  }))
 }
 
 function slideFromEditableSlide(
@@ -1241,7 +1295,7 @@ function parseTexSlides(texContent: string): PptSlideDetail[] {
   const source = texContent.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
   const frames = Array.from(source.matchAll(/\\begin\{frame\}([\s\S]*?)\\end\{frame\}/g))
   if (!frames.length) {
-    const readable = texToReadableMarkdown(source)
+    const readable = texToReadableMarkdownOverleaf(source)
     return readable ? [{ index: 1, title: "TeX 课件", content: readable, raw_text: readable, source_tex: source }] : []
   }
   return frames.map((match, index) => {
@@ -1251,7 +1305,7 @@ function parseTexSlides(texContent: string): PptSlideDetail[] {
     const bodyWithoutTitle = removeFrameTitle(body)
     const images = extractTexImages(bodyWithoutTitle)
     const layout = inferTexFrameLayout(bodyWithoutTitle, images)
-    const content = texToReadableMarkdown(bodyWithoutTitle)
+    const content = texToReadableMarkdownOverleaf(bodyWithoutTitle)
     return {
       index: index + 1,
       title,
@@ -1303,7 +1357,7 @@ function extractTexWidthRatio(options: string, command: string) {
 function inferTexFrameLayout(body: string, images: SlideImage[]): PptSlideDetail["layout"] {
   const columns = extractTexColumns(body)
   const contentWithoutColumns = removeTexColumnsBlocks(body)
-  const outsideContent = columns.length ? texToReadableMarkdown(contentWithoutColumns) : ""
+  const outsideContent = columns.length ? texToReadableMarkdownOverleaf(contentWithoutColumns) : ""
   if (columns.length > 1) {
     return {
       mode: "columns",
@@ -1314,7 +1368,7 @@ function inferTexFrameLayout(body: string, images: SlideImage[]): PptSlideDetail
       image_count: images.length,
     }
   }
-  const contentWithoutImages = texToReadableMarkdown(stripTexImages(body))
+  const contentWithoutImages = texToReadableMarkdownOverleaf(stripTexImages(body))
   const imageFirst = firstTexImageComesBeforeText(body)
   const imageOnly = images.length > 0 && !contentWithoutImages.trim()
   if (/\\titlepage\b/.test(body)) {
@@ -1345,7 +1399,7 @@ function extractTexColumns(body: string): SlideLayoutColumn[] {
     const columnImages = extractTexImages(columnSource)
     columns.push({
       width_ratio: parseColumnWidthRatio(match[1]),
-      content: texToReadableMarkdown(stripTexImages(columnSource)),
+      content: texToReadableMarkdownOverleaf(stripTexImages(columnSource)),
       images: columnImages,
       image_count: columnImages.length,
       image_first: firstTexImageComesBeforeText(columnSource),
@@ -1372,7 +1426,7 @@ function stripTexImages(value: string) {
 function firstTexImageComesBeforeText(value: string) {
   const imageIndex = value.search(/\\(?:includegraphics|safecontentimage|safeverticalimage|safelogoimage)(?:\[[^\]]*\])?\{[^}]+\}/)
   if (imageIndex < 0) return false
-  const before = texToReadableMarkdown(stripTexImages(value.slice(0, imageIndex))).trim()
+  const before = texToReadableMarkdownOverleaf(stripTexImages(value.slice(0, imageIndex))).trim()
   return !before
 }
 
@@ -1388,6 +1442,71 @@ function removeFrameTitle(value: string) {
   return value
     .replace(/^\s*(?:<[^>]*>|\[[^\]]*\])*\s*\{[^{}]*\}/, "")
     .replace(/\\frametitle(?:\s*(?:<[^>]*>|\[[^\]]*\]))*\s*\{[^{}]*\}/g, "")
+}
+
+function texToReadableMarkdownOverleaf(value: string) {
+  const mathBlocks: string[] = []
+  const storeMath = (formula: string, display = true) => {
+    const marker = `@@KGTS_MATH_${mathBlocks.length}@@`
+    mathBlocks.push(display ? `\n\n$$\n${normalizePreviewFormula(formula)}\n$$\n\n` : `$${formula.trim()}$`)
+    return marker
+  }
+
+  const cleaned = value
+    .replace(/%.*$/gm, "")
+    .replace(/\\begin\{(equation|align|alignat|aligned|alignedat|flalign|gather|gathered|multline|split|cases|matrix|pmatrix|bmatrix|vmatrix|Vmatrix)\*?\}((?:\s*(?:\[[^\]]*\]|\{[^{}]*\}))*)([\s\S]*?)\\end\{\1\*?\}/g, (_match, env, args, formula) => {
+      return storeMath(normalizePreviewEnvironment(String(env), String(args || ""), String(formula || "")))
+    })
+    .replace(/\\\[((?:.|\n)*?)\\\]/g, (_match, formula) => storeMath(String(formula)))
+    .replace(/\$\$([\s\S]*?)\$\$/g, (_match, formula) => storeMath(String(formula)))
+    .replace(/\\\(((?:.|\n)*?)\\\)/g, (_match, formula) => storeMath(String(formula), false))
+    .replace(/\\begin\{(?:itemize|enumerate)\}/g, "\n")
+    .replace(/\\end\{(?:itemize|enumerate)\}/g, "\n")
+    .replace(/\\item(?:<[^>]*>)?(?:\[[^\]]*\])?/g, "\n- ")
+    .replace(/\\(?:includegraphics|safecontentimage|safeverticalimage|safelogoimage)(?:\[[^\]]*\])?\{([^}]+)\}/g, "\n\n[图：$1]\n\n")
+    .replace(/\\(?:begin|end)\{(?:center|columns|column|minipage|block|alertblock|exampleblock|tikzpicture|picture|scope)\}(?:\[[^\]]*\])?(?:\{[^{}]*\})*/g, "\n")
+    .replace(/\\(?:textcolor|colorbox|href|parbox|makebox)(?:\[[^\]]*\])?\{[^{}]*\}\{([^{}]*)\}/g, "$1")
+    .replace(/\\(?:textbf|textit|emph|alert|underline)\{([^{}]*)\}/g, "$1")
+    .replace(/\\(?:small|footnotesize|scriptsize|tiny|normalsize|large|Large|LARGE|huge|Huge|centering|raggedright|raggedleft|pause|vfill|hfill|noindent)\b/g, "")
+    .replace(/\\(?:vspace|hspace)(?:\*)?(?:\[[^\]]*\])?\{[^{}]*\}/g, " ")
+    .replace(/\\[a-zA-Z]+\*?(?:<[^>]*>)?(?:\[[^\]]*\])?(?:\{([^{}]*)\})?/g, (_match, inner) => inner || "")
+    .replace(/[{}]/g, "")
+    .split("\n")
+    .map((line) => cleanTexInline(line).trim())
+    .filter(Boolean)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+
+  return cleaned.replace(/@@KGTS_MATH_(\d+)@@/g, (_match, index) => mathBlocks[Number(index)] || "").replace(/\n{3,}/g, "\n\n").trim()
+}
+
+function normalizePreviewEnvironment(env: string, args: string, body: string) {
+  const normalizedEnv = env.replace(/\*$/, "")
+  const trimmedBody = body.trim()
+  switch (normalizedEnv) {
+    case "equation":
+      return trimmedBody
+    case "align":
+    case "flalign":
+    case "split":
+      return `\\begin{aligned}\n${trimmedBody}\n\\end{aligned}`
+    case "alignat":
+      return `\\begin{alignedat}${args || "{2}"}\n${trimmedBody}\n\\end{alignedat}`
+    case "gather":
+    case "multline":
+      return `\\begin{gathered}\n${trimmedBody}\n\\end{gathered}`
+    default:
+      return `\\begin{${normalizedEnv}}${args || ""}\n${trimmedBody}\n\\end{${normalizedEnv}}`
+  }
+}
+
+function normalizePreviewFormula(value: string) {
+  return value
+    .replace(/\\notag\b/g, "")
+    .replace(/\\nonumber\b/g, "")
+    .replace(/\\\\\s*\[[^\]]*\]/g, "\\\\")
+    .trim()
 }
 
 function texToReadableMarkdown(value: string) {

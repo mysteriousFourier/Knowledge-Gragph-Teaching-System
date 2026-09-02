@@ -1,4 +1,4 @@
-﻿import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
@@ -88,6 +88,7 @@ export const Route = createFileRoute("/teacher/prepare")({
   validateSearch: (search: Record<string, unknown>) => ({
     chapterId: typeof search.chapterId === "string" ? search.chapterId : "",
     nodeId: typeof search.nodeId === "string" ? search.nodeId : "",
+    courseId: typeof search.courseId === "string" ? search.courseId : "",
   }),
 })
 
@@ -368,6 +369,21 @@ function coursewareProjectToPreview(project: CoursewareProject): PptPreviewRespo
     asset_map: project.asset_map || editableModel?.assets || {},
     layout: editableModel?.layout,
     source_tex: texContent,
+    rendered_pages: project.rendered_pages,
+    render_source: project.render_source,
+    render_error: project.render_error,
+  }
+}
+
+function attachRenderedPagesToPreview(result: PptPreviewResponse): PptPreviewResponse {
+  const renderedPages = result.rendered_pages || []
+  if (!renderedPages.length) return result
+  return {
+    ...result,
+    slides: result.slides.map((slide, index) => ({
+      ...slide,
+      rendered_page: renderedPages.find((page) => page.page_index === slide.index - 1) || renderedPages[index],
+    })),
   }
 }
 
@@ -381,6 +397,9 @@ function chapterToCoursewareProject(chapter: Chapter): CoursewareProject | null 
     asset_map: chapter.asset_map,
     slides,
     tex_content: chapter.tex_content,
+    rendered_pages: chapter.rendered_pages,
+    render_source: chapter.render_source,
+    render_error: chapter.render_error,
     ppt_artifact: chapter.ppt_artifact,
     source_node_ids: chapter.source_node_ids,
     created_at: typeof chapter.created_at === "number" ? String(chapter.created_at) : chapter.created_at,
@@ -1269,7 +1288,7 @@ function collectSlideImages(slide: PptSlideDetail) {
 }
 
 function TeacherPreparePage() {
-  const { chapterId, nodeId } = Route.useSearch()
+  const { chapterId, nodeId, courseId } = Route.useSearch()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [mode, setMode] = useState<GenerationMode>("graph")
@@ -1322,9 +1341,9 @@ function TeacherPreparePage() {
   const deleteCoursewareProject = useDeleteCoursewareProject()
   const saveChapter = useSaveChapter()
   const saveLecture = useSaveLecture()
-  const savedCoursewareProject = useCoursewareProject(chapterId.startsWith("cw_") ? chapterId : "")
-  const { data: coursewareProjectsData, isLoading: coursewareProjectsLoading } = useCoursewareProjects()
-  const savedTeacherChapter = useTeacherChapter(chapterId && !chapterId.startsWith("cw_") ? chapterId : "")
+  const savedCoursewareProject = useCoursewareProject(chapterId.startsWith("cw_") ? chapterId : "", courseId)
+  const { data: coursewareProjectsData, isLoading: coursewareProjectsLoading } = useCoursewareProjects(courseId)
+  const savedTeacherChapter = useTeacherChapter(chapterId && !chapterId.startsWith("cw_") ? chapterId : "", true)
   const allCoursewareProjects = coursewareProjectsData?.projects || []
   const coursewareProjects = useMemo(() => {
     const latestByKey = new Map<string, CoursewareProject>()
@@ -1699,7 +1718,7 @@ function TeacherPreparePage() {
 
   const applyPreviewResult = (result: PptPreviewResponse, fallbackTitle?: string) => {
     const editable = normalizeEditableModelLayout(result.editable_model || null)
-    setPreview(result)
+    setPreview(attachRenderedPagesToPreview(result))
     setEditableModel(editable)
     setAssetMap(result.asset_map || editable?.assets || {})
     resetTexState(result.tex_content || result.source_tex || "")
@@ -1767,6 +1786,9 @@ function TeacherPreparePage() {
       tex_content: texContent || existingChapter.tex_content,
       editable_model: currentEditableModelForSave(title) || existingChapter.editable_model,
       asset_map: Object.keys(mergedAssetMap).length ? mergedAssetMap : existingChapter.asset_map,
+      rendered_pages: preview.rendered_pages || existingChapter.rendered_pages,
+      render_source: preview.render_source || existingChapter.render_source,
+      render_error: preview.render_error ?? existingChapter.render_error,
       ppt_artifact: pptArtifact || existingChapter.ppt_artifact,
       ppt_source_node_ids: pptNodeIds.length ? pptNodeIds : existingChapter.ppt_source_node_ids,
       lecture_source_node_ids: saveSourceNodeIds.length ? saveSourceNodeIds : existingChapter.lecture_source_node_ids,
@@ -1830,13 +1852,16 @@ function TeacherPreparePage() {
       asset_map: result.asset_map,
       layout: result.layout,
       source_tex: result.source_tex,
+      rendered_pages: result.rendered_pages,
+      render_source: result.render_source,
+      render_error: result.render_error,
       warning: result.warning,
       error: result.error,
     })
     setPptArtifact(result.ppt_artifact || null)
     setPptSourceScope(result.source_scope || null)
     setLectureNodeIds(result.source_node_ids?.length ? result.source_node_ids : pptNodeIds)
-    setStatus(result.warning || "已根据图谱课程树生成 PPT/TeX 页面内容")
+    setStatus(result.render_error ? `LaTeX 编译未成功，当前为解析预览：${result.render_error}` : result.warning || "已根据图谱课程树生成 PPT/TeX 页面内容")
   }
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1886,6 +1911,9 @@ function TeacherPreparePage() {
         layout: result.layout,
         source_tex: result.source_tex,
         missing_image_refs: result.missing_image_refs,
+        rendered_pages: result.rendered_pages,
+        render_source: result.render_source,
+        render_error: result.render_error,
         warning: result.warning,
         error: result.error,
       })
@@ -2147,7 +2175,7 @@ function TeacherPreparePage() {
       chapterTitle,
     )
     resetTexState(result.tex_content || texDraft)
-    setStatus("已应用 TeX 修改并刷新页面预览")
+    setStatus(result.render_error ? `LaTeX 编译未成功，当前为解析预览：${result.render_error}` : "已应用 TeX 修改并刷新编译预览")
   }
 
   const handleFrameDraftChange = (value: string) => {
@@ -2195,7 +2223,7 @@ function TeacherPreparePage() {
     )
     resetTexState(result.tex_content || nextTex)
     setSelectedIndex(Math.min(selectedSlide.index, result.slides.length || 1))
-    setStatus("已应用当前页 TeX 修改并刷新预览")
+    setStatus(result.render_error ? `LaTeX 编译未成功，当前为解析预览：${result.render_error}` : "已应用当前页 TeX 修改并刷新编译预览")
   }
 
   const updateEditableModelForSlide = (
@@ -2408,11 +2436,15 @@ function TeacherPreparePage() {
     if (!modelForSave) return
     const result = await saveCoursewareProject.mutateAsync({
       project_id: projectId || undefined,
+      course_id: courseId || undefined,
       title,
       editable_model: modelForSave,
       asset_map: mergedAssetMap,
       slides: preview?.slides || [],
       tex_content: texContent || modelForSave.source_tex || undefined,
+      rendered_pages: preview?.rendered_pages || [],
+      render_source: preview?.render_source,
+      render_error: preview?.render_error,
       ppt_artifact: pptArtifact || undefined,
       source_node_ids: pptNodeIds,
       lecture_target_duration_minutes: targetDurationMinutes,
@@ -2420,7 +2452,7 @@ function TeacherPreparePage() {
       lecture_pacing: currentLecturePacingForSave(),
     })
     setProjectId(result.project_id)
-    navigate({ to: "/teacher/prepare", search: { chapterId: result.project_id, nodeId: "" }, replace: true })
+    navigate({ to: "/teacher/prepare", search: { chapterId: result.project_id, nodeId: "", courseId }, replace: true })
     await queryClient.invalidateQueries({ queryKey: ["courseware-projects"] })
     setStatus(result.message || "课件项目已保存")
   }
@@ -2428,7 +2460,7 @@ function TeacherPreparePage() {
   const handleOpenCoursewareProject = (nextProjectId: string) => {
     if (!nextProjectId) return
     setLoadedRecordId("")
-    navigate({ to: "/teacher/prepare", search: { chapterId: nextProjectId, nodeId: "" } })
+    navigate({ to: "/teacher/prepare", search: { chapterId: nextProjectId, nodeId: "", courseId } })
   }
 
   const handleDeleteCoursewareProject = async () => {
@@ -2439,9 +2471,9 @@ function TeacherPreparePage() {
     }
     const label = target.title || target.id
     if (!window.confirm(`删除已保存课件「${label}」？当前画布内容不会自动清空。`)) return
-    const result = await deleteCoursewareProject.mutateAsync(target.id)
+    const result = await deleteCoursewareProject.mutateAsync({ projectId: target.id, courseId })
     if (projectId === target.id) setProjectId("")
-    if (chapterId === target.id) navigate({ to: "/teacher/prepare", search: { chapterId: "", nodeId: nodeId || "" }, replace: true })
+    if (chapterId === target.id) navigate({ to: "/teacher/prepare", search: { chapterId: "", nodeId: nodeId || "", courseId }, replace: true })
     await queryClient.invalidateQueries({ queryKey: ["courseware-projects"] })
     await queryClient.removeQueries({ queryKey: ["courseware-project", target.id] })
     setStatus(result.message || "课件项目已删除")
@@ -2471,6 +2503,7 @@ function TeacherPreparePage() {
     const saveSourceScope = lectureSourceScope || pptSourceScope || (lectureNodeContext?.success ? lectureNodeContext.scope : undefined)
     const modelForSave = currentEditableModelForSave(title)
     const chapterResult = await saveChapter.mutateAsync({
+      course_id: courseId || undefined,
       chapter_id: chapterId,
       title,
       content: preview.full_text,
@@ -2482,6 +2515,9 @@ function TeacherPreparePage() {
       tex_content: texContent || undefined,
       editable_model: modelForSave,
       asset_map: Object.keys(mergedAssetMap).length ? mergedAssetMap : undefined,
+      rendered_pages: preview.rendered_pages || [],
+      render_source: preview.render_source,
+      render_error: preview.render_error,
       ppt_artifact: pptArtifact || undefined,
       ppt_source_node_ids: pptNodeIds.length ? pptNodeIds : undefined,
       lecture_source_node_ids: saveSourceNodeIds.length ? saveSourceNodeIds : undefined,
@@ -2491,6 +2527,7 @@ function TeacherPreparePage() {
     })
     const savedChapterId = chapterResult.chapter?.id || chapterResult.chapter_id || chapterId
     await saveLecture.mutateAsync({
+      course_id: courseId || undefined,
       chapter_id: savedChapterId,
       lecture_content: mergedLecture,
       source_type: mode === "graph" ? "graph_ppt_tex" : "courseware",
@@ -2501,6 +2538,9 @@ function TeacherPreparePage() {
       tex_content: texContent || undefined,
       editable_model: modelForSave,
       asset_map: Object.keys(mergedAssetMap).length ? mergedAssetMap : undefined,
+      rendered_pages: preview.rendered_pages || [],
+      render_source: preview.render_source,
+      render_error: preview.render_error,
       ppt_artifact: pptArtifact || undefined,
       ppt_source_node_ids: pptNodeIds.length ? pptNodeIds : undefined,
       lecture_source_node_ids: saveSourceNodeIds.length ? saveSourceNodeIds : undefined,
@@ -2641,12 +2681,22 @@ function TeacherPreparePage() {
 
       {status && (
         <div className="flex items-center gap-2 rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
-          {driftReport?.changed || status.includes("图片引用") ? <AlertTriangle size={16} className="text-amber-600" /> : <CheckCircle2 size={16} className="text-primary" />}
+          {driftReport?.changed || status.includes("图片引用") || status.includes("编译未成功") ? <AlertTriangle size={16} className="text-amber-600" /> : <CheckCircle2 size={16} className="text-primary" />}
           {status}
         </div>
       )}
 
       <div className="space-y-6">
+        {preview?.render_error ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            LaTeX 编译未成功，备课页暂时显示解析预览；安装/修复 LaTeX 编译器后会显示与 Overleaf 一致的 PDF 页面。错误：{preview.render_error}
+          </div>
+        ) : preview?.rendered_pages?.length ? (
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+            当前使用 LaTeX 编译后的 PDF 页面预览，备课页与授课页会显示同一份页面渲染结果。
+          </div>
+        ) : null}
+
         <CoursewareImageWarning preview={preview} />
 
         {shouldLoadGraphScope ? (
@@ -3429,6 +3479,7 @@ function SlidePreview({
   const modelCanvasItems = useMemo(() => editableCanvasItemsFromModel(editableModel, slide.index), [editableModel, slide.index])
   const canvasItems = useMemo(() => (modelCanvasItems.length ? modelCanvasItems : canvasLayoutFromSlide(slide)), [modelCanvasItems, slide])
   const canEdit = Boolean(frameDraft || editableModel)
+  const renderedPage = slide.rendered_page
 
   const updateDraft = (nextDraft: string) => {
     if (nextDraft !== frameDraft) onFrameDraftChange(nextDraft)
@@ -3498,38 +3549,68 @@ function SlidePreview({
             </button>
           </div>
         </div>
-        <SlideCanvasEditor
-          slide={slide}
-          images={allImages}
-          editableObjects={editableObjects}
-          assetMap={assetMap}
-          initialItems={canvasItems}
-          canEdit={canEdit}
-          isFullscreen={isFullscreen}
-          onTitleCommit={updateTitle}
-          onContentCommit={updateContent}
-          onLayoutCommit={updateCanvasLayout}
-          onImageWidthChange={updateImageWidth}
-          onColumnWidthChange={updateColumnWidth}
-          onObjectChange={(objectId, patch) => onEditableObjectChange(slide.index, objectId, patch)}
-          onObjectDelete={(objectId) => onEditableObjectDelete(slide.index, objectId)}
-          onObjectDuplicate={(objectId) => onEditableObjectDuplicate(slide.index, objectId)}
-          onObjectAutoFit={(objectId) => onEditableObjectAutoFit(slide.index, objectId)}
-          onAddObject={(type) => onEditableAddObject(slide.index, type)}
-          onLayer={(objectId, direction) => onEditableLayer(slide.index, objectId, direction)}
-          onAlign={(objectId, align) => onEditableAlign(slide.index, objectId, align)}
-        />
+        {renderedPage ? (
+          <CompiledSlidePage page={renderedPage} isFullscreen={isFullscreen} />
+        ) : (
+          <SlideCanvasEditor
+            slide={slide}
+            images={allImages}
+            editableObjects={editableObjects}
+            assetMap={assetMap}
+            initialItems={canvasItems}
+            canEdit={canEdit}
+            isFullscreen={isFullscreen}
+            onTitleCommit={updateTitle}
+            onContentCommit={updateContent}
+            onLayoutCommit={updateCanvasLayout}
+            onImageWidthChange={updateImageWidth}
+            onColumnWidthChange={updateColumnWidth}
+            onObjectChange={(objectId, patch) => onEditableObjectChange(slide.index, objectId, patch)}
+            onObjectDelete={(objectId) => onEditableObjectDelete(slide.index, objectId)}
+            onObjectDuplicate={(objectId) => onEditableObjectDuplicate(slide.index, objectId)}
+            onObjectAutoFit={(objectId) => onEditableObjectAutoFit(slide.index, objectId)}
+            onAddObject={(type) => onEditableAddObject(slide.index, type)}
+            onLayer={(objectId, direction) => onEditableLayer(slide.index, objectId, direction)}
+            onAlign={(objectId, align) => onEditableAlign(slide.index, objectId, align)}
+          />
+        )}
       </div>
 
-      <AssetPanel
-        assets={assetMap}
-        activeImageObject={editableObjects.find((object) => object.type === "image" || object.type === "placeholder")}
-        onInsert={(asset) => onInsertAsset(slide.index, asset)}
-        onReplace={(objectId, asset) => onReplaceImageAsset(slide.index, objectId, asset)}
-        onRemove={onRemoveAsset}
-      />
+      {!renderedPage ? (
+        <AssetPanel
+          assets={assetMap}
+          activeImageObject={editableObjects.find((object) => object.type === "image" || object.type === "placeholder")}
+          onInsert={(asset) => onInsertAsset(slide.index, asset)}
+          onReplace={(objectId, asset) => onReplaceImageAsset(slide.index, objectId, asset)}
+          onRemove={onRemoveAsset}
+        />
+      ) : null}
     </div>
   )
+}
+
+function CompiledSlidePage({ page, isFullscreen }: { page: NonNullable<PptSlideDetail["rendered_page"]>; isFullscreen: boolean }) {
+  return (
+    <div className={cn("bg-slate-950/5 p-3", isFullscreen && "min-h-[calc(100vh-96px)]")}>
+      <div
+        className="mx-auto w-full max-w-6xl overflow-hidden bg-white shadow-sm"
+        style={{ aspectRatio: renderedPageAspectRatio(page) }}
+      >
+        <img
+          src={page.image}
+          alt={`PDF rendered slide ${page.page_index + 1}`}
+          className="h-full w-full object-contain"
+          draggable={false}
+        />
+      </div>
+    </div>
+  )
+}
+
+function renderedPageAspectRatio(page: NonNullable<PptSlideDetail["rendered_page"]>) {
+  const width = Number(page.width)
+  const height = Number(page.height)
+  return width > 0 && height > 0 ? `${width} / ${height}` : "16 / 9"
 }
 
 function formatLayoutLabel(slide: PptSlideDetail) {

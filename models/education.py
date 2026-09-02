@@ -4,6 +4,16 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+class CourseCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=160, description="Course title")
+    description: str = Field("", max_length=1000, description="Course description")
+    course_id: Optional[str] = Field(None, max_length=100, description="Optional stable course ID")
+
+
+class CourseUpdateRequest(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=160, description="Course title")
+    description: Optional[str] = Field(None, max_length=1000, description="Course description")
+
 
 class GenerateLectureRequest(BaseModel):
     chapter_id: str = Field(..., description="Chapter ID")
@@ -38,11 +48,15 @@ class PreviewTexRequest(BaseModel):
 
 class CoursewareProjectSaveRequest(BaseModel):
     project_id: Optional[str] = Field(None, description="Existing project ID to update")
+    course_id: Optional[str] = Field(None, description="Course that owns this courseware project")
     title: str = Field("未命名课件", description="Project title")
     editable_model: Dict[str, Any] = Field(default_factory=dict, description="Structured editable slide model")
     asset_map: Optional[Dict[str, Any]] = Field(None, description="Courseware asset map")
     slides: Optional[List[Dict[str, Any]]] = Field(None, description="Legacy preview slide payload")
     tex_content: Optional[str] = Field(None, description="Serialized TeX source")
+    rendered_pages: Optional[List[Dict[str, Any]]] = Field(None, description="Compiled PDF page render payloads")
+    render_source: Optional[str] = Field(None, description="Render source marker, e.g. latex")
+    render_error: Optional[str] = Field(None, description="Last LaTeX render error")
     ppt_artifact: Optional[Dict[str, Any]] = Field(None, description="Export artifact metadata")
     source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs associated with this project")
     lecture_target_duration_minutes: Optional[float] = Field(None, ge=0.1, le=180, description="Persisted target duration for slide lectures")
@@ -152,6 +166,7 @@ class GenerateReviewRequest(BaseModel):
 
 class SaveChapterRequest(BaseModel):
     chapter_id: Optional[str] = Field(None, description="Chapter ID")
+    course_id: Optional[str] = Field(None, description="Course that owns this chapter")
     title: str = Field(..., description="Chapter title")
     content: Optional[str] = Field(None, description="Chapter content")
     graph_data: Optional[Dict[str, Any]] = Field(None, description="Knowledge graph data")
@@ -163,6 +178,9 @@ class SaveChapterRequest(BaseModel):
     tex_content: Optional[str] = Field(None, description="Generated TeX source")
     editable_model: Optional[Dict[str, Any]] = Field(None, description="Structured editable courseware model")
     asset_map: Optional[Dict[str, Any]] = Field(None, description="Courseware asset map")
+    rendered_pages: Optional[List[Dict[str, Any]]] = Field(None, description="Compiled PDF page render payloads")
+    render_source: Optional[str] = Field(None, description="Render source marker, e.g. latex")
+    render_error: Optional[str] = Field(None, description="Last LaTeX render error")
     ppt_artifact: Optional[Dict[str, Any]] = Field(None, description="Generated PPT/TeX artifact metadata")
     ppt_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate PPT/TeX")
     lecture_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate slide lectures")
@@ -173,6 +191,7 @@ class SaveChapterRequest(BaseModel):
 
 class SaveLectureRequest(BaseModel):
     chapter_id: str = Field(..., description="Chapter ID")
+    course_id: Optional[str] = Field(None, description="Course that owns this chapter")
     lecture_content: str = Field(..., description="Lecture content")
     graph_data: Optional[Dict[str, Any]] = Field(None, description="Knowledge graph data")
     source_type: Optional[str] = Field(None, description="Chapter source type")
@@ -185,6 +204,9 @@ class SaveLectureRequest(BaseModel):
     tex_content: Optional[str] = Field(None, description="Generated TeX source")
     editable_model: Optional[Dict[str, Any]] = Field(None, description="Structured editable courseware model")
     asset_map: Optional[Dict[str, Any]] = Field(None, description="Courseware asset map")
+    rendered_pages: Optional[List[Dict[str, Any]]] = Field(None, description="Compiled PDF page render payloads")
+    render_source: Optional[str] = Field(None, description="Render source marker, e.g. latex")
+    render_error: Optional[str] = Field(None, description="Last LaTeX render error")
     ppt_artifact: Optional[Dict[str, Any]] = Field(None, description="Generated PPT/TeX artifact metadata")
     ppt_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate PPT/TeX")
     lecture_source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used to generate slide lectures")

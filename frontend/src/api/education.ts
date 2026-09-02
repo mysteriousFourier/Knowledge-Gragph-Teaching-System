@@ -234,11 +234,15 @@ export const useSaveCoursewareProject = () => {
   return useMutation({
     mutationFn: (data: {
       project_id?: string
+      course_id?: string
       title: string
       editable_model: EditableSlideModel
       asset_map?: Record<string, CoursewareAsset>
       slides?: unknown[]
       tex_content?: string
+      rendered_pages?: unknown[]
+      render_source?: string
+      render_error?: string
       ppt_artifact?: unknown
       source_node_ids?: string[]
       lecture_target_duration_minutes?: number
@@ -255,22 +259,22 @@ export const useSaveCoursewareProject = () => {
   })
 }
 
-export const useCoursewareProjects = () => {
+export const useCoursewareProjects = (courseId = "") => {
   return useQuery({
-    queryKey: ["courseware-projects"],
+    queryKey: ["courseware-projects", courseId],
     queryFn: () =>
       educationClient
-        .get<{ success: boolean; projects: CoursewareProject[] }>("/api/education/courseware/projects")
+        .get<{ success: boolean; projects: CoursewareProject[] }>("/api/education/courseware/projects", { params: courseId ? { course_id: courseId } : undefined })
         .then((r) => r.data),
   })
 }
 
-export const useCoursewareProject = (projectId: string) => {
+export const useCoursewareProject = (projectId: string, courseId = "") => {
   return useQuery({
-    queryKey: ["courseware-project", projectId],
+    queryKey: ["courseware-project", projectId, courseId],
     queryFn: () =>
       educationClient
-        .get<{ success: boolean; project: CoursewareProject }>(`/api/education/courseware/projects/${encodeURIComponent(projectId)}`)
+        .get<{ success: boolean; project: CoursewareProject }>(`/api/education/courseware/projects/${encodeURIComponent(projectId)}`, { params: courseId ? { course_id: courseId } : undefined })
         .then((r) => r.data),
     enabled: Boolean(projectId),
   })
@@ -278,12 +282,11 @@ export const useCoursewareProject = (projectId: string) => {
 
 export const useDeleteCoursewareProject = () => {
   return useMutation({
-    mutationFn: (projectId: string) =>
-      educationClient
-        .delete<{ success: boolean; project_id: string; message?: string }>(
-          `/api/education/courseware/projects/${encodeURIComponent(projectId)}`,
-        )
-        .then((r) => r.data),
+    mutationFn: (input: string | { projectId: string; courseId?: string }) => {
+      const projectId = typeof input === "string" ? input : input.projectId
+      const courseId = typeof input === "string" ? "" : input.courseId || ""
+      return educationClient.delete<{ success: boolean; project_id: string; message?: string }>(`/api/education/courseware/projects/${encodeURIComponent(projectId)}`, { params: courseId ? { course_id: courseId } : undefined }).then((r) => r.data)
+    },
   })
 }
 

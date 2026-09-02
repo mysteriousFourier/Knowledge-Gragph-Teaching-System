@@ -34,6 +34,13 @@ CANVAS_WIDTH = 1000.0
 CANVAS_HEIGHT = 562.5
 PROJECT_DIR = RUNTIME_DIR / "courseware" / "projects"
 
+def _safe_course_id(value: Any) -> str:
+    return re.sub(r"[^A-Za-z0-9_\u4e00-\u9fff-]+", "-", str(value or "").strip())[:80].strip("-_")
+
+def _project_directory(course_id: Optional[str] = None) -> Path:
+    safe_course_id = _safe_course_id(course_id)
+    return PROJECT_DIR / safe_course_id if safe_course_id else PROJECT_DIR
+
 
 def build_editable_model(parse_result: Dict[str, Any], prompt_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Build an editable slide model from parser output."""
@@ -222,9 +229,11 @@ def build_pptx_artifact_from_editable_model(
 
 
 def save_courseware_project(payload: Dict[str, Any]) -> Dict[str, Any]:
-    PROJECT_DIR.mkdir(parents=True, exist_ok=True)
+    course_id = _safe_course_id(payload.get("course_id"))
+    project_dir = _project_directory(course_id)
+    project_dir.mkdir(parents=True, exist_ok=True)
     project_id = _safe_project_id(str(payload.get("project_id") or payload.get("id") or "")) or f"cw_{uuid.uuid4().hex[:12]}"
-    path = PROJECT_DIR / f"{project_id}.json"
+    path = project_dir / f"{project_id}.json"
     previous: Dict[str, Any] = {}
     if path.exists():
         try:
@@ -238,13 +247,20 @@ def save_courseware_project(payload: Dict[str, Any]) -> Dict[str, Any]:
         model = {**model, "source_tex": tex_content}
     record = {
         "id": project_id,
-        "title": str(payload.get("title") or model.get("title") or "未命名课件"),
+        "course_id": course_id or previous.get("course_id") or "",
+        "title": str(payload.get("title") or model.get("title") or "Untitled courseware"),
         "editable_model": model,
         "asset_map": payload.get("asset_map") or model.get("assets") or {},
         "slides": payload.get("slides") or [],
         "tex_content": tex_content,
+        "rendered_pages": payload.get("rendered_pages") or [],
+        "render_source": payload.get("render_source") or "",
+        "render_error": payload.get("render_error") or "",
         "ppt_artifact": payload.get("ppt_artifact"),
         "source_node_ids": payload.get("source_node_ids") or [],
+        "lecture_target_duration_minutes": payload.get("lecture_target_duration_minutes"),
+        "lecture_speech_rate_cpm": payload.get("lecture_speech_rate_cpm"),
+        "lecture_pacing": payload.get("lecture_pacing"),
         "created_at": previous.get("created_at") or now,
         "updated_at": now,
     }
@@ -252,47 +268,59 @@ def save_courseware_project(payload: Dict[str, Any]) -> Dict[str, Any]:
     return record
 
 
-def list_courseware_projects() -> List[Dict[str, Any]]:
+def list_courseware_projects(course_id: Optional[str] = None) -> List[Dict[str, Any]]:
     PROJECT_DIR.mkdir(parents=True, exist_ok=True)
+    safe_course_id = _safe_course_id(course_id)
+    paths = _project_directory(safe_course_id).glob("*.json") if safe_course_id else PROJECT_DIR.glob("**/*.json")
     projects: List[Dict[str, Any]] = []
-    for path in PROJECT_DIR.glob("*.json"):
+    for path in paths:
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             continue
+        record_course_id = _safe_course_id(record.get("course_id"))
+        if safe_course_id and record_course_id != safe_course_id:
+            continue
         model = record.get("editable_model") if isinstance(record.get("editable_model"), dict) else {}
-        projects.append(
-            {
-                "id": record.get("id") or path.stem,
-                "title": record.get("title") or model.get("title") or path.stem,
-                "slide_count": len(model.get("slides") or record.get("slides") or []),
-                "created_at": record.get("created_at"),
-                "updated_at": record.get("updated_at"),
-            }
-        )
+        projects.append({
+            "id": record.get("id") or path.stem,
+            "course_id": record_course_id,
+            "title": record.get("title") or model.get("title") or path.stem,
+            "slide_count": len(model.get("slides") or record.get("slides") or []),
+            "created_at": record.get("created_at"),
+            "updated_at": record.get("updated_at"),
+        })
     return sorted(projects, key=lambda item: str(item.get("updated_at") or ""), reverse=True)
 
 
-def load_courseware_project(project_id: str) -> Optional[Dict[str, Any]]:
+def load_courseware_project(project_id: str, course_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     safe_id = _safe_project_id(project_id)
     if not safe_id:
         return None
-    path = PROJECT_DIR / f"{safe_id}.json"
-    if not path.exists() or not path.is_file():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    candidates = [_project_directory(course_id) / f"{safe_id}.json"] if _safe_course_id(course_id) else [_project_directory() / f"{safe_id}.json"]
+    if not _safe_course_id(course_id):
+        candidates.extend(path / f"{safe_id}.json" for path in PROJECT_DIR.iterdir() if path.is_dir())
+    for path in candidates:
+        if path.exists() and path.is_file():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+    return None
 
 
-def delete_courseware_project(project_id: str) -> bool:
+def delete_courseware_project(project_id: str, course_id: Optional[str] = None) -> bool:
     safe_id = _safe_project_id(project_id)
     if not safe_id:
         return False
-    path = PROJECT_DIR / f"{safe_id}.json"
-    if not path.exists() or not path.is_file():
-        return False
-    path.unlink()
-    return True
-
+    candidates = [_project_directory(course_id) / f"{safe_id}.json"] if _safe_course_id(course_id) else [_project_directory() / f"{safe_id}.json"]
+    if not _safe_course_id(course_id):
+        candidates.extend(path / f"{safe_id}.json" for path in PROJECT_DIR.iterdir() if path.is_dir())
+    for path in candidates:
+        if path.exists() and path.is_file():
+            path.unlink()
+            return True
+    return False
 
 def _editable_slide_from_detail(slide: Dict[str, Any], asset_map: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     index = int(slide.get("index") or 1)
@@ -1254,4 +1282,4 @@ def _stable_id(prefix: str, value: str) -> str:
 
 
 def _safe_project_id(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_-]+", "", value or "")[:80]
+    return re.sub(r"[^A-Za-z0-9_\u4e00-\u9fff-]+", "", value or "")[:80]

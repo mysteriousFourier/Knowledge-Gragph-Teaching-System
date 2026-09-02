@@ -1,4 +1,5 @@
 export interface Chapter {
+  course_id?: string
   id: string
   title: string
   content?: string
@@ -13,6 +14,18 @@ export interface Chapter {
   tex_content?: string
   editable_model?: import("./education").EditableSlideModel
   asset_map?: Record<string, import("./education").CoursewareAsset>
+  rendered_pages?: import("./education").RenderedCoursewarePage[]
+  render_source?: string
+  render_error?: string
+  has_content?: boolean
+  has_lecture_content?: boolean
+  has_tex_content?: boolean
+  has_rendered_pages?: boolean
+  rendered_page_count?: number
+  ppt_slide_count?: number
+  slide_lecture_count?: number
+  exercise_count?: number
+  content_preview?: string
   ppt_artifact?: import("./education").PptArtifact
   ppt_source_node_ids?: string[]
   lecture_source_node_ids?: string[]
@@ -38,6 +51,7 @@ export interface Exercise {
 }
 
 export interface SaveChapterRequest {
+  course_id?: string
   chapter_id: string
   title: string
   content?: string
@@ -50,6 +64,9 @@ export interface SaveChapterRequest {
   tex_content?: string
   editable_model?: import("./education").EditableSlideModel
   asset_map?: Record<string, import("./education").CoursewareAsset>
+  rendered_pages?: import("./education").RenderedCoursewarePage[]
+  render_source?: string
+  render_error?: string
   ppt_artifact?: import("./education").PptArtifact
   ppt_source_node_ids?: string[]
   lecture_source_node_ids?: string[]
@@ -59,6 +76,7 @@ export interface SaveChapterRequest {
 }
 
 export interface SaveLectureRequest {
+  course_id?: string
   chapter_id: string
   lecture_content: string
   graph_data?: Record<string, unknown>
@@ -72,6 +90,9 @@ export interface SaveLectureRequest {
   tex_content?: string
   editable_model?: import("./education").EditableSlideModel
   asset_map?: Record<string, import("./education").CoursewareAsset>
+  rendered_pages?: import("./education").RenderedCoursewarePage[]
+  render_source?: string
+  render_error?: string
   ppt_artifact?: import("./education").PptArtifact
   ppt_source_node_ids?: string[]
   lecture_source_node_ids?: string[]

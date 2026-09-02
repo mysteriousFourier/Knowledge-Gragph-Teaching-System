@@ -110,6 +110,11 @@ class TtsCourseJobRequest(BaseModel):
     language: str | None = None
 
 
+class TtsCourseCacheClearRequest(BaseModel):
+    chapter_id: str = Field(..., min_length=1)
+    segment_id: str | None = None
+
+
 class TtsUnloadCharacterRequest(BaseModel):
     character_name: str
 
@@ -208,10 +213,30 @@ def _effective_tts_language(provider: str, text: str, normalized_language: str, 
     return normalized_language
 
 
-def _normalize_payload_text(text: str, default_language: str, language: str | None, speech_cues: list[TtsSpeechCue] | None = None):
+def _spell_latin_for_provider(provider: str) -> bool:
+    return provider not in {"azure_speech"}
+
+
+def _single_request_tts_provider(provider: str) -> bool:
+    return provider in {"azure_speech", "genie_server", "gpt_sovits_server"}
+
+
+def _normalize_payload_text(
+    text: str,
+    default_language: str,
+    language: str | None,
+    speech_cues: list[TtsSpeechCue] | None = None,
+    *,
+    provider: str | None = None,
+):
     cues = [cue.model_dump() if hasattr(cue, "model_dump") else cue.dict() for cue in speech_cues or []]
     planned_text = apply_speech_cues_for_tts(text, cues)
-    return normalize_tts_text(planned_text, default_language, language)
+    return normalize_tts_text(
+        planned_text,
+        default_language,
+        language,
+        spell_latin_for_chinese=_spell_latin_for_provider(provider or get_tts_settings().provider),
+    )
 
 
 def _course_audio_path(payload: TtsSynthesizeRequest, normalized_text: str, effective_language: str) -> Path | None:
@@ -227,6 +252,61 @@ def _course_audio_path(payload: TtsSynthesizeRequest, normalized_text: str, effe
     chapter = _safe_id(payload.chapter_id, "chapter")
     segment = _safe_id(payload.segment_id, "segment")
     return settings.output_dir / COURSE_AUDIO_DIR / chapter / f"{segment}-{requested_hash}.wav"
+
+
+def clear_course_tts_cache(chapter_id: str, segment_id: str | None = None) -> dict[str, Any]:
+    settings = get_tts_settings()
+    chapter = _safe_id(chapter_id, "chapter")
+    course_dir = settings.output_dir / COURSE_AUDIO_DIR / chapter
+    removed_files = 0
+    removed_bytes = 0
+    removed_jobs = 0
+    safe_segment = _safe_id(segment_id, "segment") if segment_id else ""
+
+    if course_dir.exists():
+        targets = list(course_dir.glob(f"{safe_segment}-*.wav")) if safe_segment else list(course_dir.rglob("*.wav"))
+        for path in targets:
+            try:
+                removed_bytes += path.stat().st_size
+                path.unlink()
+                removed_files += 1
+            except OSError:
+                pass
+        if not safe_segment:
+            try:
+                shutil.rmtree(course_dir)
+            except OSError:
+                pass
+
+    if not safe_segment:
+        for job_id, job in list(COURSE_TTS_JOBS.items()):
+            if str(job.get("chapter_id") or "") != str(chapter_id):
+                continue
+            task = job.get("task")
+            if task and not task.done():
+                task.cancel()
+            COURSE_TTS_JOBS.pop(job_id, None)
+        job_dir = _course_job_dir()
+        if job_dir.is_dir():
+            for path in job_dir.glob("*.json"):
+                try:
+                    job = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if str(job.get("chapter_id") or "") == str(chapter_id):
+                    try:
+                        path.unlink()
+                        removed_jobs += 1
+                    except OSError:
+                        pass
+
+    return {
+        "removed_files": removed_files,
+        "removed_bytes": removed_bytes,
+        "removed_jobs": removed_jobs,
+        "chapter_id": chapter_id,
+        "segment_id": segment_id,
+    }
 
 
 def _copy_to_course_audio(audio_path: Path, persistent_path: Path) -> Path:
@@ -322,11 +402,13 @@ async def _run_course_tts_job(job_id: str, request: TtsCourseJobRequest) -> None
         cache_hits = 0
         results: list[dict[str, Any]] = []
         try:
+            settings = get_tts_settings()
+            single_request = _single_request_tts_provider(settings.provider)
             for slide in request.slides:
                 if job.get("cancel_requested"):
                     break
                 speech_cues = [cue for cue in slide.speech_cues or [] if cue.target_text.strip()]
-                should_split = len(slide.text) > request.max_chars
+                should_split = len(slide.text) > request.max_chars and not single_request
                 if should_split:
                     _update_course_job(
                         job,
@@ -654,6 +736,11 @@ async def clear_audio_cache() -> dict[str, Any]:
     return {"success": True, **result}
 
 
+@router.post("/course-cache/clear")
+async def clear_course_audio_cache(payload: TtsCourseCacheClearRequest) -> dict[str, Any]:
+    return {"success": True, **clear_course_tts_cache(payload.chapter_id, payload.segment_id)}
+
+
 @router.post("/segments")
 async def split_segments(payload: TtsSegmentRequest) -> dict[str, Any]:
     settings = get_tts_settings()
@@ -806,9 +893,11 @@ async def synthesize(payload: TtsSynthesizeRequest) -> dict[str, Any]:
     effective_language = _effective_tts_language(settings.provider, text, normalized.text_lang, settings.language)
     if not text:
         raise HTTPException(status_code=400, detail="Text is empty after cleaning.")
-    if len(text) > settings.max_chars:
+    if len(text) > settings.max_chars and not _single_request_tts_provider(settings.provider):
         raise _long_text_error(len(text), settings.max_chars)
     persistent_path = _course_audio_path(payload, text, effective_language)
+    if persistent_path and payload.force:
+        clear_course_tts_cache(payload.chapter_id or "", payload.segment_id)
     if persistent_path and persistent_path.is_file() and not payload.force:
         return {
             "success": True,

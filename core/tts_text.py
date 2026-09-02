@@ -243,8 +243,13 @@ _SRE_PHRASE_REPLACEMENTS = (
     ("less than", "小于"),
     ("not equals", "不等于"),
     ("not equal to", "不等于"),
+    ("asymptotically equals", "渐近等于"),
+    ("asymptotically equal to", "渐近等于"),
+    ("almost equals", "约等于"),
+    ("almost equal to", "约等于"),
     ("approximately equals", "约等于"),
     ("approximately equal to", "约等于"),
+    ("equivalent to", "等价于"),
     ("identical to", "恒等于"),
     ("proportional to", "正比于"),
     ("element of", "属于"),
@@ -263,13 +268,23 @@ _SRE_PHRASE_REPLACEMENTS = (
     ("over", "除以"),
     ("left parenthesis", "左括号"),
     ("right parenthesis", "右括号"),
+    ("left-parenthesis", "左括号"),
+    ("right-parenthesis", "右括号"),
     ("left bracket", "左中括号"),
     ("right bracket", "右中括号"),
+    ("left-bracket", "左中括号"),
+    ("right-bracket", "右中括号"),
     ("left brace", "左大括号"),
     ("right brace", "右大括号"),
+    ("left-brace", "左大括号"),
+    ("right-brace", "右大括号"),
     ("negative", "负"),
+    ("normal", ""),
     ("upper", "大写"),
     ("lower", "小写"),
+    ("almost", "约"),
+    ("asymptotically", "渐近"),
+    ("when", "当"),
 )
 
 _SRE_TOKEN_REPLACEMENTS = {
@@ -288,6 +303,8 @@ _SRE_TOKEN_REPLACEMENTS = {
     "EndLayout": "布局结束",
     "StartMatrix": "矩阵开始",
     "EndMatrix": "矩阵结束",
+    "StartAbsoluteValue": "绝对值",
+    "EndAbsoluteValue": "绝对值结束",
     "Matrix": "矩阵",
     "Row": "行",
     "Column": "列",
@@ -437,8 +454,12 @@ def _replace_prose_dashes(text: str) -> str:
 
 @lru_cache(maxsize=1)
 def _formula_library_by_id() -> dict[str, dict[str, object]]:
-    library_path = ROOT_DIR / "structured" / "formula_library.json"
-    if not library_path.exists():
+    library_paths = (
+        ROOT_DIR / "structured" / "formula_library.json",
+        ROOT_DIR / "structured" / "structured" / "formula_library.json",
+    )
+    library_path = next((path for path in library_paths if path.exists()), None)
+    if library_path is None:
         return {}
     try:
         data = json.loads(library_path.read_text(encoding="utf-8"))
@@ -585,17 +606,39 @@ def _normalize_sre_speech(speech: str) -> str:
     text = speech.strip()
     if not text:
         return text
+    text = re.sub(
+        r"\bModifyingAbove\s+(.+?)\s+With\s+caret\b",
+        r"\1 的估计值",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\bModifyingAbove\s+(.+?)\s+With\s+tilde\b",
+        r"\1 波浪号",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"\b([A-Za-zΑ-Ωα-ω]+)\s+overtilde\b", r"\1 波浪号", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b([A-Za-zΑ-Ωα-ω]+)\s+overbar\b", r"\1 横线", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b([A-Za-zΑ-Ωα-ω]+)\s+overhat\b", r"\1 的估计值", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bovertilde\b", "波浪号", text, flags=re.IGNORECASE)
+    text = re.sub(r"\boverbar\b", "横线", text, flags=re.IGNORECASE)
+    text = re.sub(r"\boverhat\b", "的估计值", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(\d+)(?:st|nd|rd|th)\b", r"\1", text, flags=re.IGNORECASE)
     text = re.sub(r"\bsquared\b", "的 2 次方", text, flags=re.IGNORECASE)
     text = re.sub(r"\bcubed\b", "的 3 次方", text, flags=re.IGNORECASE)
     for phrase, replacement in _SRE_PHRASE_REPLACEMENTS:
         text = re.sub(rf"\b{re.escape(phrase)}\b", replacement, text, flags=re.IGNORECASE)
     for token, replacement in _SRE_TOKEN_REPLACEMENTS.items():
-        text = re.sub(rf"\b{re.escape(token)}\b", replacement, text)
+        text = re.sub(rf"\b{re.escape(token)}\b", replacement, text, flags=re.IGNORECASE)
     for token, replacement in _SRE_GREEK_REPLACEMENTS.items():
         text = re.sub(rf"\b{re.escape(token)}\b", replacement, text, flags=re.IGNORECASE)
+    text = re.sub(r"\bw\s+h\s+e\s+n\b", "当", text, flags=re.IGNORECASE)
     text = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", text)
     text = re.sub(r"(?<=[A-Za-z])(?=\d)", " ", text)
+    text = re.sub(r"约\s+等于", "约等于", text)
+    text = re.sub(r"渐近\s+等于", "渐近等于", text)
+    text = re.sub(r"根号\s+结束", "根号结束", text)
     text = re.sub(r"\s+", " ", text).strip()
     if not text:
         return ""
@@ -815,6 +858,10 @@ def _formula_id_to_speech(formula_id: str) -> str:
     if not item:
         return f"公式 {formula_id}。"
     label = str(item.get("label_format") or formula_id)
+    for key in ("speech_text", "tts_text", "spoken_text"):
+        speech_text = item.get(key)
+        if isinstance(speech_text, str) and speech_text.strip():
+            return f"公式 {label}，{_speech_with_pause(speech_text.strip(), pause='。')}"
     description = item.get("description")
     if isinstance(description, str) and description.strip():
         return f"公式 {label}，{description.strip()}。"
@@ -833,7 +880,7 @@ def _replace_bare_math_for_speech(match: re.Match[str]) -> str:
 
 def replace_formulas_for_speech(text: str) -> str:
     text = _replace_prose_dashes(text)
-    text = re.sub(r"\[\[FORMULA:([^\]]+)\]\]", lambda match: _formula_id_to_speech(match.group(1).strip()), text)
+    text = re.sub(r"\[\[(?:SEE_)?FORMULA:([^\]]+)\]\]", lambda match: _formula_id_to_speech(match.group(1).strip()), text)
     text = _replace_latex_matches_for_speech(text, r"\$\$(.+?)\$\$", flags=re.DOTALL)
     text = _replace_latex_matches_for_speech(text, r"\\\[(.+?)\\\]", flags=re.DOTALL)
     text = _replace_latex_matches_for_speech(text, r"\\\((.+?)\\\)", flags=re.DOTALL)
@@ -1025,14 +1072,20 @@ def spell_latin_terms_for_chinese(text: str, *, mode: str = "prose") -> str:
     return re.sub(r"(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z0-9+#._-]*)(?![A-Za-z0-9])", replace_token, text)
 
 
-def normalize_tts_text(text: str, default_language: str = "zh", language_override: str | None = None) -> NormalizedTtsText:
+def normalize_tts_text(
+    text: str,
+    default_language: str = "zh",
+    language_override: str | None = None,
+    *,
+    spell_latin_for_chinese: bool = True,
+) -> NormalizedTtsText:
     normalized = remove_parenthetical_asides_for_speech(text)
     normalized = replace_formulas_for_speech(normalized)
     normalized = clean_markdown_for_speech(normalized)
     normalized = sanitize_gpt_sovits_text(normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
     text_lang = (language_override or "").strip().lower() or detect_tts_language(normalized, default_language)
-    if text_lang in {"zh", "zh-cn", "zh-tw", "zh-hans", "zh-hant", "chinese", "all_zh", "all_yue", _GENIE_HYBRID_ZH_EN_LANGUAGE}:
+    if spell_latin_for_chinese and text_lang in {"zh", "zh-cn", "zh-tw", "zh-hans", "zh-hant", "chinese", "all_zh", "all_yue", _GENIE_HYBRID_ZH_EN_LANGUAGE}:
         normalized = spell_latin_terms_for_chinese(normalized)
         normalized = sanitize_gpt_sovits_text(normalized)
         normalized = re.sub(r"\s+", " ", normalized).strip()

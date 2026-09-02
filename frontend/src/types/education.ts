@@ -383,12 +383,16 @@ export interface EditableSlideModel {
 }
 
 export interface CoursewareProject {
+  course_id?: string
   id: string
   title: string
   editable_model?: EditableSlideModel
   asset_map?: Record<string, CoursewareAsset>
   slides?: PptSlideDetail[]
   tex_content?: string
+  rendered_pages?: RenderedCoursewarePage[]
+  render_source?: string
+  render_error?: string
   ppt_artifact?: PptArtifact
   source_node_ids?: string[]
   lecture_target_duration_minutes?: number
@@ -408,6 +412,7 @@ export interface PptSlideDetail {
   title?: string
   content?: string
   notes?: string
+  rendered_page?: RenderedCoursewarePage
   has_images?: boolean
   image_count?: number
   images?: PptImageInfo[]
@@ -455,6 +460,13 @@ export interface PptSlideDetail {
     }
     [key: string]: unknown
   }
+}
+
+export interface RenderedCoursewarePage {
+  page_index: number
+  image: string
+  width: number
+  height: number
 }
 
 export interface PptArtifact {
@@ -591,6 +603,9 @@ export interface PptPreviewResponse {
   asset_map?: Record<string, CoursewareAsset>
   layout?: EditableSlideModel["layout"]
   source_tex?: string
+  rendered_pages?: RenderedCoursewarePage[]
+  render_source?: string
+  render_error?: string
   warning?: string
   missing_image_refs?: string[]
   error?: string

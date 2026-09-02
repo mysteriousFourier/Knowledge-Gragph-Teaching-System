@@ -36,10 +36,6 @@ function ExercisesPage() {
   const handleGenerate = async () => {
     if (!selectedChapterId) return
     const chapterBody = (selectedChapter?.content || selectedChapter?.lecture_content || "").trim()
-    if (!chapterBody) {
-      setGenerateStatus("当前课程没有可用内容，无法生成题目。请先导入课程内容、保存授课文案或补充图谱证据。")
-      return
-    }
     setGenerateStatus("正在生成 5 道新题，DeepSeek 响应可能较慢，请等待。")
     try {
       const result = await generateExercises.mutateAsync({

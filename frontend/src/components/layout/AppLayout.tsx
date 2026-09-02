@@ -133,6 +133,12 @@ const routeMeta = [
     description: "学生和教师从同一个入口进入，身份决定后续默认工作台。",
   },
   {
+    match: (path: string) => path.startsWith("/teacher/courses"),
+    key: "courses",
+    paperTitle: "Course Registry",
+    description: "建立课程并按课程管理课件与教学资料。",
+  },
+  {
     match: (path: string) => path.startsWith("/teacher/lecture"),
     key: "lecture",
     paperTitle: "Lecture Mode",

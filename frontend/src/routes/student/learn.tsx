@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useQueryClient } from "@tanstack/react-query"
 import { useMemo, useState } from "react"
 import { BookOpen, CheckCircle, ChevronLeft, ChevronRight, Pause, Play, RotateCcw, Send, Sparkles, Undo2 } from "lucide-react"
-import { useMarkChapter, useStudentAskQuestion, useStudentChapters, useStudentProgress, type ChapterProgressStatus } from "@/api/student"
+import { useMarkChapter, useStudentAskQuestion, useStudentChapter, useStudentChapters, useStudentProgress, type ChapterProgressStatus } from "@/api/student"
 import { ConsistencyPanel } from "@/components/common/ConsistencyPanel"
 import { EvidenceSummary } from "@/components/common/EvidenceSummary"
 import { EmptyState } from "@/components/common/EmptyState"
@@ -24,29 +24,35 @@ function LearnPage() {
   const [answer, setAnswer] = useState<StudentQuestionResponse | null>(null)
 
   const { data, isLoading } = useStudentChapters()
+  const { data: selectedChapterData, isLoading: isSelectedChapterLoading } = useStudentChapter(selectedChapterId)
   const { data: progressData } = useStudentProgress()
   const markChapter = useMarkChapter()
   const askQuestion = useStudentAskQuestion()
 
   const chapters = data?.chapters || []
-  const selectedChapter = chapters.find((chapter) => chapter.id === selectedChapterId)
+  const selectedChapterSummary = chapters.find((chapter) => chapter.id === selectedChapterId)
+  const selectedChapter = selectedChapterData?.chapter || selectedChapterSummary
   const slideLectures = selectedChapter?.slide_lectures || []
-  const isCoursewareChapter = Boolean(selectedChapter?.ppt_slides?.length)
+  const coursewareSlides = useMemo(
+    () => attachRenderedPagesToSlides(selectedChapter?.ppt_slides || [], selectedChapter?.rendered_pages),
+    [selectedChapter?.ppt_slides, selectedChapter?.rendered_pages],
+  )
+  const isCoursewareChapter = Boolean(coursewareSlides.length)
   const selectedContent = selectedChapter?.lecture_content || selectedChapter?.content || ""
   const selectedProgress = selectedChapter ? progressData?.progress?.chapters?.[selectedChapter.id] : undefined
   const playback = useLecturePlayback({
-    segmentCount: isCoursewareChapter ? selectedChapter?.ppt_slides?.length || 0 : selectedContent ? 1 : 0,
+    segmentCount: isCoursewareChapter ? coursewareSlides.length : selectedContent ? 1 : 0,
     chapterId: selectedChapter?.id,
     getSegmentId: (segment) => {
       if (isCoursewareChapter) {
-        const slide = selectedChapter?.ppt_slides?.[segment]
+        const slide = coursewareSlides[segment]
         return slide ? `slide-${slide.index}` : `slide-${segment + 1}`
       }
       return "lecture"
     },
     getSegmentText: (segment) => {
       if (isCoursewareChapter) {
-        const slide = selectedChapter?.ppt_slides?.[segment]
+        const slide = coursewareSlides[segment]
         const lecture = slideLectures.find((item) => item.index === slide?.index && item.lecture?.trim())
         return lecture?.lecture || slide?.notes || slide?.content || slide?.raw_text || ""
       }
@@ -54,12 +60,12 @@ function LearnPage() {
     },
     getSegmentSpeechCues: (segment) => {
       if (!isCoursewareChapter) return undefined
-      const slide = selectedChapter?.ppt_slides?.[segment]
+      const slide = coursewareSlides[segment]
       return slideLectures.find((item) => item.index === slide?.index && item.lecture?.trim())?.speech_cues
     },
   })
   const currentSlide = playback.currentSegment
-  const currentCoursewareSlide = selectedChapter?.ppt_slides?.[currentSlide]
+  const currentCoursewareSlide = coursewareSlides[currentSlide]
   const currentSlideLecture = useMemo(() => {
     if (!isCoursewareChapter || !slideLectures.length || !currentCoursewareSlide) return undefined
     return slideLectures.find((item) => item.index === currentCoursewareSlide.index && item.lecture?.trim())
@@ -215,10 +221,10 @@ function LearnPage() {
                   <EmptyState title="暂无内容" description="该章节暂无课程内容" />
                 )}
               </div>
-              {isCoursewareChapter && selectedChapter.ppt_slides?.length ? (
+              {isCoursewareChapter && coursewareSlides.length ? (
                 <StudyPager
                   current={currentSlide}
-                  total={selectedChapter.ppt_slides.length}
+                  total={coursewareSlides.length}
                   onPrev={() => playback.setCurrentSegment((prev) => prev - 1)}
                   onNext={() => playback.setCurrentSegment((prev) => prev + 1)}
                 />
@@ -296,6 +302,17 @@ function statusLabel(status?: string) {
   return labels[status || "unlearned"] || "未学习"
 }
 
+function attachRenderedPagesToSlides(
+  slides: PptSlideDetail[],
+  renderedPages: PptSlideDetail["rendered_page"][] | undefined,
+): PptSlideDetail[] {
+  if (!renderedPages?.length) return slides
+  return slides.map((slide, index) => ({
+    ...slide,
+    rendered_page: slide.rendered_page || renderedPages.find((page) => page?.page_index === slide.index - 1) || renderedPages[index],
+  }))
+}
+
 function StudyPager({ current, total, onPrev, onNext }: { current: number; total: number; onPrev: () => void; onNext: () => void }) {
   return (
     <div className="flex items-center justify-between gap-3 border-t p-4">
@@ -323,6 +340,10 @@ function StudyPager({ current, total, onPrev, onNext }: { current: number; total
 }
 
 function PptSlideStudyView({ slide }: { slide: PptSlideDetail }) {
+  if (slide.rendered_page?.image) {
+    return <RenderedSlideStudyView slide={slide} />
+  }
+
   return (
     <section className="space-y-4">
       <div>
@@ -377,4 +398,33 @@ function PptSlideStudyView({ slide }: { slide: PptSlideDetail }) {
       ) : null}
     </section>
   )
+}
+
+function RenderedSlideStudyView({ slide }: { slide: PptSlideDetail }) {
+  const page = slide.rendered_page
+  return (
+    <section className="space-y-4">
+      <div>
+        <div className="text-xs font-medium uppercase text-muted-foreground">页面 {slide.index}</div>
+        <h3 className="mt-1 text-lg font-semibold">{slide.title || "无标题"}</h3>
+      </div>
+      <div
+        className="mx-auto w-full overflow-hidden rounded-lg border bg-white shadow-sm"
+        style={{ aspectRatio: renderedPageAspectRatio(page) }}
+      >
+        <img
+          src={page?.image || ""}
+          alt={slide.title || `PDF rendered slide ${slide.index}`}
+          className="h-full w-full object-contain"
+          draggable={false}
+        />
+      </div>
+    </section>
+  )
+}
+
+function renderedPageAspectRatio(page: PptSlideDetail["rendered_page"]) {
+  const width = Number(page?.width)
+  const height = Number(page?.height)
+  return width > 0 && height > 0 ? `${width} / ${height}` : "16 / 9"
 }

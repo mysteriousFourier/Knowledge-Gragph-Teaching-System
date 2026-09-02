@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
 import os
+import posixpath
 import re
 import uuid
 from datetime import datetime
@@ -15,6 +17,8 @@ from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import FileResponse
 
 from KGTS.models.education import (
+    CourseCreateRequest,
+    CourseUpdateRequest,
     CoursewareExportPptxRequest,
     CoursewareProjectSaveRequest,
     GenerateLectureRequest,
@@ -31,6 +35,7 @@ from KGTS.models.education import (
 from KGTS.models.graph import AddNodeRequest, UpdateNodeRequest
 from KGTS.core.mcp_client import call_mcp_tool
 from KGTS.core.bridge import (
+    RUNTIME_DIR,
     build_frontend_graph,
     build_rag_context,
     chapter_store,
@@ -42,6 +47,7 @@ from KGTS.core.bridge import (
     search_nodes as backend_search_nodes,
 )
 from KGTS.core.tts_text import apply_speech_cues_for_tts, normalize_speech_cues
+from KGTS.education.tts_router import clear_course_tts_cache
 from KGTS.core.graph_context import build_graphrag_context, build_node_contexts
 from KGTS.education.claude_api import DeepSeekAPIClient, get_deepseek_model, _strip_json_fence
 from KGTS.education.kg_constraints import (
@@ -86,11 +92,14 @@ from KGTS.education.courseware_editor import (
     serialize_editable_model_to_tex,
 )
 from KGTS.education.courseware_style import build_style_reference_guidance, build_style_reference_profile
+from KGTS.education.course_store import course_store
+from KGTS.education.beamer_full_router import _compile_latex_to_pdf_bytes, _render_pdf_bytes_to_pages
 
 load_root_env()
 
 router = APIRouter(prefix="/api", tags=["education"])
 logger = logging.getLogger(__name__)
+RENDERED_PAGE_DIR = RUNTIME_DIR / "courseware" / "rendered-pages"
 
 DEFAULT_SLIDE_LECTURE_DURATION_MINUTES = 10.0
 DEFAULT_SLIDE_LECTURE_SPEECH_RATE_CPM = 250
@@ -110,6 +119,60 @@ def _courseware_image_warning(parse_result: Dict[str, Any]) -> str:
         return f"检测到未匹配的图片引用：{shown}{suffix}。请确认 ZIP 中包含与 {tex_source} 相对路径一致的图片文件。"
     return f"检测到未匹配的图片引用：{shown}{suffix}。单独上传 .tex 不包含 fig 等相对路径图片；请上传包含 .tex 和图片目录的 ZIP，或用“图片包”补充资源。"
 
+
+@router.post("/education/courses")
+async def create_course(request: CourseCreateRequest):
+    try:
+        course = course_store.create(title=request.title, description=request.description, course_id=request.course_id)
+        return {"success": True, "course": course}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Course creation failed: {exc}") from exc
+
+
+@router.get("/education/courses")
+async def list_courses():
+    try:
+        courses = course_store.list()
+        for course in courses:
+            course["chapter_count"] = len(chapter_store.list_chapters(course.get("id")))
+            course["courseware_count"] = len(list_courseware_projects(course.get("id")))
+        return {"success": True, "courses": courses}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Course list failed: {exc}") from exc
+
+
+@router.get("/education/courses/{course_id}")
+async def get_course(course_id: str):
+    course = course_store.get(course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    course["chapter_count"] = len(chapter_store.list_chapters(course_id))
+    course["courseware_count"] = len(list_courseware_projects(course_id))
+    return {"success": True, "course": course}
+
+
+@router.patch("/education/courses/{course_id}")
+async def update_course(course_id: str, request: CourseUpdateRequest):
+    try:
+        course = course_store.update(course_id, title=request.title, description=request.description)
+        if not course:
+            raise HTTPException(status_code=404, detail="Course not found")
+        return {"success": True, "course": course}
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Course update failed: {exc}") from exc
+
+
+@router.delete("/education/courses/{course_id}")
+async def delete_course(course_id: str):
+    if not course_store.delete(course_id):
+        raise HTTPException(status_code=404, detail="Course not found")
+    return {"success": True, "course_id": course_id}
 
 @router.get("/")
 async def root():
@@ -536,6 +599,7 @@ async def generate_ppt_tex(request: GeneratePptTexRequest):
         artifact = build_pptx_artifact(chapter_title, slides, source_node_ids=source_node_ids, style_reference=request.style_reference)
         artifact["tex_content_hash"] = hashlib.md5(tex_content.encode("utf-8")).hexdigest()
         artifact.pop("tex_content", None)
+        rendered_pages, render_error = _render_courseware_pdf_pages(tex_content, editable_model.get("assets") or {})
         return {
             "success": True,
             "chapter_title": chapter_title,
@@ -547,6 +611,9 @@ async def generate_ppt_tex(request: GeneratePptTexRequest):
             "asset_map": editable_model.get("assets") or {},
             "layout": editable_model.get("layout") or {},
             "source_tex": tex_content,
+            "rendered_pages": rendered_pages,
+            **({"render_source": "latex"} if rendered_pages else {}),
+            **({"render_error": render_error} if render_error else {}),
             "ppt_artifact": artifact,
             "learning_plan": learning_plan,
             "retrieval_mode": graphrag_context.get("retrieval_mode"),
@@ -1232,6 +1299,102 @@ def _slide_feedback_for_index(slide_feedback: Optional[Dict[int, str]], slide_in
         if text:
             return text
     return ""
+
+
+def _courseware_asset_urls_from_map(asset_map: Any) -> dict[str, str]:
+    if not isinstance(asset_map, dict):
+        return {}
+    asset_urls: dict[str, str] = {}
+
+    def add_key(key: Any, value: str) -> None:
+        normalized = str(key or "").strip().replace("\\", "/").lstrip("./")
+        if not normalized:
+            return
+        asset_urls.setdefault(normalized, value)
+        basename = posixpath.basename(normalized)
+        if basename:
+            asset_urls.setdefault(basename, value)
+            asset_urls.setdefault(f"fig/{basename}", value)
+
+    for asset in asset_map.values():
+        if not isinstance(asset, dict):
+            continue
+        value = str(asset.get("data_uri") or asset.get("url") or asset.get("path") or "").strip()
+        if not value:
+            continue
+        add_key(asset.get("source_path"), value)
+        add_key(asset.get("tex_ref"), value)
+        add_key(asset.get("name"), value)
+        for alias in asset.get("aliases") or []:
+            add_key(alias, value)
+    return asset_urls
+
+
+def _safe_render_namespace(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", value or "").strip("._")
+    return safe[:96] or "preview"
+
+
+def _externalize_rendered_pages(pages: list[dict], namespace: str) -> list[dict]:
+    safe_namespace = _safe_render_namespace(namespace)
+    output_dir = RENDERED_PAGE_DIR / safe_namespace
+    converted: list[dict] = []
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        item = dict(page)
+        image = str(item.get("image") or "")
+        if image.startswith("data:image/") and "," in image:
+            header, payload = image.split(",", 1)
+            extension = "jpg" if "jpeg" in header.lower() else "png"
+            page_index = int(item.get("page_index") or len(converted))
+            filename = f"page_{page_index + 1:03d}.{extension}"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            image_bytes = base64.b64decode(payload, validate=False)
+            (output_dir / filename).write_bytes(image_bytes)
+            digest = hashlib.md5(image_bytes).hexdigest()[:10]
+            item["image"] = f"/api/education/rendered-pages/{safe_namespace}/{filename}?v={digest}"
+        converted.append(item)
+    return converted
+
+
+def _render_courseware_pdf_pages(tex_content: str, asset_map: Any = None, namespace: str | None = None) -> tuple[list[dict], str]:
+    if not tex_content.strip():
+        return [], ""
+    try:
+        pdf_bytes = _compile_latex_to_pdf_bytes(tex_content, _courseware_asset_urls_from_map(asset_map))
+        rendered_pages = _render_pdf_bytes_to_pages(pdf_bytes)
+        render_namespace = namespace or hashlib.md5(tex_content.encode("utf-8")).hexdigest()
+        return _externalize_rendered_pages(rendered_pages, render_namespace), ""
+    except Exception as exc:
+        return [], str(exc)
+
+
+def _chapter_list_item(chapter: Dict[str, Any]) -> Dict[str, Any]:
+    content = str(chapter.get("content") or "")
+    rendered_pages = chapter.get("rendered_pages") or []
+    ppt_slides = chapter.get("ppt_slides") or []
+    slide_lectures = chapter.get("slide_lectures") or []
+    return {
+        "id": chapter.get("id"),
+        "course_id": chapter.get("course_id"),
+        "title": chapter.get("title"),
+        "content": content[:240],
+        "content_preview": content[:240],
+        "created_at": chapter.get("created_at"),
+        "updated_at": chapter.get("updated_at"),
+        "source_type": chapter.get("source_type"),
+        "source_node_ids": chapter.get("source_node_ids") or [],
+        "source_scope": chapter.get("source_scope"),
+        "has_content": bool(content.strip()),
+        "has_lecture_content": bool(str(chapter.get("lecture_content") or "").strip()),
+        "has_tex_content": bool(str(chapter.get("tex_content") or "").strip()),
+        "has_rendered_pages": bool(rendered_pages),
+        "rendered_page_count": len(rendered_pages) if isinstance(rendered_pages, list) else 0,
+        "ppt_slide_count": len(ppt_slides) if isinstance(ppt_slides, list) else 0,
+        "slide_lecture_count": len(slide_lectures) if isinstance(slide_lectures, list) else 0,
+        "exercise_count": len(chapter.get("exercise_bank") or []),
+    }
 
 
 def _format_slide_visible_elements_for_prompt(slide: Dict[str, Any]) -> str:
@@ -2274,6 +2437,7 @@ async def save_chapter(request: SaveChapterRequest):
             content=request.content,
             graph_data=request.graph_data,
             chapter_id=request.chapter_id,
+            course_id=request.course_id,
             source_type=request.source_type,
             source_node_ids=source_node_ids or request.source_node_ids,
             source_scope=request.source_scope,
@@ -2282,6 +2446,9 @@ async def save_chapter(request: SaveChapterRequest):
             tex_content=request.tex_content,
             editable_model=request.editable_model,
             asset_map=request.asset_map,
+            rendered_pages=request.rendered_pages,
+            render_source=request.render_source,
+            render_error=request.render_error,
             ppt_artifact=request.ppt_artifact,
             ppt_source_node_ids=request.ppt_source_node_ids,
             lecture_source_node_ids=request.lecture_source_node_ids,
@@ -2300,18 +2467,18 @@ async def save_chapter(request: SaveChapterRequest):
 
 
 @router.get("/education/list-chapters")
-async def list_chapters():
+async def list_chapters(course_id: Optional[str] = None):
     try:
         return {
             "success": True,
-            "chapters": chapter_store.list_chapters(),
+            "chapters": [_chapter_list_item(chapter) for chapter in chapter_store.list_chapters(course_id)],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取章节列表失败: {str(e)}")
 
 
 @router.get("/education/get-chapter")
-async def get_chapter(chapter_id: str):
+async def get_chapter(chapter_id: str, include_assets: bool = False):
     try:
         chapter = chapter_store.get_chapter(chapter_id)
         if not chapter:
@@ -2322,9 +2489,49 @@ async def get_chapter(chapter_id: str):
         chapter["exercise_bank"] = cleaned_bank
         chapter["approved_exercise_bank"] = approved_bank
         chapter["exercises"] = cleaned_bank[0] if cleaned_bank else None
+        if not include_assets and chapter.get("rendered_pages"):
+            content = str(chapter.get("content") or "")
+            chapter["content"] = content[:240]
+            chapter["content_preview"] = content[:240]
+            chapter.pop("tex_content", None)
+            chapter.pop("graph_data", None)
+            compact_slides = []
+            for slide in chapter.get("ppt_slides") or []:
+                if not isinstance(slide, dict):
+                    continue
+                compact_slides.append(
+                    {
+                        "index": slide.get("index"),
+                        "title": slide.get("title"),
+                        "content": slide.get("content"),
+                        "raw_text": slide.get("raw_text"),
+                        "notes": slide.get("notes"),
+                    }
+                )
+            chapter["ppt_slides"] = compact_slides
+            chapter.pop("editable_model", None)
+            chapter.pop("asset_map", None)
+            chapter.pop("ppt_artifact", None)
         return {"success": True, "chapter": chapter}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取章节数据失败: {str(e)}")
+
+
+@router.get("/education/rendered-pages/{namespace}/{filename}")
+async def get_rendered_page_image(namespace: str, filename: str):
+    safe_namespace = _safe_render_namespace(namespace)
+    safe_filename = Path(filename).name
+    if safe_namespace != namespace or not re.fullmatch(r"page_\d+\.(?:png|jpg|jpeg)", safe_filename, re.I):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    path = (RENDERED_PAGE_DIR / safe_namespace / safe_filename).resolve()
+    try:
+        path.relative_to(RENDERED_PAGE_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail="图片不存在") from None
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="图片不存在")
+    media_type = "image/jpeg" if path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
+    return FileResponse(path, media_type=media_type)
 
 
 @router.delete("/education/delete-chapter")
@@ -2333,6 +2540,7 @@ async def delete_chapter(chapter_id: str):
         result = chapter_store.delete_chapter(chapter_id)
         if not result.get("success"):
             return {"success": False, "error": "Chapter not found", "chapter_id": chapter_id}
+        result["tts_cache"] = clear_course_tts_cache(chapter_id)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Delete chapter failed: {str(e)}")
@@ -2350,6 +2558,7 @@ async def save_lecture(request: SaveLectureRequest):
             consistency_report = _safe_consistency_report(cleaned_content, learning_plan, task="lecture")
         chapter = chapter_store.save_lecture(
             chapter_id=request.chapter_id,
+            course_id=request.course_id,
             lecture_content=cleaned_content,
             graph_data=request.graph_data,
             source_type=request.source_type,
@@ -2360,6 +2569,9 @@ async def save_lecture(request: SaveLectureRequest):
             tex_content=request.tex_content,
             editable_model=request.editable_model,
             asset_map=request.asset_map,
+            rendered_pages=request.rendered_pages,
+            render_source=request.render_source,
+            render_error=request.render_error,
             ppt_artifact=request.ppt_artifact,
             ppt_source_node_ids=request.ppt_source_node_ids,
             lecture_source_node_ids=request.lecture_source_node_ids,
@@ -3348,6 +3560,7 @@ async def preview_tex(request: PreviewTexRequest):
         prompt_data = build_ppt_lecture_prompt_data(parse_result)
         editable_model = build_editable_model(parse_result, prompt_data)
         image_warning = _courseware_image_warning(parse_result)
+        rendered_pages, render_error = _render_courseware_pdf_pages(tex_content, editable_model.get("assets") or {})
         return {
             "success": True,
             "chapter_title": prompt_data["chapter_title"],
@@ -3360,6 +3573,9 @@ async def preview_tex(request: PreviewTexRequest):
             "layout": editable_model.get("layout") or {},
             "source_tex": tex_content,
             "missing_image_refs": parse_result.get("missing_image_refs") or [],
+            "rendered_pages": rendered_pages,
+            **({"render_source": "latex"} if rendered_pages else {}),
+            **({"render_error": render_error} if render_error else {}),
             **({"warning": image_warning} if image_warning else {}),
         }
     except HTTPException:
@@ -3405,11 +3621,15 @@ async def save_courseware_project_route(request: CoursewareProjectSaveRequest):
         record = save_courseware_project(
             {
                 "project_id": request.project_id,
+                "course_id": request.course_id,
                 "title": request.title,
                 "editable_model": model,
                 "asset_map": request.asset_map,
                 "slides": request.slides,
                 "tex_content": tex_content or "",
+                "rendered_pages": request.rendered_pages or [],
+                "render_source": request.render_source or "",
+                "render_error": request.render_error or "",
                 "ppt_artifact": request.ppt_artifact,
                 "source_node_ids": request.source_node_ids or [],
                 "lecture_target_duration_minutes": request.lecture_target_duration_minutes,
@@ -3423,17 +3643,17 @@ async def save_courseware_project_route(request: CoursewareProjectSaveRequest):
 
 
 @router.get("/education/courseware/projects")
-async def list_courseware_projects_route():
+async def list_courseware_projects_route(course_id: Optional[str] = None):
     try:
-        return {"success": True, "projects": list_courseware_projects()}
+        return {"success": True, "projects": list_courseware_projects(course_id)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"课件项目列表读取失败: {str(e)}")
 
 
 @router.get("/education/courseware/projects/{project_id}")
-async def load_courseware_project_route(project_id: str):
+async def load_courseware_project_route(project_id: str, course_id: Optional[str] = None):
     try:
-        record = load_courseware_project(project_id)
+        record = load_courseware_project(project_id, course_id)
         if not record:
             raise HTTPException(status_code=404, detail="课件项目不存在")
         return {"success": True, "project": record}
@@ -3444,9 +3664,9 @@ async def load_courseware_project_route(project_id: str):
 
 
 @router.delete("/education/courseware/projects/{project_id}")
-async def delete_courseware_project_route(project_id: str):
+async def delete_courseware_project_route(project_id: str, course_id: Optional[str] = None):
     try:
-        deleted = delete_courseware_project(project_id)
+        deleted = delete_courseware_project(project_id, course_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="课件项目不存在")
         return {"success": True, "project_id": project_id, "message": "课件项目已删除"}

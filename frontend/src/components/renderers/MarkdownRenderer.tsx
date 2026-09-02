@@ -11,6 +11,9 @@ interface MarkdownRendererProps {
   inline?: boolean
 }
 
+const latexMathEnvironments =
+  "array|aligned|alignedat|alignat|align|flalign|gathered|gather|multline|matrix|pmatrix|bmatrix|vmatrix|Vmatrix|cases|equation|split|smallmatrix|subarray"
+
 function normalizeLatexDelimiters(content: string) {
   return content
     .split(/(```[\s\S]*?```)/g)
@@ -86,13 +89,35 @@ function normalizeBrokenDisplayMath(segment: string) {
 }
 
 function wrapBareLatexEnvironments(segment: string) {
-  const mathEnvironments = "array|aligned|align|gather|matrix|pmatrix|bmatrix|vmatrix|Vmatrix|cases|equation|split"
-  const pattern = new RegExp(String.raw`\\begin\{(${mathEnvironments})\}[\s\S]*?\\end\{\1\}`, "g")
+  const pattern = new RegExp(
+    String.raw`\\begin\{(${latexMathEnvironments})(\*)?\}((?:\s*(?:\[[^\]]*\]|\{[^{}]*\}))*)([\s\S]*?)\\end\{\1\2\}`,
+    "g"
+  )
 
-  return segment.replace(pattern, (match, _env, offset, fullText) => {
+  return segment.replace(pattern, (match, env, _star, args, body, offset, fullText) => {
     if (isInsideMathBlock(fullText, offset)) return match
-    return `\n\n$$\n${match}\n$$\n\n`
+    return `\n\n$$\n${normalizeDisplayEnvironment(String(env), String(args || ""), String(body || match))}\n$$\n\n`
   })
+}
+
+function normalizeDisplayEnvironment(env: string, args: string, body: string) {
+  const normalizedEnv = env.replace(/\*$/, "")
+  const trimmedBody = body.trim()
+  switch (normalizedEnv) {
+    case "equation":
+      return trimmedBody
+    case "align":
+    case "flalign":
+    case "split":
+      return `\\begin{aligned}\n${trimmedBody}\n\\end{aligned}`
+    case "alignat":
+      return `\\begin{alignedat}${args || "{2}"}\n${trimmedBody}\n\\end{alignedat}`
+    case "gather":
+    case "multline":
+      return `\\begin{gathered}\n${trimmedBody}\n\\end{gathered}`
+    default:
+      return `\\begin{${normalizedEnv}}${args || ""}\n${trimmedBody}\n\\end{${normalizedEnv}}`
+  }
 }
 
 function isInsideMathBlock(text: string, offset: number) {
@@ -138,7 +163,7 @@ export function MarkdownRenderer({ content, className = "", inline = false }: Ma
       <span className={`inline whitespace-normal ${className}`}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex, rehypeRaw]}
+          rehypePlugins={[[rehypeKatex, { strict: "ignore", throwOnError: false }], rehypeRaw]}
           components={components}
         >
           {normalizedContent}
@@ -151,7 +176,7 @@ export function MarkdownRenderer({ content, className = "", inline = false }: Ma
     <div className={`prose prose-sm max-w-none dark:prose-invert ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex, rehypeRaw]}
+        rehypePlugins={[[rehypeKatex, { strict: "ignore", throwOnError: false }], rehypeRaw]}
         components={components}
       >
         {normalizedContent}
