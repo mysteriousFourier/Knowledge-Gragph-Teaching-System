@@ -1329,6 +1329,11 @@ function TeacherPreparePage() {
   const courseAudioAbortRef = useRef(false)
   const recoveredCourseAudioKeyRef = useRef("")
 
+  // Saved courseware opens directly in the editor and does not need the graph tree.
+  useEffect(() => {
+    setGraphScopeEnabled(!chapterId || Boolean(nodeId))
+  }, [chapterId, nodeId])
+
   const previewPpt = usePreviewPpt()
   const previewTex = usePreviewTex()
   const uploadCoursewareAssets = useUploadCoursewareAssets()

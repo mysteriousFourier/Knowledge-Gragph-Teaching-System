@@ -28,7 +28,7 @@ function TeacherPage() {
           </p>
         </div>
         <Link
-          to="/teacher/courses"
+          to="/teacher"
           className="inline-flex min-h-10 items-center justify-center gap-2 border bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
         >
           <Plus size={16} />
