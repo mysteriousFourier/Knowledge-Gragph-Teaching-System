@@ -7,6 +7,8 @@ interface ConsistencyPanelProps {
 }
 
 export function ConsistencyPanel({ report, title = "实体与可靠性检查" }: ConsistencyPanelProps) {
+  if (!hasMeaningfulReport(report)) return null
+
   const displayExpectedEntities = filterCoreEntities(report.expected_entities || [])
   const displayMentionedEntities = filterCoreEntities(report.mentioned_entities || [])
   const displayMissingEntities = filterCoreEntities(report.missing_entities || [])
@@ -49,6 +51,25 @@ export function ConsistencyPanel({ report, title = "实体与可靠性检查" }:
       </div>
     </section>
   )
+}
+
+function hasMeaningfulReport(report: ConsistencyReport) {
+  const hasEntities = [
+    report.expected_entities,
+    report.mentioned_entities,
+    report.missing_entities,
+    report.unsupported_entities,
+  ].some((items) => Array.isArray(items) && items.length > 0)
+  const hasWarnings = Array.isArray(report.warnings) && report.warnings.length > 0
+  const hasPositiveMetric = [
+    report.entity_recall,
+    report.entity_hallucination_rate,
+    report.knowledge_support_ratio,
+    report.unsupported_concept_rate,
+    report.learning_goal_alignment,
+  ].some((value) => typeof value === "number" && value > 0)
+
+  return hasEntities || hasWarnings || hasPositiveMetric || report.is_safe_to_show === false
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
