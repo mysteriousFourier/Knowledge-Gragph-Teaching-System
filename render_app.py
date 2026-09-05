@@ -219,6 +219,8 @@ def _vector_index_dir() -> Path:
 
 
 def _ensure_seed_vector_index() -> None:
+    if os.getenv("KGTS_RETRIEVAL_MODE", "hybrid").strip().lower() != "hybrid":
+        return
     if not _env_flag("APP_BOOTSTRAP_SEED_DATA", True):
         return
     if not (SEED_VECTOR_INDEX_DIR / "metadata.json").exists():
@@ -376,6 +378,7 @@ async def health_check() -> dict[str, Any]:
         "status": "healthy",
         "service": "render-single-fastapi",
         "graph_db_path": _graph_db_path() or "default",
+        "retrieval_mode": os.getenv("KGTS_RETRIEVAL_MODE", "hybrid"),
     }
 
 

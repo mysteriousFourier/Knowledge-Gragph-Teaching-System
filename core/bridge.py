@@ -581,8 +581,8 @@ def build_rag_context(
         )
 
     return {
-        "context": "\n".join(context_lines[:limit]),
-        "llm_context": llm_context[:limit],
+        "context": "\n".join(context_lines[:24]),
+        "llm_context": llm_context[:24],
         "keyword_hits": keyword_hits,
         "semantic_hits": semantic_hits,
         "vector_hits": semantic_hits,

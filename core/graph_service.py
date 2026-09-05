@@ -307,7 +307,7 @@ class GraphService:
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
+        conn = sqlite3.connect(str(self.db_path), timeout=30)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -514,6 +514,74 @@ class GraphService:
             "vector_stats": self._vector_stats(),
         }
 
+    def read_neighborhood(
+        self, root_ids: Iterable[str], *, max_nodes: int = 260, hops: int = 2,
+        relation_types: Optional[Iterable[str]] = None, outgoing_only: bool = False,
+        allowed_node_ids: Optional[Set[str]] = None,
+    ) -> Dict[str, Any]:
+        """Fetch a bounded subgraph using endpoint indexes, without loading the corpus."""
+        max_nodes = max(1, min(max_nodes, 512))
+        roots = list(dict.fromkeys(str(v) for v in root_ids if v))[:max_nodes]
+        nodes: Dict[str, Any] = {}
+        truncated = False
+        with self._connection() as conn:
+            scope_clause = ""
+            if allowed_node_ids is not None:
+                conn.execute("CREATE TEMP TABLE permitted_ids (id TEXT PRIMARY KEY)")
+                conn.executemany("INSERT INTO permitted_ids VALUES (?)", ((v,) for v in allowed_node_ids))
+                scope_clause = " AND source_node IN (SELECT id FROM permitted_ids) AND target_node IN (SELECT id FROM permitted_ids)"
+            for node_id in roots:
+                if allowed_node_ids is not None and node_id not in allowed_node_ids:
+                    continue
+                row = conn.execute("SELECT * FROM nodes WHERE id=?", (node_id,)).fetchone()
+                if row:
+                    nodes[node_id] = self._node_row_to_api(row)
+            frontier = list(nodes)
+            types = sorted(set(relation_types or []))
+            for _ in range(max(0, min(hops, 32))):
+                following = []
+                for node_id in frontier:
+                    endpoint = "source_node=?" if outgoing_only else "(source_node=? OR target_node=?)"
+                    params: list = [node_id] if outgoing_only else [node_id, node_id]
+                    type_clause = ""
+                    if types:
+                        type_clause = " AND type IN (" + ",".join("?" for _ in types) + ")"
+                        params.extend(types)
+                    rows = conn.execute(
+                        f"SELECT source_node,target_node FROM relationships WHERE {endpoint}{type_clause}{scope_clause} LIMIT ?",
+                        params + [max_nodes * 4 + 1],
+                    ).fetchall()
+                    if len(rows) > max_nodes * 4:
+                        truncated = True
+                    for row in rows[:max_nodes * 4]:
+                        neighbor = row[1] if row[0] == node_id else row[0]
+                        if neighbor in nodes or (allowed_node_ids is not None and neighbor not in allowed_node_ids):
+                            continue
+                        if len(nodes) >= max_nodes:
+                            truncated = True
+                            continue
+                        found = conn.execute("SELECT * FROM nodes WHERE id=?", (neighbor,)).fetchone()
+                        if found:
+                            nodes[neighbor] = self._node_row_to_api(found)
+                            following.append(neighbor)
+                frontier = following
+                if not frontier or len(nodes) >= max_nodes:
+                    break
+            if frontier and hops > 0:
+                truncated = True
+            conn.execute("CREATE TEMP TABLE neighborhood_ids (id TEXT PRIMARY KEY)")
+            conn.executemany("INSERT INTO neighborhood_ids VALUES (?)", ((v,) for v in nodes))
+            rows = conn.execute("""SELECT * FROM relationships
+                WHERE source_node IN (SELECT id FROM neighborhood_ids)
+                  AND target_node IN (SELECT id FROM neighborhood_ids) LIMIT ?""",
+                (max_nodes * 8 + 1,),
+            ).fetchall()
+            truncated = truncated or len(rows) > max_nodes * 8
+            relations = [self._relation_row_to_api(row) for row in rows[:max_nodes * 8]]
+        return {"nodes": list(nodes.values()), "relations": relations,
+                "vector_stats": self._vector_stats(),
+                "stats": {"node_count": len(nodes), "relation_count": len(relations), "truncated": truncated}}
+
     def list_nodes(
         self,
         limit: int = 5000,
@@ -660,7 +728,11 @@ class GraphService:
         allowed_node_ids: Optional[Iterable[str]] = None,
     ) -> List[Dict[str, Any]]:
         global _LAST_VECTOR_ERROR
+        if not query.strip() or top_k <= 0:
+            return []
         allowed_ids = self._normalize_allowed_node_ids(allowed_node_ids)
+        if allowed_ids is not None and not allowed_ids:
+            return []
         if self.retrieval_mode == "hybrid":
             try:
                 results = self._hybrid_search(query, node_type=node_type, top_k=top_k, allowed_node_ids=allowed_ids)
@@ -693,11 +765,11 @@ class GraphService:
         return self._text_semantic_search(query, node_type=node_type, top_k=top_k, allowed_node_ids=allowed_ids)
 
     def _normalize_allowed_node_ids(self, values: Optional[Iterable[str]]) -> Optional[Set[str]]:
-        if not values:
+        if values is None:
             return None
         allowed = {str(value or "").strip() for value in values}
         allowed.discard("")
-        return allowed or None
+        return allowed
 
     def _text_semantic_search(
         self,
@@ -817,17 +889,17 @@ class GraphService:
         top_k: int = 10,
         allowed_node_ids: Optional[Set[str]] = None,
     ) -> List[Dict[str, Any]]:
-        query_terms = _sparse_terms(query)
-        if not query_terms:
-            return []
+        from KGTS.core.sparse_index import search
 
-        candidates = [self._node_row_to_api(row) for row in self._fetch_node_rows(node_type=node_type, limit=5000)]
-        if allowed_node_ids is not None:
-            candidates = [candidate for candidate in candidates if str(candidate.get("id") or "") in allowed_node_ids]
+        with self._connection() as conn:
+            rows = search(conn, query, limit=min(max(top_k * 4, 24), 128),
+                          node_type=node_type, allowed_ids=allowed_node_ids)
+        candidates = [self._node_row_to_api(row) for row in rows]
+        best_rank = max((-float(row["bm25_rank"]) for row in rows), default=1.0)
         results: List[Dict[str, Any]] = []
-        for candidate in candidates:
+        for candidate, row in zip(candidates, rows):
             haystack = f"{candidate['metadata'].get('label', '')}\n{candidate['type']}\n{candidate['content']}"
-            sparse_score = _cosine_sparse(query_terms, _sparse_terms(haystack))
+            sparse_score = -float(row["bm25_rank"]) / max(best_rank, 1e-12)
             text_score = _score_text(query, haystack)
             if sparse_score <= 0 and text_score <= 0:
                 continue
@@ -866,6 +938,14 @@ class GraphService:
 
     def rebuild_vector_index(self) -> Dict[str, Any]:
         global _LAST_VECTOR_ERROR
+        if self.retrieval_mode == "sparse_hybrid":
+            from KGTS.core.sparse_index import ensure_index, synchronize
+            with self._connection() as conn:
+                ensure_index(conn)
+                conn.execute("INSERT OR REPLACE INTO kgts_fts_dirty SELECT id FROM nodes")
+                conn.commit()
+                synchronize(conn)
+            return self._vector_stats()
         if self.vector_index is None:
             try:
                 self.vector_index = GraphVectorIndex()
@@ -884,6 +964,8 @@ class GraphService:
             return self._vector_stats()
 
     def reset_vector_index(self) -> Dict[str, Any]:
+        if self.retrieval_mode == "sparse_hybrid":
+            return self.rebuild_vector_index()
         if self.vector_index is None:
             try:
                 self.vector_index = GraphVectorIndex()
@@ -894,11 +976,18 @@ class GraphService:
 
     def _vector_stats(self) -> Dict[str, Any]:
         if self.retrieval_mode == "sparse_hybrid":
+            with self._connection() as conn:
+                indexed = bool(conn.execute("SELECT 1 FROM sqlite_master WHERE name='kgts_fts'").fetchone())
+                size = conn.execute("SELECT COUNT(*) FROM kgts_fts").fetchone()[0] if indexed else 0
+                pending = conn.execute("SELECT COUNT(*) FROM kgts_fts_dirty").fetchone()[0] if indexed else 0
             return {
                 "enabled": True,
                 "mode": "sparse_hybrid",
-                "provider": "standard-library-sparse",
-                "model": "token-char-ngram",
+                "provider": "sqlite-fts5-bm25",
+                "model": "unicode-cjk-bigram",
+                "index_size": size,
+                "pending_updates": pending,
+                "stale": not indexed or pending > 0,
                 "db_path": str(self.db_path),
                 "path_policy": "project_local" if project_local_only() else "external_paths_allowed",
                 "outside_project_paths": [],

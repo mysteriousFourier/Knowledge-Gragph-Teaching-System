@@ -16,6 +16,8 @@ KGTS 已支持单端口部署：前端构建产物、教学 API、维护 API、�
 
 ## 免费规格选择
 
+> 低内存配置更新（2026-09-05）：现有 1 GB VM 推荐按 [免费 VM GraphRAG 优化](azure-student-free-graphrag.md) 启用 `sparse_hybrid` 和单 worker 配置。下文 `hybrid` + CPU 模型的步骤保留为可选神经检索方案，不再是免费 VM 默认建议；轻量检索无需安装 `requirements/vector-cpu.txt`。TTS 仍使用现有独立服务。
+
 Azure for Students 当前包含 12 个月内的免费 VM 小规格和 100 美元额度。免费 VM 候选优先级：
 
 | 规格 | 架构 | 资源 | 判断 |

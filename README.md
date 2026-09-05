@@ -153,6 +153,8 @@ python backend/start_all.py
 
 ## 当前线上部署
 
+约 1 GB 的 Azure for Students VM 推荐使用 SQLite FTS5 + 两跳图扩展的低内存 GraphRAG，避免 Web 进程加载 PyTorch 和 embedding 模型。启用步骤和能力边界见 [免费 VM GraphRAG 优化](docs/azure-student-free-graphrag.md)。
+
 当前公开演示站点 `http://kgts.southeastasia.cloudapp.azure.com` 运行在 Azure for Students VM 上，服务由 VM 内的 Git 仓库、systemd 和 Nginx 管理。更新这个站点时，需要 SSH 到 VM，在 `/home/azureuser/kgts` 中拉取或应用代码、重建前端，并重启对应 systemd 服务。仅把提交推到 GitHub 不会更新当前公开演示站点。
 
 VM 更新流程见 [Azure for Students VM 部署](docs/azure-student-vm.md#更新部署)。如果改动涉及 TTS 后端、TTS 代理或语音配置，例如 `core/tts_*`、`education/tts_router.py`、`scripts/genie_tts_proxy_server.py` 或 `KGTS_TTS_*`，除了 `kgts.service` 外还要重启 `kgts-tts.service`。

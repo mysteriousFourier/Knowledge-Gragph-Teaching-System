@@ -1,0 +1,23 @@
+[Unit]
+Description=KGTS GraphRAG on Azure for Students
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=azureuser
+WorkingDirectory=/home/azureuser/kgts
+EnvironmentFile=/home/azureuser/kgts/.env
+EnvironmentFile=/home/azureuser/kgts/deploy/azure-student-free.env
+ExecStart=/home/azureuser/kgts/.venv/bin/python -m uvicorn render_app:app --host 127.0.0.1 --port 8000 --workers 1 --limit-concurrency 16 --limit-max-requests 2000
+Restart=always
+RestartSec=3
+TimeoutStopSec=45
+# Leave room for the OS and nginx. The separate TTS service needs its own budget.
+MemoryAccounting=true
+MemoryHigh=650M
+MemoryMax=800M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

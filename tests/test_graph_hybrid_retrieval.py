@@ -171,7 +171,7 @@ class GraphHybridRetrievalTest(unittest.TestCase):
         self.assertIn("sparse_score", results[0])
         self.assertIn("graph_score", results[0])
         self.assertEqual(stats["mode"], "sparse_hybrid")
-        self.assertEqual(stats["provider"], "standard-library-sparse")
+        self.assertEqual(stats["provider"], "sqlite-fts5-bm25")
 
     def test_hybrid_search_reports_vector_error_and_falls_back_to_sparse_search(self):
         with patch.dict(os.environ, {"KGTS_RETRIEVAL_MODE": "hybrid", "KGTS_ALLOW_EXTERNAL_PATHS": "1"}):

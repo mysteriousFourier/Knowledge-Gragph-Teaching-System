@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+import os
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from KGTS.core.bridge import build_frontend_graph, get_graph_schema, search_nodes, semantic_search
@@ -57,7 +58,9 @@ def build_graphrag_context(
     evidence boundary. Vector search is scoped to that subtree plus direct
     reference nodes.
     """
-    graph = build_frontend_graph()
+    expansion_limit = max(1, min(int(expansion_limit), 64))
+    lightweight = os.getenv("KGTS_RETRIEVAL_MODE", "hybrid").strip().lower() == "sparse_hybrid"
+    graph = {"nodes": [], "relations": []} if lightweight else build_frontend_graph()
     nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else []
     relations = graph.get("relations") or graph.get("edges") or []
     node_by_id = {str(node.get("id") or ""): node for node in nodes if isinstance(node, dict)}
@@ -70,14 +73,17 @@ def build_graphrag_context(
         if not selected_context.get("success"):
             raise ValueError(str(selected_context.get("error") or "Graph node not found"))
         selected_ids = [str(node.get("id") or "") for node in selected_context.get("nodes") or []]
-        allowed.update(node_id for node_id in selected_ids if node_id)
-    allowed_set: Optional[Set[str]] = allowed or None
+        selected_set = {node_id for node_id in selected_ids if node_id}
+        allowed = allowed & selected_set if allowed_node_ids is not None else selected_set
+        if lightweight:
+            graph = selected_context["graph_data"]
+    allowed_set: Optional[Set[str]] = allowed if seeds or allowed_node_ids is not None else None
 
     scoped_graph = _scope_graph(graph, allowed_set) if allowed_set is not None else graph
-    top_k = max(1, int(limit or 6))
+    top_k = max(1, min(int(limit or 6), expansion_limit))
 
     try:
-        vector_hits = semantic_search(query, top_k=top_k, allowed_node_ids=sorted(allowed_set) if allowed_set else None)
+        vector_hits = semantic_search(query, top_k=top_k, allowed_node_ids=sorted(allowed_set) if allowed_set is not None else None)
     except Exception as exc:
         vector_hits = []
         vector_error = str(exc)
@@ -85,13 +91,33 @@ def build_graphrag_context(
         vector_error = None
 
     try:
-        keyword_hits = search_nodes(query, limit=top_k)
+        keyword_hits = [] if lightweight else search_nodes(query, limit=top_k)
         if allowed_set is not None:
             keyword_hits = [hit for hit in keyword_hits if str(hit.get("id") or "") in allowed_set]
     except Exception:
         keyword_hits = []
 
     fallback_seed_ids = seeds if not vector_hits and not keyword_hits else []
+    if lightweight:
+        from KGTS.core.graph_service import GraphService
+        service = GraphService()
+        if seeds:
+            graph = service.read_neighborhood(
+                sorted(allowed_set or []), max_nodes=min(max_nodes + 32, 512), hops=0,
+                allowed_node_ids=allowed_set,
+            )
+        else:
+            hit_ids = [str(hit.get("node_id") or "") for hit in vector_hits]
+            graph = service.read_neighborhood(
+                hit_ids, max_nodes=expansion_limit, hops=2,
+                relation_types=EXPANSION_TYPES, allowed_node_ids=allowed_set,
+            )
+        graph = build_frontend_graph(graph)
+        graph["vector_stats"] = service._vector_stats()
+        nodes = graph.get("nodes", [])
+        relations = graph.get("relations", [])
+        node_by_id = {str(node.get("id") or ""): node for node in nodes}
+        scoped_graph = _scope_graph(graph, allowed_set)
     expanded_node_ids = _expand_hit_nodes(
         vector_hits=vector_hits,
         keyword_hits=keyword_hits,
@@ -107,8 +133,12 @@ def build_graphrag_context(
     evidence = _nodes_to_evidence(expanded_nodes)
     graph_paths = graph_paths_for_evidence(graph_context, evidence, limit=12)
     formula_context = formula_context_for_text(_formula_text(query, expanded_nodes), limit=12)
-    llm_context, context_lines = _build_llm_context(expanded_nodes, vector_hits, keyword_hits)
+    llm_context, context_lines = _build_llm_context(expanded_nodes, vector_hits, keyword_hits, context_relations)
     retrieval_stats = _retrieval_stats(scoped_graph, vector_error)
+    if lightweight:
+        retrieval_stats = {**retrieval_stats, "graph_hops": 2,
+                           "context_node_limit": expansion_limit,
+                           "context_truncated": bool(graph.get("stats", {}).get("truncated"))}
 
     return {
         "query": query,
@@ -121,9 +151,10 @@ def build_graphrag_context(
         "relations": context_relations,
         "graph_paths": graph_paths,
         "formula_context": formula_context,
+        "evidence": evidence,
         "llm_context": llm_context,
         "context_lines": context_lines,
-        "context": "\n".join(context_lines[:top_k]),
+        "context": "\n".join(context_lines),
         "retrieval_stats": retrieval_stats,
         "retrieval_mode": retrieval_stats.get("mode"),
         "selected_context": selected_context,
@@ -134,7 +165,20 @@ def build_graphrag_context(
 
 
 def build_node_contexts(node_ids: Iterable[str], *, max_nodes: int = 260) -> Dict[str, Any]:
-    graph = build_frontend_graph()
+    node_ids = list(node_ids)
+    if os.getenv("KGTS_RETRIEVAL_MODE", "hybrid").strip().lower() == "sparse_hybrid":
+        from KGTS.core.graph_service import GraphService
+        service = GraphService()
+        subtree = service.read_neighborhood(node_ids, max_nodes=max_nodes, hops=32,
+                                            relation_types=STRUCTURAL_TYPES, outgoing_only=True)
+        graph = service.read_neighborhood(
+            [node["id"] for node in subtree["nodes"]], max_nodes=min(max_nodes + 32, 512),
+            hops=1, relation_types=REFERENCE_TYPES, outgoing_only=True,
+        )
+        graph["stats"]["truncated"] |= subtree["stats"]["truncated"]
+        graph = build_frontend_graph(graph)
+    else:
+        graph = build_frontend_graph()
     nodes = graph.get("nodes") if isinstance(graph.get("nodes"), list) else []
     relations = graph.get("relations") or graph.get("edges") or []
     node_by_id = {str(node.get("id") or ""): node for node in nodes if isinstance(node, dict)}
@@ -244,7 +288,7 @@ def build_node_contexts(node_ids: Iterable[str], *, max_nodes: int = 260) -> Dic
             "selected_count": len(selected_ids),
             "referenced_count": len(referenced_ids),
             "max_nodes": max_nodes,
-            "truncated": len(selected_ids) >= max_nodes,
+            "truncated": len(selected_ids) >= max_nodes or bool(graph.get("stats", {}).get("truncated")),
         },
         "evidence": evidence,
         "allowed_node_ids": ordered_ids,
@@ -257,7 +301,7 @@ def build_node_contexts(node_ids: Iterable[str], *, max_nodes: int = 260) -> Dic
 
 
 def _scope_graph(graph: Dict[str, Any], allowed_node_ids: Optional[Set[str]]) -> Dict[str, Any]:
-    if not allowed_node_ids:
+    if allowed_node_ids is None:
         return graph
     nodes = [
         node
@@ -310,13 +354,19 @@ def _expand_hit_nodes(
     for node_id in seed_ids:
         add(node_id)
 
-    for node_id in list(ordered):
+    queue = deque((node_id, 0) for node_id in ordered)
+    while queue:
+        node_id, depth = queue.popleft()
+        if depth >= 2:
+            continue
         for relation in _neighbor_relations(relations, node_id):
             relation_type = str(relation.get("relation_type") or relation.get("type") or "")
             if relation_type not in EXPANSION_TYPES:
                 continue
+            before = len(ordered)
             add(str(relation.get("target_id") or relation.get("target") or relation.get("to") or ""))
             add(str(relation.get("source_id") or relation.get("source") or relation.get("from") or ""))
+            queue.extend((added, depth + 1) for added in ordered[before:])
             if len(ordered) >= limit:
                 return ordered[:limit]
     return ordered[:limit]
@@ -358,7 +408,8 @@ def _nodes_to_evidence(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "label": _node_label(node),
                 "type": str(node.get("type") or "concept"),
                 "content": str(node.get("content") or ""),
-                "source": "graphrag",
+                "source": (node.get("metadata") or {}).get("source") or "graphrag",
+                "source_file": (node.get("metadata") or {}).get("source_file"),
             }
         )
     return evidence
@@ -368,6 +419,7 @@ def _build_llm_context(
     nodes: List[Dict[str, Any]],
     vector_hits: List[Dict[str, Any]],
     keyword_hits: List[Dict[str, Any]],
+    relations: Optional[List[Dict[str, Any]]] = None,
 ) -> tuple[List[Dict[str, Any]], List[str]]:
     vector_ids = {
         str(hit.get("node_id") or (hit.get("metadata") or {}).get("id") or "")
@@ -379,9 +431,23 @@ def _build_llm_context(
     }
     llm_context = []
     context_lines = []
+    remaining = max(1000, min(int(os.getenv("KGTS_RAG_CONTEXT_CHARS", "12000")), 24000))
+    if relations:
+        labels = {str(node.get("id")): _node_label(node) for node in nodes}
+        paths = []
+        for relation in relations[:12]:
+            source = str(relation.get("source_id") or relation.get("source") or "")
+            target = str(relation.get("target_id") or relation.get("target") or "")
+            kind = relation.get("relation_type") or relation.get("type") or "related"
+            paths.append(f"[{source}] {labels.get(source, source)} --{kind}--> [{target}] {labels.get(target, target)}")
+        text = "\n".join(paths)[:min(2000, remaining // 4)]
+        remaining -= len(text)
+        llm_context.append({"content": text, "metadata": {"source": "graph_relations", "type": "relations"}})
+        context_lines.append(text)
     for node in nodes:
         node_id = str(node.get("id") or "")
-        source = "vector"
+        source = next((hit.get("retrieval_source", "vector") for hit in vector_hits
+                       if str(hit.get("node_id") or "") == node_id), "vector")
         if node_id in keyword_ids and node_id not in vector_ids:
             source = "keyword"
         elif node_id not in vector_ids:
@@ -391,7 +457,10 @@ def _build_llm_context(
         content = str(node.get("content") or label).strip()
         if not content:
             continue
-        clipped = content[:900]
+        clipped = content[:min(900, remaining)]
+        if not clipped:
+            break
+        remaining -= len(clipped)
         llm_context.append(
             {
                 "content": clipped,
@@ -400,6 +469,8 @@ def _build_llm_context(
                     "label": label,
                     "type": node_type,
                     "source": source,
+                    "source_file": (node.get("metadata") or {}).get("source_file"),
+                    "document_source": (node.get("metadata") or {}).get("source"),
                 },
             }
         )
@@ -475,12 +546,13 @@ def _build_tree(
     children_by_parent: Dict[str, List[str]],
     node_by_id: Dict[str, Dict[str, Any]],
     selected_ids: set[str],
+    ancestors: frozenset[str] = frozenset(),
 ) -> Dict[str, Any]:
     node = node_by_id[node_id]
     children = [
-        _build_tree(child_id, children_by_parent, node_by_id, selected_ids)
+        _build_tree(child_id, children_by_parent, node_by_id, selected_ids, ancestors | {node_id})
         for child_id in sorted(children_by_parent.get(node_id, []), key=lambda item: _node_sort_key(node_by_id.get(item, {})))
-        if child_id in selected_ids and child_id in node_by_id
+        if child_id in selected_ids and child_id in node_by_id and child_id not in ancestors | {node_id}
     ]
     return {
         "id": node_id,

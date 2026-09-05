@@ -40,13 +40,14 @@ KGTS_PROJECT_LOCAL_ONLY=1
 
 ## `sparse_hybrid`
 
-面向受限部署环境的免费、无模型图谱向量式检索。
+面向受限部署环境的免费、无模型 GraphRAG 检索，也是 Azure for Students 1 GB VM 的推荐模式。
 
 它使用：
 
-- Python 标准库构建 token 和字符 n-gram 稀疏向量
+- SQLite FTS5 持久化 BM25 索引，英文词项与中文双字片段召回
+- 数据库触发器记录节点变化，下次查询增量同步索引
 - 文本重叠打分
-- 图谱关系密度重排
+- 图谱关系密度重排，以及有节点数和字符预算的两跳图扩展
 
 它不需要：
 
@@ -57,9 +58,11 @@ KGTS_PROJECT_LOCAL_ONLY=1
 - 本地模型文件
 - 外部 embedding API
 
-`sparse_hybrid` 不是神经网络 embedding 检索，但可以在不增加部署体积的情况下提供实用的“图谱 + 向量式”混合检索。当前 Azure 默认仍保持 `hybrid`，不会主动切到该模式。
+`sparse_hybrid` 不是神经网络 embedding 检索，不保证跨语言或同义改写召回；它保留节点证据、课程范围、图路径和公式引用。启用步骤见 [免费 VM GraphRAG 优化](azure-student-free-graphrag.md)。现有部署需要显式启用该配置。
 
 ## 低资源 Azure 部署说明
+
+Azure for Students VM 优先使用上述 `sparse_hybrid`；以下 `hybrid` 配置是可选神经检索方案。已有 App Service workflow 是独立部署路径，本次 VM 优化不改变它。
 
 Azure App Service F1 不适合让神经 embedding 大模型常驻主进程。线上保持 `hybrid`，但用 CPU-only 依赖、启动不预热、查询/重建后释放模型引用：
 
