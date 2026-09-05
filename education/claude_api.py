@@ -24,8 +24,10 @@ from KGTS.education.kg_constraints import (
 from KGTS.core.graph_context import build_graphrag_context
 from KGTS.config import load_root_env
 
-DEFAULT_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
-DEFAULT_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash-vision-exp"
+# Compatibility aliases for callers importing the old names.
+DEFAULT_DEEPSEEK_FLASH_MODEL = DEFAULT_DEEPSEEK_MODEL
+DEFAULT_DEEPSEEK_PRO_MODEL = DEFAULT_DEEPSEEK_MODEL
 _DEFAULT_TIMEOUT = object()
 
 QA_SYSTEM_PROMPT = """你是一个公式友好的教学问答助手。
@@ -36,14 +38,8 @@ QA_SYSTEM_PROMPT = """你是一个公式友好的教学问答助手。
 
 
 def get_deepseek_model(kind: str = "flash") -> str:
-    """Resolve task-specific DeepSeek model names."""
-    if kind == "pro":
-        return (
-            os.getenv("DEEPSEEK_PRO_MODEL")
-            or os.getenv("DEEPSEEK_MODEL")
-            or DEFAULT_DEEPSEEK_PRO_MODEL
-        ).strip() or DEFAULT_DEEPSEEK_PRO_MODEL
-    return (os.getenv("DEEPSEEK_FLASH_MODEL") or DEFAULT_DEEPSEEK_FLASH_MODEL).strip() or DEFAULT_DEEPSEEK_FLASH_MODEL
+    """Return the single model used by all education generation flows."""
+    return DEFAULT_DEEPSEEK_MODEL
 
 
 def _parse_read_timeout(value: str | None, default: float | None) -> float | None:
@@ -186,7 +182,7 @@ class DeepSeekAPIClient:
             load_root_env()
         self.api_key = (api_key or os.getenv("DEEPSEEK_API_KEY", "")).strip()
         self.base_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").rstrip("/")
-        self.model = (model or get_deepseek_model("flash")).strip() or DEFAULT_DEEPSEEK_FLASH_MODEL
+        self.model = DEFAULT_DEEPSEEK_MODEL
 
     async def generate_lecture(self, graph_data: Dict, chapter_data: Dict, style: str = "引导式教学") -> str:
         prompt = self._build_lecture_prompt(graph_data, chapter_data, style)
