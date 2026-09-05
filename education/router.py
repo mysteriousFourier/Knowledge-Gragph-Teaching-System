@@ -97,7 +97,7 @@ from KGTS.education.courseware_editor import (
 from KGTS.education.courseware_style import build_style_reference_guidance, build_style_reference_profile
 from KGTS.education.teacher_profile import merge_teacher_guidance
 from KGTS.education.course_store import course_store
-from KGTS.education.beamer_full_router import _compile_latex_to_pdf_bytes, _render_pdf_bytes_to_pages
+from KGTS.education.beamer_full_router import _compile_latex_file_to_pdf_bytes, _compile_latex_to_pdf_bytes, _render_pdf_bytes_to_pages
 
 load_root_env()
 
@@ -2677,6 +2677,13 @@ async def save_lecture(request: SaveLectureRequest):
         source_node_ids = _normalize_source_node_ids(None, request.source_node_ids)
         cleaned_content = clean_generated_lecture_output(request.lecture_content)
         learning_plan = request.learning_plan if request.learning_plan is not None else existing_chapter.get("lecture_learning_plan")
+        if not isinstance(learning_plan, dict) and isinstance(request.slide_lectures, list):
+            plans = [item.get("learning_plan") for item in request.slide_lectures if isinstance(item, dict) and isinstance(item.get("learning_plan"), dict)]
+            evidence = []
+            for plan in plans:
+                evidence.extend(plan.get("evidence") or [])
+            if plans:
+                learning_plan = {**plans[0], "evidence": evidence}
         consistency_report = request.consistency_report if request.consistency_report is not None else None
         if consistency_report is None and isinstance(learning_plan, dict):
             consistency_report = _safe_consistency_report(cleaned_content, learning_plan, task="lecture")
