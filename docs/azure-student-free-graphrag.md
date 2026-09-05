@@ -59,7 +59,7 @@ KGTS_RETRIEVAL_MODE=sparse_hybrid GRAPH_DB_PATH=.runtime/knowledge_graph.db .ven
 
 - Web 单 worker，最多 16 个并发连接/任务；超限返回 503。每 2,000 请求后退出并由 systemd 重启，存在短暂不可用时间。
 - 内存软上限 650 MB、硬上限 800 MB；超限可能被系统终止并重启。需结合线上课件导出等工作负载验证，检索基准不是全站峰值保证。
-- TTS 保留现有独立 `genie_server` 服务和 `.env` 的开关、URL。1 GB VM 无法保证 Web 与本地语音模型同时运行；大型语音合成仍需错峰或使用已有外部推理服务。本配置不停止或删除 TTS 服务。
+- TTS 继承 `.env` 的提供方、开关和 URL，支持保留现有 Azure Speech 或独立 `genie_server`。1 GB VM 无法保证 Web 与本地语音模型同时运行；大型语音合成仍需错峰或使用已有外部推理服务。本配置不停止或删除 TTS 服务。
 - 图检索无模型调用费用。自然语言答案、讲稿和课件仍使用现有 DeepSeek API，费用独立于 Azure 学生额度；未配置 Key 时问答保留本地证据回退。
 - Students VM 免费资格有期限和月用量限制。磁盘、公网 IP、带宽及超期规格可能消耗余额，不保证账单恒为零。继续在 Portal 检查现有 VM 的 Free services 与 Cost Management。
 
