@@ -393,6 +393,9 @@ export const useGeneratePptLectures = () => {
       speechRateCpm,
       sourceNodeIds,
       teacherGuidance,
+      courseId,
+      teacherProfileId,
+      allowNoNode,
     }: {
       file: File
       style: string
@@ -400,6 +403,9 @@ export const useGeneratePptLectures = () => {
       speechRateCpm?: number
       sourceNodeIds?: string[]
       teacherGuidance?: string
+      courseId?: string
+      teacherProfileId?: string
+      allowNoNode?: boolean
     }) => {
       const formData = new FormData()
       formData.append("file", file)
@@ -412,6 +418,9 @@ export const useGeneratePptLectures = () => {
         formData.append("graph_scope", "subtree")
       }
       if (teacherGuidance?.trim()) formData.append("teacher_guidance", teacherGuidance.trim())
+      if (courseId?.trim()) formData.append("course_id", courseId.trim())
+      if (teacherProfileId?.trim()) formData.append("teacher_profile_id", teacherProfileId.trim())
+      if (allowNoNode) formData.append("allow_no_node", "true")
       return educationClient
         .post<PptUploadResponse>("/api/education/upload-ppt", formData, {
           headers: { "Content-Type": "multipart/form-data" },

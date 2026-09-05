@@ -92,6 +92,7 @@ from KGTS.education.courseware_editor import (
     serialize_editable_model_to_tex,
 )
 from KGTS.education.courseware_style import build_style_reference_guidance, build_style_reference_profile
+from KGTS.education.teacher_profile import merge_teacher_guidance
 from KGTS.education.course_store import course_store
 from KGTS.education.beamer_full_router import _compile_latex_to_pdf_bytes, _render_pdf_bytes_to_pages
 
@@ -118,6 +119,23 @@ def _courseware_image_warning(parse_result: Dict[str, Any]) -> str:
     if tex_source:
         return f"检测到未匹配的图片引用：{shown}{suffix}。请确认 ZIP 中包含与 {tex_source} 相对路径一致的图片文件。"
     return f"检测到未匹配的图片引用：{shown}{suffix}。单独上传 .tex 不包含 fig 等相对路径图片；请上传包含 .tex 和图片目录的 ZIP，或用“图片包”补充资源。"
+
+
+def _resolve_teacher_guidance(
+    teacher_guidance: str = "",
+    *,
+    course_id: Optional[str] = None,
+    title: str = "",
+    profile_id: Optional[str] = None,
+) -> tuple[str, Optional[Dict[str, Any]]]:
+    course = course_store.get(str(course_id)) if course_id else None
+    profile_title = "\n".join(part for part in (str((course or {}).get("title") or ""), title) if part)
+    return merge_teacher_guidance(
+        teacher_guidance,
+        course_id=str(course_id or ""),
+        title=profile_title,
+        profile_id=str(profile_id or ""),
+    )
 
 
 @router.post("/education/courses")
@@ -377,11 +395,20 @@ async def generate_lecture(request: GenerateLectureRequest):
                 chapter_content = str(graphrag_context.get("context") or chapter_content)
         except Exception:
             graphrag_context = None
+        existing_chapter = chapter_store.get_chapter(request.chapter_id) or {}
+        effective_course_id = request.course_id or existing_chapter.get("course_id")
+        effective_teacher_guidance, teacher_profile = _resolve_teacher_guidance(
+            request.teacher_guidance,
+            course_id=effective_course_id,
+            title=chapter_title,
+            profile_id=request.teacher_profile_id,
+        )
         chapter_data = {
             "id": request.chapter_id,
             "title": chapter_title,
             "content": chapter_content,
-            "teacher_guidance": str(request.teacher_guidance or "").strip(),
+            "course_id": effective_course_id,
+            "teacher_guidance": effective_teacher_guidance,
             "source_node_ids": source_node_ids,
             "graphrag_context": graphrag_context,
             "graph_context": _format_graphrag_generation_context(graphrag_context) if graphrag_context else "",
@@ -442,6 +469,7 @@ async def generate_lecture(request: GenerateLectureRequest):
             title=chapter_title,
             content=chapter_content,
             chapter_id=request.chapter_id,
+            course_id=effective_course_id,
             source_type="graph_subtree" if selected_context else None,
             source_node_ids=source_node_ids or None,
             source_scope=(selected_context or {}).get("scope"),
@@ -449,6 +477,7 @@ async def generate_lecture(request: GenerateLectureRequest):
         )
         saved_chapter = chapter_store.save_lecture(
             chapter_id=request.chapter_id,
+            course_id=effective_course_id,
             lecture_content=lecture_content,
             learning_plan=learning_plan,
             consistency_report=consistency_report,
@@ -476,6 +505,7 @@ async def generate_lecture(request: GenerateLectureRequest):
             "vector_hits": (graphrag_context or {}).get("vector_hits"),
             "graph_paths": (graphrag_context or {}).get("graph_paths"),
             "formula_context": (graphrag_context or {}).get("formula_context"),
+            "teacher_profile_id": (teacher_profile or {}).get("profile_id") if teacher_profile else None,
             "generated_at": datetime.now().isoformat(),
         }
     except ValueError as e:
@@ -516,24 +546,59 @@ async def _generate_chapter_title(client: DeepSeekAPIClient, graph_data: Dict[st
     return str(title or "").strip().strip("\"'“”")
 
 
+async def _auto_select_source_node_ids(query: str, api_key: Optional[str] = None) -> List[str]:
+    """Use the vision-capable flash model to pick relevant graph nodes from content."""
+    candidates = backend_search_nodes(str(query or "")[:1600], limit=16)
+    if not candidates:
+        return []
+    compact = [
+        {"id": str(item.get("id") or item.get("node_id") or ""), "label": item.get("label"), "content": str(item.get("content") or "")[:260]}
+        for item in candidates
+    ]
+    compact = [item for item in compact if item["id"]]
+    try:
+        client = DeepSeekAPIClient(api_key=api_key, model="deepseek-v4-flash-vision-exp")
+        raw = await client._call_deepseek(
+            "根据课程标题、正文和候选知识图谱节点，选择最相关的节点。只输出 JSON 数组，元素为候选节点 id，最多 6 个。\n"
+            f"课程内容：\n{str(query or '')[:1800]}\n候选节点：\n{json.dumps(compact, ensure_ascii=False)}",
+            max_tokens=300,
+            system_prompt="You select relevant knowledge graph node IDs. Return JSON array only.",
+            read_timeout_seconds=30.0,
+        )
+        selected = json.loads(_strip_json_fence(raw))
+        if isinstance(selected, list):
+            allowed = {item["id"] for item in compact}
+            return [str(item) for item in selected if str(item) in allowed][:6]
+    except Exception:
+        pass
+    return [item["id"] for item in compact[:3]]
+
+
 @router.post("/education/generate-ppt-tex")
 async def generate_ppt_tex(request: GeneratePptTexRequest):
     source_node_ids = _normalize_source_node_ids(request.source_node_id, request.source_node_ids)
-    if not source_node_ids:
-        raise HTTPException(status_code=400, detail="请选择图谱章节树节点后再生成 PPT/TeX")
+    auto_selected = False
+    if not source_node_ids and not request.allow_no_node:
+        source_node_ids = await _auto_select_source_node_ids(
+            f"{request.chapter_title}\n{request.content}", request.api_key
+        )
+        auto_selected = bool(source_node_ids)
+    if not source_node_ids and not request.allow_no_node and not request.content.strip() and not request.chapter_title.strip():
+        raise HTTPException(status_code=400, detail="请选择图谱章节树节点，或提供标题/内容后自动选择节点")
     try:
-        selected_context = build_node_contexts(source_node_ids)
-        if not selected_context.get("success"):
+        selected_context = build_node_contexts(source_node_ids) if source_node_ids else {"success": True, "chapter_content": request.content}
+        if source_node_ids and not selected_context.get("success"):
             raise HTTPException(status_code=404, detail=selected_context.get("error") or "Graph node not found")
-        chapter_title = str(request.chapter_title or selected_context.get("chapter_title") or "").strip() or "图谱生成课件"
+        chapter_title = str(request.chapter_title or selected_context.get("chapter_title") or "").strip() or "自动生成课件"
+        base_content = str(request.content or selected_context.get("chapter_content") or "").strip()
         graphrag_context = build_graphrag_context(
-            f"{chapter_title}\n{str(selected_context.get('chapter_content') or '')[:1200]}",
-            seed_node_ids=source_node_ids,
+            f"{chapter_title}\n{base_content[:1200]}",
+            seed_node_ids=source_node_ids or None,
             limit=10,
         )
         selected_context = graphrag_context.get("selected_context") or selected_context
         graph_data = graphrag_context.get("graph_data") or selected_context.get("graph_data")
-        context_content = _format_graphrag_generation_context(graphrag_context) or str(selected_context.get("chapter_content") or "").strip()
+        context_content = _format_graphrag_generation_context(graphrag_context) or base_content
         source_evidence = evidence_from_rag(graphrag_context.get("llm_context") or [], limit=10)
         learning_plan = _build_ppt_learning_plan(
             chapter_title=chapter_title,
@@ -549,6 +614,12 @@ async def generate_ppt_tex(request: GeneratePptTexRequest):
         formula_context = graphrag_context.get("formula_context") or formula_context_for_text(context_content, limit=12)
         raw_slides: Any = None
         warning = ""
+        effective_teacher_guidance, teacher_profile = _resolve_teacher_guidance(
+            request.teacher_guidance,
+            course_id=request.course_id,
+            title=chapter_title,
+            profile_id=request.teacher_profile_id,
+        )
         style_reference_guidance = build_style_reference_guidance(request.style_reference)
         try:
             client = DeepSeekAPIClient(
@@ -562,7 +633,7 @@ async def generate_ppt_tex(request: GeneratePptTexRequest):
                 graph_paths=graph_paths,
                 formula_context=formula_context,
                 style=request.style,
-                teacher_guidance=str(request.teacher_guidance or "").strip(),
+                teacher_guidance=effective_teacher_guidance,
                 style_reference_guidance=style_reference_guidance,
                 max_slides=request.max_slides,
             )
@@ -622,11 +693,13 @@ async def generate_ppt_tex(request: GeneratePptTexRequest):
             "vector_hits": graphrag_context.get("vector_hits"),
             "graph_paths": graph_paths,
             "formula_context": formula_context,
-            "source_node_id": source_node_ids[0],
+            "source_node_id": source_node_ids[0] if source_node_ids else None,
             "source_node_ids": source_node_ids,
-            "source_scope": selected_context.get("scope"),
+            "auto_selected_nodes": auto_selected,
+            "source_scope": selected_context.get("scope") if source_node_ids else None,
             "style": request.style,
             "style_reference": request.style_reference,
+            "teacher_profile_id": (teacher_profile or {}).get("profile_id") if teacher_profile else None,
             "model": model_name,
             "generated_at": datetime.now().isoformat(),
             **({"warning": warning} if warning else {}),
@@ -763,12 +836,15 @@ async def _generate_slide_lectures_sync(
     source_node_ids = _normalize_source_node_ids(request.source_node_id, request.source_node_ids)
     if not source_node_ids:
         source_node_ids = _normalize_source_node_ids(None, request.ppt_source_node_ids)
-    if not source_node_ids:
+    if not source_node_ids and not request.allow_no_node:
+        base_query = "\n\n".join(str(slide.get("raw_text") or slide.get("content") or slide.get("title") or "") for slide in request.slides[:8])
+        source_node_ids = await _auto_select_source_node_ids(f"{request.chapter_title}\n{base_query}", request.api_key)
+    if not source_node_ids and not request.allow_no_node:
         raise HTTPException(status_code=400, detail="请选择图谱章节树节点后再生成逐页讲解")
     if not request.slides:
         raise HTTPException(status_code=400, detail="缺少已生成的 PPT/TeX 页面内容")
     try:
-        selected_context = build_node_contexts(source_node_ids)
+        selected_context = build_node_contexts(source_node_ids) if source_node_ids else {"success": True, "chapter_content": ""}
         if not selected_context.get("success"):
             raise HTTPException(status_code=404, detail=selected_context.get("error") or "Graph node not found")
         chapter_title = request.chapter_title or selected_context.get("chapter_title") or "图谱生成课件"
@@ -793,6 +869,12 @@ async def _generate_slide_lectures_sync(
         selected_context = graphrag_context.get("selected_context") or selected_context
         graph_data = graphrag_context.get("graph_data") or selected_context.get("graph_data")
         graph_context_content = _format_graphrag_generation_context(graphrag_context)
+        effective_teacher_guidance, teacher_profile = _resolve_teacher_guidance(
+            request.teacher_guidance,
+            course_id=request.course_id,
+            title=chapter_title,
+            profile_id=request.teacher_profile_id,
+        )
         source_evidence = _compact_evidence_for_prompt(
             evidence_from_rag(graphrag_context.get("llm_context") or [], limit=4),
             limit=4,
@@ -811,7 +893,7 @@ async def _generate_slide_lectures_sync(
             style=request.style,
             target_duration_minutes=request.target_duration_minutes,
             speech_rate_cpm=request.speech_rate_cpm,
-            teacher_guidance=str(request.teacher_guidance or "").strip(),
+            teacher_guidance=effective_teacher_guidance,
             style_reference_guidance=style_reference_guidance,
         )
         mark("generating", f"正在生成逐页讲解（{len(base_query_slides) or len(request.slides)} 页）")
@@ -824,7 +906,7 @@ async def _generate_slide_lectures_sync(
             selected_evidence=source_evidence,
             selected_graph_context=graph_context_content,
             source_node_ids=source_node_ids,
-            teacher_guidance=str(request.teacher_guidance or "").strip(),
+            teacher_guidance=effective_teacher_guidance,
             slide_feedback=request.slide_feedback or {},
             style_reference_guidance=style_reference_guidance,
             target_slide_indices=target_slide_indices,
@@ -845,7 +927,7 @@ async def _generate_slide_lectures_sync(
                 "tex_content": request.tex_content,
                 "lecture_content": "",
                 "slide_lectures": slide_lectures,
-                "source_node_id": source_node_ids[0],
+                "source_node_id": source_node_ids[0] if source_node_ids else None,
                 "source_node_ids": source_node_ids,
                 "source_scope": selected_context.get("scope"),
                 "ppt_source_node_ids": request.ppt_source_node_ids or [],
@@ -897,7 +979,7 @@ async def _generate_slide_lectures_sync(
             "vector_hits": graphrag_context.get("vector_hits"),
             "graph_paths": graphrag_context.get("graph_paths"),
             "formula_context": graphrag_context.get("formula_context"),
-            "source_node_id": source_node_ids[0],
+            "source_node_id": source_node_ids[0] if source_node_ids else None,
             "source_node_ids": source_node_ids,
             "source_scope": selected_context.get("scope"),
             "ppt_source_node_ids": request.ppt_source_node_ids or [],
@@ -906,6 +988,7 @@ async def _generate_slide_lectures_sync(
             "warning": warning,
             "style": request.style,
             "style_reference": request.style_reference,
+            "teacher_profile_id": (teacher_profile or {}).get("profile_id") if teacher_profile else None,
             "regenerated_slide_indices": target_slide_indices or [int(slide.get("index")) for slide in request.slides if isinstance(slide.get("index"), int)],
             "model": client.model,
             "generated_at": datetime.now().isoformat(),
@@ -2602,6 +2685,9 @@ async def upload_ppt(
     source_node_ids: Optional[List[str]] = Form(None),
     graph_scope: Optional[str] = Form(None),
     teacher_guidance: Optional[str] = Form(None),
+    course_id: Optional[str] = Form(None),
+    teacher_profile_id: Optional[str] = Form(None),
+    allow_no_node: bool = Form(False),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="未提供文件名")
@@ -2628,9 +2714,23 @@ async def upload_ppt(
         image_warning = _courseware_image_warning(parse_result)
 
         chapter_title = prompt_data["chapter_title"]
+        effective_teacher_guidance, teacher_profile = _resolve_teacher_guidance(
+            teacher_guidance,
+            course_id=course_id,
+            title=chapter_title,
+            profile_id=teacher_profile_id,
+        )
         chapter_content = prompt_data["chapter_content"]
         slide_details = prompt_data["slide_details"]
         normalized_source_node_ids = _normalize_source_node_ids(source_node_id, source_node_ids)
+        auto_selected_nodes = False
+        if not normalized_source_node_ids and not allow_no_node:
+            upload_query = "\n".join(
+                [chapter_title, chapter_content[:2200]]
+                + [str(slide.get("raw_text") or slide.get("content") or slide.get("title") or "")[:500] for slide in slide_details[:8]]
+            )
+            normalized_source_node_ids = await _auto_select_source_node_ids(upload_query, api_key)
+            auto_selected_nodes = bool(normalized_source_node_ids)
         selected_context = None
         graph_data = None
         source_scope = None
@@ -2680,6 +2780,8 @@ async def upload_ppt(
                 "lecture_content": "",
                 "slide_lectures": slide_lectures,
                 "lecture_pacing": _summarize_slide_lecture_pacing(slide_lectures, pacing),
+                "teacher_profile_id": (teacher_profile or {}).get("profile_id") if teacher_profile else None,
+                "auto_selected_nodes": auto_selected_nodes,
                 "warning": image_warning or "课件中未提取到有效文本内容，可能是纯图片或扫描件",
             }
             if normalized_source_node_ids:
@@ -2714,7 +2816,7 @@ async def upload_ppt(
             style=style,
             target_duration_minutes=target_duration_minutes,
             speech_rate_cpm=speech_rate_cpm,
-            teacher_guidance=str(teacher_guidance or "").strip(),
+            teacher_guidance=effective_teacher_guidance,
         )
 
         slide_lectures = await _generate_per_slide_lectures(
@@ -2726,7 +2828,7 @@ async def upload_ppt(
             selected_evidence=selected_evidence,
             selected_graph_context=graph_context_content,
             source_node_ids=normalized_source_node_ids or None,
-            teacher_guidance=str(teacher_guidance or "").strip(),
+            teacher_guidance=effective_teacher_guidance,
             slide_feedback={},
             pacing_by_index=pacing["slides"],
             speech_rate_cpm=pacing["speech_rate_cpm"],
@@ -2753,6 +2855,7 @@ async def upload_ppt(
                 "source_node_id": normalized_source_node_ids[0] if normalized_source_node_ids else None,
                 "source_node_ids": normalized_source_node_ids,
                 "source_scope": source_scope,
+                "teacher_profile_id": (teacher_profile or {}).get("profile_id") if teacher_profile else None,
                 "model": claude_client.model,
                 "generated_at": datetime.now().isoformat(),
             })
@@ -2805,6 +2908,8 @@ async def upload_ppt(
             "source_node_ids": normalized_source_node_ids,
             "source_scope": source_scope,
             "style": style,
+            "teacher_profile_id": (teacher_profile or {}).get("profile_id") if teacher_profile else None,
+            "auto_selected_nodes": auto_selected_nodes,
             "model": claude_client.model,
             "generated_at": datetime.now().isoformat(),
             **({"warning": image_warning} if image_warning else {}),
@@ -2988,7 +3093,7 @@ async def _generate_per_slide_lectures(
         if teacher_guidance:
             requirements.append(
                 "Teacher guidance for emphasis, selection, and pacing. Treat it as generation guidance only; it must not override source/graph facts:\n"
-                + _truncate_for_prompt(teacher_guidance, 700)
+                + _truncate_for_prompt(teacher_guidance, 1800)
             )
         if page_feedback:
             requirements.append(

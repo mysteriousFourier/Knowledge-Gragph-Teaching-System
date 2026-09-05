@@ -1313,6 +1313,7 @@ function TeacherPreparePage() {
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set(["toc::root"]))
   const [treeSearch, setTreeSearch] = useState("")
   const [teacherGuidance, setTeacherGuidance] = useState("")
+  const [allowNoNodeGeneration, setAllowNoNodeGeneration] = useState(false)
   const [slideFeedbackDrafts, setSlideFeedbackDrafts] = useState<Record<number, string>>({})
   const [styleReference, setStyleReference] = useState<CoursewareStyleReference | null>(null)
   const [pptSourceScope, setPptSourceScope] = useState<GraphSourceScope | null>(null)
@@ -1827,13 +1828,19 @@ function TeacherPreparePage() {
   }
 
   const handleGeneratePptTex = async () => {
-    if (!pptNodeIds.length) return
+    if (!pptNodeIds.length && !allowNoNodeGeneration && !chapterTitle.trim()) {
+      setStatus("请先选择节点，或勾选无节点自动生成文案并填写标题")
+      return
+    }
     setGraphScopeEnabled(true)
     setMode("graph")
     setStatus("")
     resetGeneratedLectures()
     const result = await generatePptTex.mutateAsync({
       chapter_title: chapterTitle.trim() || undefined,
+      content: [chapterTitle.trim(), teacherGuidance.trim()].filter(Boolean).join("\n\n") || undefined,
+      allow_no_node: allowNoNodeGeneration,
+      course_id: courseId || undefined,
       style,
       source_node_ids: pptNodeIds,
       graph_scope: "subtree",
@@ -1890,10 +1897,12 @@ function TeacherPreparePage() {
       const result = await generateUploadedPptLectures.mutateAsync({
         file,
         style,
+        courseId: courseId || undefined,
         targetDurationMinutes,
         speechRateCpm: DEFAULT_SPEECH_RATE_CPM,
         sourceNodeIds: lectureNodeIds.length ? lectureNodeIds : pptNodeIds,
         teacherGuidance,
+        allowNoNode: allowNoNodeGeneration,
       })
       if (!result.success) {
         setStatus(result.message || result.error || "上传课件逐页讲解生成失败")
@@ -1931,6 +1940,8 @@ function TeacherPreparePage() {
       setStatus("正在分配每页字数并逐页生成讲解...")
       const result = await generateSlideLectures.mutateAsync({
         chapter_title: effectiveCoursewareTitle(),
+        course_id: courseId || undefined,
+        allow_no_node: allowNoNodeGeneration,
         slides: preview.slides.map(compactSlideForLectureRequest),
         tex_content: texContent,
         style,
@@ -1994,6 +2005,7 @@ function TeacherPreparePage() {
     try {
       const result = await generateSlideLectures.mutateAsync({
         chapter_title: effectiveCoursewareTitle(),
+        course_id: courseId || undefined,
         slides: [compactSlideForLectureRequest(selectedSlide)],
         tex_content: "",
         style,
@@ -2602,7 +2614,7 @@ function TeacherPreparePage() {
           </select>
           <button
             onClick={handleGeneratePptTex}
-            disabled={!pptNodeIds.length || generatePptTex.isPending}
+            disabled={(!pptNodeIds.length && !allowNoNodeGeneration) || generatePptTex.isPending}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {generatePptTex.isPending ? <LoadingSpinner size={16} /> : <Wand2 size={16} />}
@@ -2853,6 +2865,15 @@ function TeacherPreparePage() {
               placeholder="例如：按这棵子树顺序讲，重点说明公式适用条件，减少历史背景。"
               className="min-h-[88px] w-full resize-y rounded-lg border bg-background px-3 py-2.5 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 lg:min-h-[42px]"
             />
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent">
+              <input
+                type="checkbox"
+                checked={allowNoNodeGeneration}
+                onChange={(event) => setAllowNoNodeGeneration(event.target.checked)}
+                className="h-4 w-4 accent-primary"
+              />
+              无节点自动生成文案
+            </label>
             <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-accent">
               <FileUp size={16} />
               上传课件

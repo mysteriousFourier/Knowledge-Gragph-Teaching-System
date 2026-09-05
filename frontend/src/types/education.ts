@@ -1,5 +1,7 @@
 export interface GenerateLectureRequest {
   chapter_id?: string
+  course_id?: string
+  teacher_profile_id?: string
   chapter_content?: string
   chapter_title?: string
   style?: string
@@ -31,6 +33,7 @@ export interface GenerateLectureResponse {
   source_node_id?: string
   source_node_ids?: string[]
   source_scope?: GraphSourceScope
+  teacher_profile_id?: string | null
   error?: string
 }
 
@@ -582,6 +585,10 @@ export interface CoursewareStyleReferenceResponse extends CoursewareStyleReferen
 
 export interface PptTexGenerateRequest {
   chapter_title?: string
+  content?: string
+  allow_no_node?: boolean
+  course_id?: string
+  teacher_profile_id?: string
   style?: string
   source_node_id?: string
   source_node_ids?: string[]
@@ -620,6 +627,8 @@ export interface PptTexGenerateResponse extends PptPreviewResponse {
   source_node_id?: string | null
   source_node_ids?: string[]
   source_scope?: GraphSourceScope | null
+  auto_selected_nodes?: boolean
+  teacher_profile_id?: string | null
   style?: string
   model?: string
   generated_at?: string
@@ -628,6 +637,9 @@ export interface PptTexGenerateResponse extends PptPreviewResponse {
 
 export interface GenerateSlideLecturesRequest {
   chapter_title?: string
+  course_id?: string
+  teacher_profile_id?: string
+  allow_no_node?: boolean
   slides: PptSlideDetail[]
   tex_content?: string
   style?: string

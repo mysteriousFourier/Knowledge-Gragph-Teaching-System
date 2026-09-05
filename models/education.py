@@ -17,6 +17,8 @@ class CourseUpdateRequest(BaseModel):
 
 class GenerateLectureRequest(BaseModel):
     chapter_id: str = Field(..., description="Chapter ID")
+    course_id: Optional[str] = Field(None, description="Course ID used to resolve a teacher pedagogy profile")
+    teacher_profile_id: Optional[str] = Field(None, description="Optional teacher pedagogy profile ID")
     chapter_title: str = Field("", description="Chapter title")
     chapter_content: str = Field("", description="Chapter content")
     style: str = Field("guided", description="Teaching style")
@@ -30,6 +32,10 @@ class GenerateLectureRequest(BaseModel):
 
 class GeneratePptTexRequest(BaseModel):
     chapter_title: str = Field("", description="Optional title override")
+    content: str = Field("", description="Optional free-form courseware content when no graph node is selected")
+    allow_no_node: bool = Field(False, description="Generate from content without requiring a graph node")
+    course_id: Optional[str] = Field(None, description="Course ID used to resolve a teacher pedagogy profile")
+    teacher_profile_id: Optional[str] = Field(None, description="Optional teacher pedagogy profile ID")
     style: str = Field("引导式教学", description="Teaching style")
     source_node_id: Optional[str] = Field(None, description="Graph node ID used as the PPT/TeX source")
     source_node_ids: Optional[List[str]] = Field(None, description="Graph node IDs used as PPT/TeX sources")
@@ -72,6 +78,9 @@ class CoursewareExportPptxRequest(BaseModel):
 
 class GenerateSlideLecturesRequest(BaseModel):
     chapter_title: str = Field("", description="Generated PPT/TeX title")
+    course_id: Optional[str] = Field(None, description="Course ID used to resolve a teacher pedagogy profile")
+    teacher_profile_id: Optional[str] = Field(None, description="Optional teacher pedagogy profile ID")
+    allow_no_node: bool = Field(False, description="Allow generation without graph nodes")
     slides: List[Dict[str, Any]] = Field(default_factory=list, description="Generated slide/page details")
     tex_content: Optional[str] = Field(None, description="Generated TeX source")
     style: str = Field("引导式教学", description="Teaching style")
