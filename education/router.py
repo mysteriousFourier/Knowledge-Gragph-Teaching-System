@@ -3,12 +3,15 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import io
 import json
 import logging
 import os
 import posixpath
 import re
+import tempfile
 import uuid
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -1449,6 +1452,44 @@ def _render_courseware_pdf_pages(tex_content: str, asset_map: Any = None, namesp
         rendered_pages = _render_pdf_bytes_to_pages(pdf_bytes)
         render_namespace = namespace or hashlib.md5(tex_content.encode("utf-8")).hexdigest()
         return _externalize_rendered_pages(rendered_pages, render_namespace), ""
+    except Exception as exc:
+        return [], str(exc)
+
+
+def _render_zip_courseware_pdf_pages(file_bytes: bytes, tex_source_file: str) -> tuple[list[dict], str]:
+    """Compile the uploaded ZIP as a real LaTeX project, preserving its assets."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive, tempfile.TemporaryDirectory(prefix="kg-courseware-zip-") as temp_name:
+            temp_dir = Path(temp_name).resolve()
+            source_name = str(tex_source_file or "").replace("\\", "/").lstrip("/")
+            if not source_name or any(part in {"", ".", ".."} for part in Path(source_name).parts):
+                return [], "ZIP 主 TeX 路径无效"
+            for info in archive.infolist():
+                name = str(info.filename or "").replace("\\", "/")
+                if not name or name.startswith("/") or any(part in {"", ".", ".."} for part in Path(name).parts):
+                    continue
+                target = (temp_dir / name).resolve()
+                try:
+                    target.relative_to(temp_dir)
+                except ValueError:
+                    continue
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(archive.read(info))
+            tex_path = (temp_dir / source_name).resolve()
+            try:
+                tex_path.relative_to(temp_dir)
+            except ValueError:
+                return [], "ZIP 主 TeX 路径无效"
+            if not tex_path.is_file():
+                return [], "ZIP 主 TeX 文件不存在"
+            pdf_bytes = _compile_latex_file_to_pdf_bytes(tex_path)
+            namespace = hashlib.md5(file_bytes).hexdigest()
+            return _externalize_rendered_pages(_render_pdf_bytes_to_pages(pdf_bytes), namespace), ""
+    except zipfile.BadZipFile as exc:
+        return [], f"ZIP 文件损坏：{exc}"
     except Exception as exc:
         return [], str(exc)
 
@@ -3626,6 +3667,14 @@ async def upload_ppt_preview(file: UploadFile = File(...)):
         prompt_data = build_ppt_lecture_prompt_data(parse_result)
         editable_model = build_editable_model(parse_result, prompt_data)
         image_warning = _courseware_image_warning(parse_result)
+        if file.filename.lower().endswith(".zip"):
+            rendered_pages, render_error = _render_zip_courseware_pdf_pages(
+                file_bytes, parse_result.get("tex_source_file") or ""
+            )
+        else:
+            rendered_pages, render_error = _render_courseware_pdf_pages(
+                parse_result.get("tex_content") or "", editable_model.get("assets") or {}
+            )
 
         return {
             "success": True,
@@ -3640,6 +3689,9 @@ async def upload_ppt_preview(file: UploadFile = File(...)):
             "layout": editable_model.get("layout") or {},
             "source_tex": parse_result.get("tex_content") or "",
             "missing_image_refs": parse_result.get("missing_image_refs") or [],
+            "rendered_pages": rendered_pages,
+            **({"render_source": "latex_project" if file.filename.lower().endswith(".zip") else "latex"} if rendered_pages else {}),
+            **({"render_error": render_error} if render_error else {}),
             **({"warning": image_warning} if image_warning else {}),
         }
 

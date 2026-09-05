@@ -3,6 +3,8 @@ param(
     [string]$PublishProfilePath,
 
     [string]$KnowledgeGraphPath = ".runtime\knowledge_graph.db",
+    [string]$CoursesPath = ".runtime\courses.json",
+    [string]$ChaptersPath = ".runtime\chapters.json",
     [string]$MetadataPath = ".runtime\vector_index\metadata.json",
     [string]$FaissPath = ".runtime\vector_index\vector_index.faiss",
     [string]$RemoteRuntimeRoot = "site/kgts-runtime"
@@ -63,6 +65,8 @@ function Send-KuduFile {
 
 $publishProfileFile = Resolve-ExistingFile $PublishProfilePath
 $knowledgeGraphFile = Resolve-ExistingFile $KnowledgeGraphPath
+$coursesFile = Resolve-ExistingFile $CoursesPath
+$chaptersFile = Resolve-ExistingFile $ChaptersPath
 $metadataFile = Resolve-ExistingFile $MetadataPath
 $faissFile = Resolve-ExistingFile $FaissPath
 
@@ -80,9 +84,11 @@ $headers = @{
 
 $remoteRoot = $RemoteRuntimeRoot.Trim("/")
 $remoteVectorRoot = "$remoteRoot/vector_index"
-Invoke-KuduCommand -BaseUri $baseUri -Headers $headers -Command "mkdir -p /home/$remoteVectorRoot"
+Invoke-KuduCommand -BaseUri $baseUri -Headers $headers -Command "mkdir -p /home/$remoteRoot /home/$remoteVectorRoot"
 
 Send-KuduFile -BaseUri $baseUri -Headers $headers -LocalPath $knowledgeGraphFile -RemoteVfsPath (Join-KuduVfsPath $remoteRoot "knowledge_graph.db")
+Send-KuduFile -BaseUri $baseUri -Headers $headers -LocalPath $coursesFile -RemoteVfsPath (Join-KuduVfsPath $remoteRoot "courses.json")
+Send-KuduFile -BaseUri $baseUri -Headers $headers -LocalPath $chaptersFile -RemoteVfsPath (Join-KuduVfsPath $remoteRoot "chapters.json")
 Send-KuduFile -BaseUri $baseUri -Headers $headers -LocalPath $metadataFile -RemoteVfsPath (Join-KuduVfsPath $remoteVectorRoot "metadata.json")
 Send-KuduFile -BaseUri $baseUri -Headers $headers -LocalPath $faissFile -RemoteVfsPath (Join-KuduVfsPath $remoteVectorRoot "vector_index.faiss")
 

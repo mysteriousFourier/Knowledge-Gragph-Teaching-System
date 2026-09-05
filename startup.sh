@@ -2,7 +2,13 @@
 set -euo pipefail
 
 export APP_BIND_HOST="${APP_BIND_HOST:-0.0.0.0}"
-export APP_RUNTIME_DIR="${APP_RUNTIME_DIR:-.runtime}"
+# Azure App Service replaces the deployment directory on each deployment;
+# keep mutable course and chapter data on its persistent /home volume.
+if [ -z "${APP_RUNTIME_DIR:-}" ] && [ -n "${WEBSITE_SITE_NAME:-}${WEBSITE_INSTANCE_ID:-}${APPSETTING_WEBSITE_SITE_NAME:-}" ]; then
+  export APP_RUNTIME_DIR="/home/site/kgts-runtime"
+else
+  export APP_RUNTIME_DIR="${APP_RUNTIME_DIR:-.runtime}"
+fi
 export GRAPH_DB_PATH="${GRAPH_DB_PATH:-${APP_RUNTIME_DIR}/knowledge_graph.db}"
 export KGTS_VECTOR_INDEX_DIR="${KGTS_VECTOR_INDEX_DIR:-${APP_RUNTIME_DIR}/vector_index}"
 export APP_BOOTSTRAP_SEED_DATA="${APP_BOOTSTRAP_SEED_DATA:-1}"

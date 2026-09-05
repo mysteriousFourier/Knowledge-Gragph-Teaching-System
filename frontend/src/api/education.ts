@@ -157,7 +157,7 @@ export const usePreviewPpt = () => {
       return educationClient
         .post<PptPreviewResponse>("/api/education/upload-ppt-preview", formData, {
           headers: { "Content-Type": "multipart/form-data" },
-          timeout: 60000,
+          timeout: 600000,
         })
         .then((r) => r.data)
     },
@@ -424,7 +424,7 @@ export const useGeneratePptLectures = () => {
       return educationClient
         .post<PptUploadResponse>("/api/education/upload-ppt", formData, {
           headers: { "Content-Type": "multipart/form-data" },
-          timeout: 180000,
+          timeout: 600000,
         })
         .then((r) => r.data)
     },

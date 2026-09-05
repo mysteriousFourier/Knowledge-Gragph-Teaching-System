@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -39,7 +41,21 @@ class CourseStore:
         return courses if isinstance(courses, dict) else {}
 
     def _save(self, courses: Dict[str, Dict[str, Any]]) -> None:
-        self.path.write_text(json.dumps({"courses": courses}, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = json.dumps({"courses": courses}, ensure_ascii=False, indent=2)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Replace the catalog atomically so a restart cannot observe a partial JSON file.
+        fd, temp_name = tempfile.mkstemp(prefix=f"{self.path.stem}.", suffix=".tmp", dir=self.path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_name, self.path)
+        finally:
+            try:
+                os.unlink(temp_name)
+            except FileNotFoundError:
+                pass
 
     def create(self, *, title: str, description: str = "", course_id: Optional[str] = None) -> Dict[str, Any]:
         clean_title = str(title or "").strip()
