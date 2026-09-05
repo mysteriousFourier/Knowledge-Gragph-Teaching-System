@@ -157,8 +157,9 @@ async def list_courses():
     try:
         courses = course_store.list()
         for course in courses:
-            course["chapter_count"] = len(chapter_store.list_chapters(course.get("id")))
-            course["courseware_count"] = len(list_courseware_projects(course.get("id")))
+            chapters = chapter_store.list_chapters(course.get("id"))
+            course["chapter_count"] = len(chapters)
+            course["courseware_count"] = sum(1 for chapter in chapters if str(chapter.get("source_type") or "").lower() == "courseware") or len(list_courseware_projects(course.get("id")))
         return {"success": True, "courses": courses}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Course list failed: {exc}") from exc
@@ -169,8 +170,9 @@ async def get_course(course_id: str):
     course = course_store.get(course_id)
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    course["chapter_count"] = len(chapter_store.list_chapters(course_id))
-    course["courseware_count"] = len(list_courseware_projects(course_id))
+    chapters = chapter_store.list_chapters(course_id)
+    course["chapter_count"] = len(chapters)
+    course["courseware_count"] = sum(1 for chapter in chapters if str(chapter.get("source_type") or "").lower() == "courseware") or len(list_courseware_projects(course_id))
     return {"success": True, "course": course}
 
 
