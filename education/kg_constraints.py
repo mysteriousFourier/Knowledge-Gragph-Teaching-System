@@ -794,6 +794,13 @@ def clean_generated_lecture_output(text: str) -> str:
         cleaned,
     )
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    # Keep a pause between Latin words and trailing punctuation. Without the
+    # space some TTS engines read constructs such as ``model-中文`` letter by
+    # letter instead of as natural mixed-language speech.
+    cleaned = re.sub(r"([A-Za-z])([\-–—/:;，。！？、])(?=\S)", r"\1\2 ", cleaned)
+    # Also separate dangling connectors (e.g. ``macro-``) and connectors
+    # immediately before Chinese text, while preserving Latin compounds.
+    cleaned = re.sub(r"([A-Za-z])([\-–—])", r"\1 \2", cleaned)
     cleaned = cleaned.strip()
     if cleaned:
         if _looks_like_internal_reasoning_only(cleaned):

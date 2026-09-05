@@ -1,5 +1,4 @@
 import { AlertTriangle, Database, ShieldCheck } from "lucide-react"
-import { ConsistencyPanel } from "@/components/common/ConsistencyPanel"
 import { EvidenceSummary } from "@/components/common/EvidenceSummary"
 import type { ConsistencyReport } from "@/types/education"
 
@@ -32,7 +31,6 @@ export function LectureReviewPanel({ learningPlan, sources, retrievalContext, wa
             warning={warning}
           />
         ) : null}
-        {consistencyReport ? <ConsistencyPanel report={consistencyReport} title="Grounding and risk metrics" /> : null}
         {derivedWarnings.length ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
             <div className="mb-2 flex items-center gap-2 font-medium">

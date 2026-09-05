@@ -275,7 +275,7 @@ export const useCoursewareProject = (projectId: string, courseId = "") => {
     queryKey: ["courseware-project", projectId, courseId],
     queryFn: ({ signal }) =>
       educationClient
-        .get<{ success: boolean; project: CoursewareProject }>(`/api/education/courseware/projects/${encodeURIComponent(projectId)}`, { params: { course_id: courseId || undefined, compact_strings: 1 }, signal, timeout: 60000 })
+        .get<{ success: boolean; project: CoursewareProject }>(`/api/education/courseware/projects/${encodeURIComponent(projectId)}`, { params: { course_id: courseId || undefined, compact_strings: 1 }, signal, timeout: 0 })
         .then((r) => unpackCourseware(r.data)),
     enabled: Boolean(projectId),
     staleTime: 5 * 60 * 1000,

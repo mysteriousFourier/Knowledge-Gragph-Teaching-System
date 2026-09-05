@@ -1324,14 +1324,16 @@ function TeacherPreparePage() {
   const [activeCourseAudioJob, setActiveCourseAudioJob] = useState<StoredCourseAudioJob | null>(() => readStoredCourseAudioJob())
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false)
   const [courseAudioProgress, setCourseAudioProgress] = useState<CourseAudioProgress>(emptyCourseAudioProgress)
-  const [graphScopeEnabled, setGraphScopeEnabled] = useState(() => !chapterId || Boolean(nodeId))
+  const [graphScopeEnabled, setGraphScopeEnabled] = useState(() => !chapterId)
   const [status, setStatus] = useState("")
   const courseAudioAbortRef = useRef(false)
   const recoveredCourseAudioKeyRef = useRef("")
 
   // Saved courseware opens directly in the editor and does not need the graph tree.
   useEffect(() => {
-    setGraphScopeEnabled(!chapterId || Boolean(nodeId))
+    // Existing chapters/courseware open in the editor without the large graph
+    // payload. Graph context is enabled only after an explicit node selection.
+    setGraphScopeEnabled(!chapterId)
   }, [chapterId, nodeId])
 
   const previewPpt = usePreviewPpt()

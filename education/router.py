@@ -2680,6 +2680,13 @@ async def save_lecture(request: SaveLectureRequest):
         existing_chapter = chapter_store.get_chapter(request.chapter_id) or {}
         source_node_ids = _normalize_source_node_ids(None, request.source_node_ids)
         cleaned_content = clean_generated_lecture_output(request.lecture_content)
+        cleaned_slide_lectures = request.slide_lectures
+        if isinstance(request.slide_lectures, list):
+            cleaned_slide_lectures = [
+                {**item, "lecture": clean_generated_lecture_output(item.get("lecture") or "")}
+                if isinstance(item, dict) else item
+                for item in request.slide_lectures
+            ]
         learning_plan = request.learning_plan if request.learning_plan is not None else existing_chapter.get("lecture_learning_plan")
         if not isinstance(learning_plan, dict) and isinstance(request.slide_lectures, list):
             plans = [item.get("learning_plan") for item in request.slide_lectures if isinstance(item, dict) and isinstance(item.get("learning_plan"), dict)]
@@ -2700,7 +2707,7 @@ async def save_lecture(request: SaveLectureRequest):
             source_node_ids=source_node_ids or request.source_node_ids,
             source_scope=request.source_scope,
             ppt_slides=request.ppt_slides,
-            slide_lectures=request.slide_lectures,
+            slide_lectures=cleaned_slide_lectures,
             tex_content=request.tex_content,
             editable_model=request.editable_model,
             asset_map=request.asset_map,
@@ -2716,9 +2723,13 @@ async def save_lecture(request: SaveLectureRequest):
             learning_plan=learning_plan if isinstance(learning_plan, dict) else None,
             consistency_report=consistency_report if isinstance(consistency_report, dict) else None,
         )
+        # Text changes invalidate chapter audio; remove old segments so the
+        # next playback cannot retain stale audio files on the Azure VM.
+        cache_cleanup = clear_course_tts_cache(request.chapter_id)
         return {
             "success": True,
             "chapter": chapter,
+            "tts_cache": cache_cleanup,
             "message": "授课文案保存成功",
         }
     except Exception as e:
@@ -3821,11 +3832,18 @@ async def list_courseware_projects_route(course_id: Optional[str] = None):
 @router.get("/education/courseware/projects/{project_id}")
 async def load_courseware_project_route(project_id: str, course_id: Optional[str] = None, compact_strings: bool = False):
     try:
-        record = load_courseware_project(project_id, course_id)
+        # Keep large JSON parsing and string packing off the event loop.
+        record = await asyncio.to_thread(load_courseware_project, project_id, course_id)
         if not record:
             raise HTTPException(status_code=404, detail="课件项目不存在")
+        if compact_strings and isinstance(record, dict):
+            # The editable model already contains slides and assets. Avoid
+            # sending legacy duplicate copies on the first editor request.
+            record = dict(record)
+            record.pop("slides", None)
+            record.pop("asset_map", None)
         response = {"success": True, "project": record}
-        return pack_courseware(response) if compact_strings else response
+        return await asyncio.to_thread(pack_courseware, response) if compact_strings else response
     except HTTPException:
         raise
     except Exception as e:
