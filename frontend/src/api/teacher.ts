@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { educationClient } from "./client"
+import { unpackCourseware } from "./coursewareTransport"
 import type { ApiResponse, LoginApiResponse } from "@/types/api"
 import type { Chapter, Exercise, SaveChapterRequest, SaveLectureRequest } from "@/types/chapter"
 
@@ -60,13 +61,17 @@ export const useTeacherChapters = (courseId?: string) => {
 export const useTeacherChapter = (chapterId: string, includeAssets = false) => {
   return useQuery({
     queryKey: ["teacher-chapter", chapterId, includeAssets ? "assets" : "compact"],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       educationClient
         .get<{ success: boolean; chapter?: Chapter; error?: string }>(
-          `/api/education/get-chapter?chapter_id=${encodeURIComponent(chapterId)}${includeAssets ? "&include_assets=1" : ""}`,
+          `/api/education/get-chapter?chapter_id=${encodeURIComponent(chapterId)}${includeAssets ? "&include_assets=1&compact_strings=1" : ""}`,
+          { signal, timeout: 60000 },
         )
-        .then((r) => r.data),
+        .then((r) => unpackCourseware(r.data)),
     enabled: Boolean(chapterId),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: 1,
   })
 }
 

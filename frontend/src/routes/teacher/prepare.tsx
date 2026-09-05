@@ -51,7 +51,7 @@ import {
   stopCourseTtsJob,
 } from "@/api/education"
 import { useGraphScopeTree } from "@/api/graph"
-import { useSaveChapter, useSaveLecture, useTeacherChapter } from "@/api/teacher"
+import { useDeleteChapter, useSaveChapter, useSaveLecture, useTeacherChapter } from "@/api/teacher"
 import {
   GraphContextPanel,
   GraphTreePanel,
@@ -1345,6 +1345,7 @@ function TeacherPreparePage() {
   const generateSlideLectures = useGenerateSlideLectures()
   const planSlideSpeech = usePlanSlideSpeech()
   const deleteCoursewareProject = useDeleteCoursewareProject()
+  const deleteChapter = useDeleteChapter()
   const saveChapter = useSaveChapter()
   const saveLecture = useSaveLecture()
   const savedCoursewareProject = useCoursewareProject(chapterId.startsWith("cw_") ? chapterId : "", courseId)
@@ -2516,13 +2517,13 @@ function TeacherPreparePage() {
       return
     }
     const title = effectiveCoursewareTitle(file?.name.replace(/\.[^.]+$/, ""), "未命名PPT")
-    const chapterId = `ppt_${Date.now()}`
+    const targetChapterId = chapterId && !chapterId.startsWith("cw_") ? chapterId : `ppt_${Date.now()}`
     const saveSourceNodeIds = lectureNodeIds.length ? lectureNodeIds : pptNodeIds
     const saveSourceScope = lectureSourceScope || pptSourceScope || (lectureNodeContext?.success ? lectureNodeContext.scope : undefined)
     const modelForSave = currentEditableModelForSave(title)
     const chapterResult = await saveChapter.mutateAsync({
       course_id: courseId || undefined,
-      chapter_id: chapterId,
+      chapter_id: targetChapterId,
       title,
       content: preview.full_text,
       source_type: mode === "graph" ? "graph_ppt_tex" : "courseware",
@@ -2543,7 +2544,7 @@ function TeacherPreparePage() {
       lecture_speech_rate_cpm: DEFAULT_SPEECH_RATE_CPM,
       lecture_pacing: currentLecturePacingForSave(),
     })
-    const savedChapterId = chapterResult.chapter?.id || chapterResult.chapter_id || chapterId
+    const savedChapterId = chapterResult.chapter?.id || chapterResult.chapter_id || targetChapterId
     await saveLecture.mutateAsync({
       course_id: courseId || undefined,
       chapter_id: savedChapterId,
@@ -2570,7 +2571,27 @@ function TeacherPreparePage() {
       queryClient.invalidateQueries({ queryKey: ["teacher-chapters"] }),
       queryClient.invalidateQueries({ queryKey: ["student-chapters"] }),
     ])
+    await queryClient.invalidateQueries({ queryKey: ["teacher-chapter", savedChapterId] })
+    await queryClient.invalidateQueries({ queryKey: ["courses"] })
+    setLoadedRecordId(savedChapterId)
+    navigate({ to: "/teacher/prepare", search: { chapterId: savedChapterId, nodeId: "", courseId }, replace: true })
     setStatus("已保存为课程授课文案")
+  }
+
+  const handleDeleteCurrent = async () => {
+    if (!chapterId || !window.confirm(`删除课件“${chapterTitle || chapterId}”？`)) return
+    try {
+      const result = chapterId.startsWith("cw_")
+        ? await deleteCoursewareProject.mutateAsync({ projectId: chapterId, courseId })
+        : await deleteChapter.mutateAsync(chapterId)
+      if (!result.success) throw new Error("删除失败")
+      queryClient.removeQueries({ queryKey: ["teacher-chapter", chapterId] })
+      queryClient.removeQueries({ queryKey: ["courseware-project", chapterId] })
+      await Promise.all(["teacher-chapters", "student-chapters", "courseware-projects", "courses"].map((key) => queryClient.invalidateQueries({ queryKey: [key] })))
+      navigate({ to: "/teacher" })
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "删除失败，请重试")
+    }
   }
 
   const handleCopy = async () => {
@@ -2606,6 +2627,7 @@ function TeacherPreparePage() {
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-bold">备课工作台</h1>
+          {chapterId && <button type="button" onClick={handleDeleteCurrent} disabled={deleteChapter.isPending || deleteCoursewareProject.isPending} className="mt-2 inline-flex items-center gap-1 border px-3 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"><Trash2 size={16} />删除课件</button>}
           <p className="text-muted-foreground">从图谱课程树生成 PPT/TeX 课件，并基于同一证据链生成逐页讲解</p>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
@@ -2697,6 +2719,8 @@ function TeacherPreparePage() {
         </div>
       </div>
 
+      {chapterId && (savedTeacherChapter.isFetching || savedCoursewareProject.isFetching) && <LoadingSpinner text="正在加载课件..." />}
+      {chapterId && (savedTeacherChapter.isError || savedCoursewareProject.isError) && <div role="alert" className="flex items-center gap-3 border p-3 text-sm text-destructive">课件加载失败<button type="button" className="border px-3 py-1" onClick={() => chapterId.startsWith("cw_") ? savedCoursewareProject.refetch() : savedTeacherChapter.refetch()}>重试</button></div>}
       {status && (
         <div className="flex items-center gap-2 rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
           {driftReport?.changed || status.includes("图片引用") || status.includes("编译未成功") ? <AlertTriangle size={16} className="text-amber-600" /> : <CheckCircle2 size={16} className="text-primary" />}

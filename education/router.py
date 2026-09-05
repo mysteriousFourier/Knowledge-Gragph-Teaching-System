@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import FileResponse
+from KGTS.education.courseware_transport import pack_courseware
 
 from KGTS.models.education import (
     CourseCreateRequest,
@@ -2604,7 +2605,7 @@ async def list_chapters(course_id: Optional[str] = None):
 
 
 @router.get("/education/get-chapter")
-async def get_chapter(chapter_id: str, include_assets: bool = False):
+async def get_chapter(chapter_id: str, include_assets: bool = False, compact_strings: bool = False):
     try:
         chapter = chapter_store.get_chapter(chapter_id)
         if not chapter:
@@ -2638,7 +2639,8 @@ async def get_chapter(chapter_id: str, include_assets: bool = False):
             chapter.pop("editable_model", None)
             chapter.pop("asset_map", None)
             chapter.pop("ppt_artifact", None)
-        return {"success": True, "chapter": chapter}
+        response = {"success": True, "chapter": chapter}
+        return pack_courseware(response) if compact_strings else response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取章节数据失败: {str(e)}")
 
@@ -3817,12 +3819,13 @@ async def list_courseware_projects_route(course_id: Optional[str] = None):
 
 
 @router.get("/education/courseware/projects/{project_id}")
-async def load_courseware_project_route(project_id: str, course_id: Optional[str] = None):
+async def load_courseware_project_route(project_id: str, course_id: Optional[str] = None, compact_strings: bool = False):
     try:
         record = load_courseware_project(project_id, course_id)
         if not record:
             raise HTTPException(status_code=404, detail="课件项目不存在")
-        return {"success": True, "project": record}
+        response = {"success": True, "project": record}
+        return pack_courseware(response) if compact_strings else response
     except HTTPException:
         raise
     except Exception as e:

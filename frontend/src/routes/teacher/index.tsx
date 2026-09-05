@@ -1,9 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { BookOpen, FileText, FolderOpen, Plus, Trash2 } from "lucide-react"
-import { useCourses } from "@/api/courses"
+import { BookOpen, FileText, FolderOpen, Pencil, Plus, Trash2 } from "lucide-react"
+import { useState, type FormEvent } from "react"
+import { useCourses, useCreateCourse, useUpdateCourse } from "@/api/courses"
 import { useCoursewareProjects, useDeleteCoursewareProject } from "@/api/education"
 import { useQueryClient } from "@tanstack/react-query"
-import { useTeacherChapters } from "@/api/teacher"
+import { useDeleteChapter, useTeacherChapters } from "@/api/teacher"
 import { EmptyState } from "@/components/common/EmptyState"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
 import type { Chapter } from "@/types/chapter"
@@ -14,6 +15,7 @@ export const Route = createFileRoute("/teacher/")({
 })
 
 function TeacherPage() {
+  const [creating, setCreating] = useState(false)
   const { data, isLoading, isError } = useCourses()
   const courses = data?.courses || []
 
@@ -27,14 +29,17 @@ function TeacherPage() {
             先进入一门课程，再选择具体课节进行备课或授课。
           </p>
         </div>
-        <Link
-          to="/teacher"
+        <button
+          type="button"
+          onClick={() => setCreating((value) => !value)}
           className="inline-flex min-h-10 items-center justify-center gap-2 border bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
         >
           <Plus size={16} />
           新建课程
-        </Link>
+        </button>
       </header>
+
+      {creating && <CourseEditor onClose={() => setCreating(false)} />}
 
       {isLoading ? (
         <div className="flex min-h-48 items-center justify-center border bg-card">
@@ -67,6 +72,7 @@ function TeacherPage() {
 }
 
 function CourseCard({ course }: { course: Course }) {
+  const [editing, setEditing] = useState(false)
   const { data, isLoading } = useTeacherChapters(course.id)
   const { data: projectsData } = useCoursewareProjects(course.id)
   const deleteProject = useDeleteCoursewareProject()
@@ -75,9 +81,14 @@ function CourseCard({ course }: { course: Course }) {
   const projects = projectsData?.projects || []
   const handleDeleteProject = async (project: { id: string; title?: string }) => {
     if (!window.confirm(`删除课件“${project.title || project.id}”？`)) return
-    await deleteProject.mutateAsync({ projectId: project.id, courseId: course.id })
-    await queryClient.invalidateQueries({ queryKey: ["courseware-projects", course.id] })
-    await queryClient.invalidateQueries({ queryKey: ["courses"] })
+    try {
+      await deleteProject.mutateAsync({ projectId: project.id, courseId: course.id })
+      queryClient.removeQueries({ queryKey: ["courseware-project", project.id] })
+      await queryClient.invalidateQueries({ queryKey: ["courseware-projects", course.id] })
+      await queryClient.invalidateQueries({ queryKey: ["courses"] })
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "删除失败，请重试")
+    }
   }
 
   return (
@@ -90,6 +101,7 @@ function CourseCard({ course }: { course: Course }) {
             {course.description || "暂无课程说明"}
           </p>
         </div>
+        <button type="button" onClick={() => setEditing((value) => !value)} title="编辑课程" aria-label={`编辑课程 ${course.title}`} className="inline-flex h-9 w-9 shrink-0 items-center justify-center border hover:bg-accent"><Pencil size={15} /></button>
         <Link
           to="/teacher/prepare"
           search={{ chapterId: "", nodeId: "", courseId: course.id }}
@@ -100,6 +112,8 @@ function CourseCard({ course }: { course: Course }) {
           进入课程
         </Link>
       </div>
+
+      {editing && <CourseEditor course={course} onClose={() => setEditing(false)} />}
 
       <div className="mt-5 border-t pt-4">
         <div className="mb-3 flex items-center justify-between">
@@ -134,7 +148,7 @@ function CourseCard({ course }: { course: Course }) {
                 <Link to="/teacher/prepare" search={{ chapterId: project.id, nodeId: "", courseId: course.id }} className="min-w-0 flex-1 truncate">{project.title}</Link>
                 <span className="ml-3 flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
                   编辑
-                  <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void handleDeleteProject(project) }} disabled={deleteProject.isPending} className="inline-flex h-7 w-7 items-center justify-center border hover:bg-destructive hover:text-destructive-foreground" title="删除课件" aria-label={`删除课件 ${project.title || project.id}`}><Trash2 size={13} /></button>
+                  <button type="button" onClick={() => void handleDeleteProject(project)} disabled={deleteProject.isPending} className="inline-flex h-8 items-center gap-1 border px-2 text-destructive hover:bg-destructive/10 disabled:opacity-50" aria-label={`删除课件 ${project.title || project.id}`}><Trash2 size={13} />删除</button>
                 </span>
               </div>
             ))}
@@ -145,11 +159,54 @@ function CourseCard({ course }: { course: Course }) {
   )
 }
 
+function CourseEditor({ course, onClose }: { course?: Course; onClose: () => void }) {
+  const [title, setTitle] = useState(course?.title || "")
+  const [description, setDescription] = useState(course?.description || "")
+  const [error, setError] = useState("")
+  const create = useCreateCourse()
+  const update = useUpdateCourse()
+  const queryClient = useQueryClient()
+  const save = async (event: FormEvent) => {
+    event.preventDefault()
+    try {
+      if (course) await update.mutateAsync({ courseId: course.id, title: title.trim(), description: description.trim() })
+      else await create.mutateAsync({ title: title.trim(), description: description.trim() })
+      await queryClient.invalidateQueries({ queryKey: ["courses"] })
+      onClose()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "保存失败")
+    }
+  }
+  return <form onSubmit={save} className="mt-4 space-y-3 border-y py-4">
+    <label className="block text-sm">课程名称<input required maxLength={160} value={title} onChange={(event) => setTitle(event.target.value)} className="mt-1" /></label>
+    <label className="block text-sm">课程说明<textarea maxLength={1000} value={description} onChange={(event) => setDescription(event.target.value)} className="mt-1" /></label>
+    <div className="flex gap-2"><button disabled={!title.trim() || create.isPending || update.isPending} className="border bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50">保存</button><button type="button" onClick={onClose} className="border px-3 py-2 text-sm">取消</button></div>
+    {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+  </form>
+}
+
 function LessonRow({ chapter, index, courseId }: { chapter: Chapter; index: number; courseId: string }) {
   const hasLecture = Boolean(chapter.has_lecture_content || chapter.lecture_content)
+  const deleteChapter = useDeleteChapter()
+  const queryClient = useQueryClient()
+  const handleDelete = async () => {
+    if (!window.confirm(`删除课件“${chapter.title}”及其讲稿和练习？`)) return
+    try {
+      const result = await deleteChapter.mutateAsync(chapter.id)
+      if (!result.success) throw new Error(result.error || "删除失败")
+      queryClient.removeQueries({ queryKey: ["teacher-chapter", chapter.id] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["teacher-chapters"] }),
+        queryClient.invalidateQueries({ queryKey: ["student-chapters"] }),
+        queryClient.invalidateQueries({ queryKey: ["courses"] }),
+      ])
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "删除失败，请重试")
+    }
+  }
 
   return (
-    <div className="flex items-center gap-3 border bg-background/40 px-3 py-2.5">
+    <div className="flex flex-wrap items-center gap-3 border bg-background/40 px-3 py-2.5">
       <span className="mono w-6 shrink-0 text-xs text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{chapter.title}</p>
@@ -157,7 +214,7 @@ function LessonRow({ chapter, index, courseId }: { chapter: Chapter; index: numb
           {hasLecture ? "已有授课文案" : "尚未生成授课文案"}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="ml-auto flex shrink-0 flex-wrap items-center gap-1.5">
         <Link
           to="/teacher/prepare"
           search={{ chapterId: chapter.id, nodeId: "", courseId }}
@@ -176,6 +233,9 @@ function LessonRow({ chapter, index, courseId }: { chapter: Chapter; index: numb
           <FileText size={14} />
           授课
         </Link>
+        <button type="button" onClick={handleDelete} disabled={deleteChapter.isPending} aria-label={`删除课件 ${chapter.title}`} className="inline-flex h-8 items-center gap-1 border px-2.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50">
+          <Trash2 size={14} />{deleteChapter.isPending ? "删除中..." : "删除"}
+        </button>
       </div>
     </div>
   )

@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { educationClient } from "./client"
+import { unpackCourseware } from "./coursewareTransport"
 import type {
   CoursewareAsset,
   CoursewareProject,
@@ -272,11 +273,14 @@ export const useCoursewareProjects = (courseId = "") => {
 export const useCoursewareProject = (projectId: string, courseId = "") => {
   return useQuery({
     queryKey: ["courseware-project", projectId, courseId],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       educationClient
-        .get<{ success: boolean; project: CoursewareProject }>(`/api/education/courseware/projects/${encodeURIComponent(projectId)}`, { params: courseId ? { course_id: courseId } : undefined })
-        .then((r) => r.data),
+        .get<{ success: boolean; project: CoursewareProject }>(`/api/education/courseware/projects/${encodeURIComponent(projectId)}`, { params: { course_id: courseId || undefined, compact_strings: 1 }, signal, timeout: 60000 })
+        .then((r) => unpackCourseware(r.data)),
     enabled: Boolean(projectId),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: 1,
   })
 }
 
