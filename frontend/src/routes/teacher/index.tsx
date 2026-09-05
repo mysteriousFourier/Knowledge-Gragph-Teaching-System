@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { BookOpen, FileText, FolderOpen, Plus } from "lucide-react"
+import { BookOpen, FileText, FolderOpen, Plus, Trash2 } from "lucide-react"
 import { useCourses } from "@/api/courses"
-import { useCoursewareProjects } from "@/api/education"
+import { useCoursewareProjects, useDeleteCoursewareProject } from "@/api/education"
+import { useQueryClient } from "@tanstack/react-query"
 import { useTeacherChapters } from "@/api/teacher"
 import { EmptyState } from "@/components/common/EmptyState"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
@@ -68,8 +69,16 @@ function TeacherPage() {
 function CourseCard({ course }: { course: Course }) {
   const { data, isLoading } = useTeacherChapters(course.id)
   const { data: projectsData } = useCoursewareProjects(course.id)
+  const deleteProject = useDeleteCoursewareProject()
+  const queryClient = useQueryClient()
   const chapters = data?.chapters || []
   const projects = projectsData?.projects || []
+  const handleDeleteProject = async (project: { id: string; title?: string }) => {
+    if (!window.confirm(`删除课件“${project.title || project.id}”？`)) return
+    await deleteProject.mutateAsync({ projectId: project.id, courseId: course.id })
+    await queryClient.invalidateQueries({ queryKey: ["courseware-projects", course.id] })
+    await queryClient.invalidateQueries({ queryKey: ["courses"] })
+  }
 
   return (
     <article className="flex min-h-64 flex-col border bg-card p-5 transition-colors hover:border-primary/50">
@@ -125,7 +134,10 @@ function CourseCard({ course }: { course: Course }) {
                 className="flex items-center justify-between border bg-background/40 px-3 py-2 text-sm hover:bg-accent"
               >
                 <span className="truncate">{project.title}</span>
-                <span className="ml-3 shrink-0 text-xs text-muted-foreground">编辑</span>
+                <span className="ml-3 flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                  编辑
+                  <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void handleDeleteProject(project) }} disabled={deleteProject.isPending} className="inline-flex h-7 w-7 items-center justify-center border hover:bg-destructive hover:text-destructive-foreground" title="删除课件" aria-label={`删除课件 ${project.title || project.id}`}><Trash2 size={13} /></button>
+                </span>
               </Link>
             ))}
           </div>

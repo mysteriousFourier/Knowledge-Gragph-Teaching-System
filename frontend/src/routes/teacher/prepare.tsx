@@ -2447,7 +2447,8 @@ function TeacherPreparePage() {
     const modelForSave = currentEditableModelForSave(title)
     if (!modelForSave) return
     const result = await saveCoursewareProject.mutateAsync({
-      project_id: projectId || undefined,
+      // Keep the loaded project's identity when the route was opened directly.
+      project_id: projectId || (chapterId.startsWith("cw_") ? chapterId : undefined),
       course_id: courseId || undefined,
       title,
       editable_model: modelForSave,
