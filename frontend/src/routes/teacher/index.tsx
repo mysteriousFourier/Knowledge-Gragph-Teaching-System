@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { BookOpen, FileText, FolderOpen, Plus } from "lucide-react"
 import { useCourses } from "@/api/courses"
+import { useCoursewareProjects } from "@/api/education"
 import { useTeacherChapters } from "@/api/teacher"
 import { EmptyState } from "@/components/common/EmptyState"
 import { LoadingSpinner } from "@/components/common/LoadingSpinner"
@@ -66,7 +67,9 @@ function TeacherPage() {
 
 function CourseCard({ course }: { course: Course }) {
   const { data, isLoading } = useTeacherChapters(course.id)
+  const { data: projectsData } = useCoursewareProjects(course.id)
   const chapters = data?.chapters || []
+  const projects = projectsData?.projects || []
 
   return (
     <article className="flex min-h-64 flex-col border bg-card p-5 transition-colors hover:border-primary/50">
@@ -111,6 +114,22 @@ function CourseCard({ course }: { course: Course }) {
             ))}
           </div>
         )}
+        {projects.length > 0 ? (
+          <div className="mt-4 space-y-2 border-t pt-3">
+            <h4 className="text-sm font-semibold">已保存课件</h4>
+            {projects.map((project) => (
+              <Link
+                key={project.id}
+                to="/teacher/prepare"
+                search={{ chapterId: project.id, nodeId: "", courseId: course.id }}
+                className="flex items-center justify-between border bg-background/40 px-3 py-2 text-sm hover:bg-accent"
+              >
+                <span className="truncate">{project.title}</span>
+                <span className="ml-3 shrink-0 text-xs text-muted-foreground">编辑</span>
+              </Link>
+            ))}
+          </div>
+        ) : null}
       </div>
     </article>
   )
