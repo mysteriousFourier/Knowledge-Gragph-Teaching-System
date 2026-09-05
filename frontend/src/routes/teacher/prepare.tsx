@@ -2276,6 +2276,23 @@ function TeacherPreparePage() {
     updateEditableModelForSlide(slideIndex, (model) => mutateEditableSlide(model, slideIndex, (objects) => objects.filter((object) => object.id !== objectId)))
   }
 
+  const handleDeleteCurrentSlide = () => {
+    if (!selectedSlide || !preview || preview.slides.length <= 1) {
+      setStatus("至少保留一页课件")
+      return
+    }
+    if (!window.confirm(`删除第 ${selectedSlide.index} 页？此操作只删除当前编辑页，不修改源 TeX。`)) return
+    const deletedIndex = selectedSlide.index
+    const nextSlides = preview.slides
+      .filter((slide) => slide.index !== deletedIndex)
+      .map((slide, index) => ({ ...slide, index: index + 1 }))
+    setPreview({ ...preview, slides: nextSlides })
+    setEditableModel((model) => model ? { ...model, slides: model.slides.filter((slide) => slide.index !== deletedIndex).map((slide, index) => ({ ...slide, index: index + 1 })) } : model)
+    setSlideLectures((items) => items.filter((item) => item.index !== deletedIndex).map((item, index) => ({ ...item, index: index + 1 })))
+    setSelectedIndex(Math.min(deletedIndex, nextSlides.length))
+    setStatus(`已删除第 ${deletedIndex} 页。图片资源已保留，浏览内容已修复。`)
+  }
+
   const handleEditableObjectDuplicate = (slideIndex: number, objectId: string) => {
     updateEditableModelForSlide(slideIndex, (model) =>
       mutateEditableSlide(model, slideIndex, (objects) => {
@@ -2982,6 +2999,7 @@ function TeacherPreparePage() {
                     hasChanges={hasSelectedFrameChanges}
                     isPending={previewTex.isPending}
                     onToggleFullscreen={() => setIsPreviewFullscreen((value) => !value)}
+                    onDeleteSlide={handleDeleteCurrentSlide}
                     onFrameDraftChange={handleFrameDraftChange}
                     onApplyFrameDraft={handleApplyFrameDraft}
                     onEditableObjectChange={handleEditableObjectChange}
@@ -3489,6 +3507,7 @@ function SlidePreview({
   hasChanges,
   isPending,
   onToggleFullscreen,
+  onDeleteSlide,
   onFrameDraftChange,
   onApplyFrameDraft,
   onEditableObjectChange,
@@ -3512,6 +3531,7 @@ function SlidePreview({
   hasChanges: boolean
   isPending: boolean
   onToggleFullscreen: () => void
+  onDeleteSlide: () => void
   onFrameDraftChange: (value: string) => void
   onApplyFrameDraft: () => void
   onEditableObjectChange: (slideIndex: number, objectId: string, patch: Partial<EditableSlideObject>) => void
@@ -3591,6 +3611,15 @@ function SlidePreview({
             >
               {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               {isFullscreen ? "退出全屏" : "全屏"}
+            </button>
+            <button
+              type="button"
+              onClick={onDeleteSlide}
+              disabled={!canEdit}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
+              title="删除当前课件页"
+            >
+              <Trash2 size={14} />删除当前页
             </button>
             <button
               onClick={onApplyFrameDraft}
