@@ -185,11 +185,12 @@ export const useGeneratePptTex = () => {
 
 export const usePreviewTex = () => {
   return useMutation({
-    mutationFn: (data: { tex_content: string; filename?: string }) =>
+    mutationFn: (data: { tex_content: string; filename?: string; asset_map?: Record<string, unknown> }) =>
       educationClient
         .post<PptPreviewResponse>("/api/education/preview-tex", {
           filename: data.filename || "edited.tex",
           tex_content: data.tex_content,
+          asset_map: data.asset_map,
         }, {
           timeout: 60000,
         })

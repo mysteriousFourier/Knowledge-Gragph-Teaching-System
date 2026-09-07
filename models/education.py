@@ -50,6 +50,7 @@ class GeneratePptTexRequest(BaseModel):
 class PreviewTexRequest(BaseModel):
     tex_content: str = Field(..., description="Editable TeX source to parse into slide previews")
     filename: str = Field("edited.tex", description="Virtual filename used for parser hints")
+    asset_map: Optional[Dict[str, Any]] = Field(None, description="Uploaded assets referenced by the TeX source")
 
 
 class CoursewareProjectSaveRequest(BaseModel):

@@ -3739,7 +3739,10 @@ async def preview_tex(request: PreviewTexRequest):
         prompt_data = build_ppt_lecture_prompt_data(parse_result)
         editable_model = build_editable_model(parse_result, prompt_data)
         image_warning = _courseware_image_warning(parse_result)
-        rendered_pages, render_error = _render_courseware_pdf_pages(tex_content, editable_model.get("assets") or {})
+        # The client retains uploaded images between edits. Parsing edited TeX
+        # can omit those assets, so use the supplied map while recompiling.
+        render_assets = request.asset_map or editable_model.get("assets") or {}
+        rendered_pages, render_error = _render_courseware_pdf_pages(tex_content, render_assets)
         return {
             "success": True,
             "chapter_title": prompt_data["chapter_title"],
@@ -3748,7 +3751,7 @@ async def preview_tex(request: PreviewTexRequest):
             "full_text": prompt_data["chapter_content"],
             "tex_content": tex_content,
             "editable_model": editable_model,
-            "asset_map": editable_model.get("assets") or {},
+            "asset_map": render_assets,
             "layout": editable_model.get("layout") or {},
             "source_tex": tex_content,
             "missing_image_refs": parse_result.get("missing_image_refs") or [],

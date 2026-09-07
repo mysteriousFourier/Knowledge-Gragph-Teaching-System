@@ -2179,6 +2179,7 @@ function TeacherPreparePage() {
     const result = await previewTex.mutateAsync({
       tex_content: texDraft,
       filename: file?.name?.toLowerCase().endsWith(".tex") ? file.name : "edited.tex",
+      asset_map: mergedAssetMap,
     })
     const slides = result.slides.map((slide) => ({
       ...slide,
@@ -2226,6 +2227,7 @@ function TeacherPreparePage() {
     const result = await previewTex.mutateAsync({
       tex_content: nextTex,
       filename: file?.name?.toLowerCase().endsWith(".tex") ? file.name : "edited.tex",
+      asset_map: mergedAssetMap,
     })
     const slides = result.slides.map((slide) => ({
       ...slide,
