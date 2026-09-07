@@ -387,6 +387,11 @@ function attachRenderedPagesToPreview(result: PptPreviewResponse): PptPreviewRes
   }
 }
 
+function preserveRenderedPages(previous: PptPreviewResponse | null | undefined, result: PptPreviewResponse): PptPreviewResponse {
+  if ((result.rendered_pages || []).length || !(previous?.rendered_pages || []).length) return result
+  return { ...result, rendered_pages: previous?.rendered_pages, render_source: previous?.render_source }
+}
+
 function chapterToCoursewareProject(chapter: Chapter): CoursewareProject | null {
   const slides = chapter.ppt_slides || []
   if (!slides.length && !chapter.editable_model && !chapter.tex_content) return null
@@ -2182,7 +2187,7 @@ function TeacherPreparePage() {
     }))
     applyPreviewResult(
       {
-        ...result,
+        ...preserveRenderedPages(preview, result),
         slides,
         editable_model: result.editable_model
           ? {
@@ -2229,7 +2234,7 @@ function TeacherPreparePage() {
     }))
     applyPreviewResult(
       {
-        ...result,
+        ...preserveRenderedPages(preview, result),
         slides,
         editable_model: result.editable_model
           ? {
